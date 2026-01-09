@@ -4,7 +4,9 @@
   "version": "1.0.0",
   "identifier": "com.crackinginterview.app",
   "build": {
-    "frontendDist": "../dist"
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420"
   },
   "bundle": {
     "active": true,
