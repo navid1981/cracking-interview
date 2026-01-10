@@ -17,7 +17,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json", "multipart"] }
+reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls", "rustls-tls-native-roots"] }
 
 # Base64 encoding
 base64 = "0.22"

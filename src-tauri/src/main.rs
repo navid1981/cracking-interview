@@ -7,7 +7,10 @@ mod screenshot;
 
 use tauri::Manager;
 
-// Chrome CDP commands
+// ============================================================================
+// CHROME CDP COMMANDS
+// ============================================================================
+
 #[tauri::command]
 async fn get_chrome_tabs() -> Result<Vec<chrome::ChromeTab>, String> {
     chrome::get_all_tabs().await
@@ -56,16 +59,57 @@ async fn extract_leetcode_problem(tab_id: String) -> Result<String, String> {
     chrome::execute_javascript(&tab_id, js).await
 }
 
+// ============================================================================
+// AI COMMANDS
+// ============================================================================
+
+#[tauri::command]
+async fn query_ai(
+    prompt: String,
+    config: ai::AIConfig,
+) -> Result<String, String> {
+    println!("🤖 Querying AI: {}", config.selected_model);
+    println!("🔑 API key present: Gemini={}, Claude={}", 
+        !config.gemini_api_key.is_empty(),
+        !config.claude_api_key.is_empty()
+    );
+    
+    ai::query_with_text(&prompt, &config).await
+}
+
+#[tauri::command]
+async fn query_ai_with_image(
+    prompt: String,
+    image_path: String,
+    config: ai::AIConfig,
+) -> Result<String, String> {
+    println!("🤖 Querying AI with image: {}", config.selected_model);
+    
+    // Read image file
+    let image_data = std::fs::read(&image_path)
+        .map_err(|e| format!("Failed to read image: {}", e))?;
+    
+    ai::query_with_image(&prompt, &image_data, &config).await
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            // Chrome CDP
             get_chrome_tabs,
             get_cdp_status,
             open_chrome_cdp,
             extract_tab_text,
             activate_tab,
             extract_leetcode_problem,
+            // AI
+            query_ai,
+            query_ai_with_image,
         ])
         .setup(|app| {
             println!("🚀 CrackingInterview starting...");
