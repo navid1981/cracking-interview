@@ -5,17 +5,22 @@ mod chrome;
 mod ai;
 mod screenshot;
 
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
-// Commands
+// Chrome CDP commands
 #[tauri::command]
 async fn get_chrome_tabs() -> Result<Vec<chrome::ChromeTab>, String> {
     chrome::get_all_tabs().await
 }
 
 #[tauri::command]
-async fn test_chrome_cdp() -> Result<String, String> {
+async fn get_cdp_status() -> Result<String, String> {
     Ok(chrome::get_cdp_status().await)
+}
+
+#[tauri::command]
+async fn open_chrome_cdp() -> Result<String, String> {
+    chrome::launch_chrome_cdp_window().await
 }
 
 #[tauri::command]
@@ -51,42 +56,20 @@ async fn extract_leetcode_problem(tab_id: String) -> Result<String, String> {
     chrome::execute_javascript(&tab_id, js).await
 }
 
-// AUTO-LAUNCH Chrome CDP
-#[tauri::command]
-async fn start_chrome_cdp() -> Result<String, String> {
-    chrome::ensure_chrome_cdp().await
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_chrome_tabs,
-            test_chrome_cdp,
+            get_cdp_status,
+            open_chrome_cdp,
             extract_tab_text,
             activate_tab,
             extract_leetcode_problem,
-            start_chrome_cdp,
         ])
         .setup(|app| {
             println!("🚀 CrackingInterview starting...");
-            
-            // AUTO-LAUNCH Chrome CDP on startup
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                println!("🔌 Auto-launching Chrome with CDP...");
-                
-                match chrome::ensure_chrome_cdp().await {
-                    Ok(msg) => {
-                        println!("✅ {}", msg);
-                        app_handle.emit("chrome-ready", ()).ok();
-                    }
-                    Err(e) => {
-                        eprintln!("⚠️  Chrome CDP error: {}", e);
-                        app_handle.emit("chrome-error", e).ok();
-                    }
-                }
-            });
+            println!("💡 Click 'Open Chrome CDP' button to launch debugging Chrome");
             
             Ok(())
         })

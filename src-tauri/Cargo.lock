@@ -563,6 +563,7 @@ dependencies = [
  "base64 0.22.1",
  "futures-util",
  "image",
+ "lazy_static",
  "reqwest",
  "screenshots",
  "serde",

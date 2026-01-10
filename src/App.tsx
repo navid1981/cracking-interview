@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import './App.css';
 
 interface ChromeTab {
@@ -11,69 +10,78 @@ interface ChromeTab {
 }
 
 function App() {
+  const [cdpStatus, setCdpStatus] = useState('🔴 CDP Not Running');
+  const [cdpReady, setCdpReady] = useState(false);
   const [tabs, setTabs] = useState<ChromeTab[]>([]);
   const [selectedTab, setSelectedTab] = useState<ChromeTab | null>(null);
-  const [message, setMessage] = useState('');
-  const [extractedText, setExtractedText] = useState('');
+  const [extractedContent, setExtractedContent] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [chromeStatus, setChromeStatus] = useState<'checking' | 'ready' | 'error'>('checking');
+  const [isOpeningChrome, setIsOpeningChrome] = useState(false);
+  const [message, setMessage] = useState('');
 
-  // Listen for Chrome auto-launch events
   useEffect(() => {
-    const setupListeners = async () => {
-      await listen('chrome-ready', () => {
-        setChromeStatus('ready');
-        setMessage('✅ Chrome CDP automatically started!');
-      });
-      
-      await listen('chrome-error', (event) => {
-        setChromeStatus('error');
-        setMessage(`⚠️ Chrome startup issue: ${event.payload}`);
-      });
-    };
-    
-    setupListeners();
+    checkCdpStatus();
+    const interval = setInterval(checkCdpStatus, 3000);
+    return () => clearInterval(interval);
   }, []);
 
-  const testCDP = async () => {
-    setIsLoading(true);
+  const checkCdpStatus = async () => {
     try {
-      const result = await invoke<string>('test_chrome_cdp');
-      setMessage(result);
-      setChromeStatus('ready');
+      const status = await invoke<string>('get_cdp_status');
+      setCdpStatus(status);
+      setCdpReady(status.includes('🟢'));
     } catch (error) {
-      setMessage(`❌ Error: ${error}`);
-      setChromeStatus('error');
-    } finally {
-      setIsLoading(false);
+      setCdpStatus('🔴 Error');
+      setCdpReady(false);
     }
   };
 
-  const startChromeCDP = async () => {
+  const openChromeCdp = async () => {
+    // Prevent double-clicks
+    if (isOpeningChrome || isLoading) {
+      console.log('⚠️  Already opening Chrome, ignoring click');
+      return;
+    }
+
+    setIsOpeningChrome(true);
     setIsLoading(true);
-    setChromeStatus('checking');
-    setMessage('🔄 Restarting Chrome with CDP...');
+    setMessage('🚀 Opening Chrome CDP...');
     
     try {
-      const result = await invoke<string>('start_chrome_cdp');
+      const result = await invoke<string>('open_chrome_cdp');
       setMessage(`✅ ${result}`);
-      setChromeStatus('ready');
+      
+      // Wait a moment then check status
+      setTimeout(() => checkCdpStatus(), 1000);
     } catch (error) {
-      setMessage(`❌ Error: ${error}`);
-      setChromeStatus('error');
+      setMessage(`❌ ${error}`);
     } finally {
       setIsLoading(false);
+      // Keep button disabled for 2 seconds to prevent rapid clicks
+      setTimeout(() => setIsOpeningChrome(false), 2000);
     }
   };
 
-  const fetchTabs = async () => {
+  const getTabs = async () => {
+    if (!cdpReady) {
+      setMessage('❌ CDP not ready');
+      return;
+    }
+
     setIsLoading(true);
+    setMessage('📡 Getting tabs...');
+    
     try {
       const chromeTabs = await invoke<ChromeTab[]>('get_chrome_tabs');
       setTabs(chromeTabs);
-      setMessage(`✅ Found ${chromeTabs.length} Chrome tabs!`);
+      
+      if (chromeTabs.length === 0) {
+        setMessage('⚠️  No tabs found');
+      } else {
+        setMessage(`✅ Found ${chromeTabs.length} tabs`);
+      }
     } catch (error) {
-      setMessage(`❌ Error: ${error}`);
+      setMessage(`❌ ${error}`);
       setTabs([]);
     } finally {
       setIsLoading(false);
@@ -82,44 +90,22 @@ function App() {
 
   const extractText = async () => {
     if (!selectedTab) {
-      setMessage('❌ Please select a tab first!');
+      setMessage('❌ Select a tab first');
       return;
     }
 
     setIsLoading(true);
-    setExtractedText('');
+    setMessage('📝 Extracting...');
     
     try {
       await invoke('activate_tab', { tabId: selectedTab.id });
       await new Promise(resolve => setTimeout(resolve, 300));
       
       const text = await invoke<string>('extract_tab_text', { tabId: selectedTab.id });
-      setExtractedText(text);
-      setMessage(`✅ Extracted ${text.length} characters!`);
+      setExtractedContent(text);
+      setMessage(`✅ Extracted ${text.length} chars`);
     } catch (error) {
-      setMessage(`❌ Extract error: ${error}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const extractLeetCode = async () => {
-    if (!selectedTab) {
-      setMessage('❌ Please select a tab first!');
-      return;
-    }
-
-    setIsLoading(true);
-    
-    try {
-      await invoke('activate_tab', { tabId: selectedTab.id });
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      const structuredData = await invoke<string>('extract_leetcode_problem', { tabId: selectedTab.id });
-      setExtractedText(structuredData);
-      setMessage('✅ Extracted structured LeetCode data!');
-    } catch (error) {
-      setMessage(`❌ Error: ${error}`);
+      setMessage(`❌ ${error}`);
     } finally {
       setIsLoading(false);
     }
@@ -133,104 +119,55 @@ function App() {
           <h1>CrackingInterview</h1>
         </div>
         <div className="header-right">
-          <span className={`status-indicator ${chromeStatus}`}>
-            {chromeStatus === 'checking' && '🔄 Starting Chrome...'}
-            {chromeStatus === 'ready' && '✅ Chrome Ready'}
-            {chromeStatus === 'error' && '⚠️ Chrome Error'}
-          </span>
+          <span className="status-text">{cdpStatus}</span>
         </div>
       </header>
 
       <div className="content">
-        <div className="test-section">
-          <h2>🚀 Auto-Launch Chrome CDP</h2>
+        <div className="main-section">
           
           <div className="chrome-controls">
             <button 
-              onClick={startChromeCDP} 
-              disabled={isLoading}
-              className="test-btn primary"
+              onClick={openChromeCdp}
+              disabled={isLoading || isOpeningChrome}
+              className="action-btn primary"
             >
-              🔄 Restart Chrome with CDP
+              🚀 {isOpeningChrome ? 'Opening...' : 'Open Chrome CDP'}
             </button>
             
             <button 
-              onClick={testCDP} 
-              disabled={isLoading}
-              className="test-btn"
-            >
-              🔌 Check Status
-            </button>
-            
-            <button 
-              onClick={fetchTabs} 
-              disabled={isLoading || chromeStatus !== 'ready'}
-              className="test-btn success"
+              onClick={getTabs}
+              disabled={isLoading || !cdpReady}
+              className="action-btn success"
+              title={!cdpReady ? "Open Chrome CDP first" : ""}
             >
               📑 Get Tabs
             </button>
           </div>
 
-          {chromeStatus === 'checking' && (
-            <div className="info-banner checking">
-              <p>🔄 Chrome is starting with remote debugging...</p>
-              <p className="small">This happens automatically when you launch the app</p>
-            </div>
-          )}
-
-          {chromeStatus === 'error' && (
-            <div className="info-banner error">
-              <p>⚠️ Chrome CDP not available</p>
-              <p className="small">Click "Restart Chrome with CDP" above</p>
-            </div>
-          )}
-
-          {selectedTab && (
-            <div className="extract-section">
-              <h3>Selected: {selectedTab.title}</h3>
-              <div className="test-buttons">
-                <button 
-                  onClick={extractText} 
-                  disabled={isLoading}
-                  className="test-btn success"
-                >
-                  📝 Extract Text
-                </button>
-                
-                <button 
-                  onClick={extractLeetCode} 
-                  disabled={isLoading}
-                  className="test-btn success"
-                >
-                  🎯 Extract LeetCode
-                </button>
-              </div>
-            </div>
-          )}
-
-          {isLoading && (
-            <div className="loading">
-              <div className="spinner"></div>
-              <p>Processing...</p>
+          {!cdpReady && (
+            <div className="info-banner warning">
+              <p>⚠️  Chrome CDP not running</p>
+              <p className="small">Click "Open Chrome CDP" button above</p>
             </div>
           )}
 
           {message && (
             <div className="message-box">
-              <pre>{message}</pre>
+              {message}
             </div>
           )}
 
           {tabs.length > 0 && (
             <div className="tabs-list">
-              <h3>Chrome Tabs ({tabs.length}):</h3>
+              <h3>Tabs ({tabs.length}):</h3>
               {tabs.map((tab) => (
                 <div 
-                  key={tab.id} 
+                  key={tab.id}
                   className={`tab-item ${selectedTab?.id === tab.id ? 'selected' : ''}`}
                   onClick={() => {
                     setSelectedTab(tab);
-                    setMessage(`✅ Selected: ${tab.title}`);
+                    setMessage(`Selected: ${tab.title}`);
                   }}
                 >
                   <span className="tab-icon">🌐</span>
@@ -244,38 +181,50 @@ function App() {
             </div>
           )}
 
-          {extractedText && (
-            <div className="extracted-text">
+          {selectedTab && cdpReady && (
+            <div className="extract-section">
+              <h4>Selected: {selectedTab.title}</h4>
+              <button 
+                onClick={extractText}
+                disabled={isLoading}
+                className="action-btn success"
+              >
+                📝 Extract Text
+              </button>
+            </div>
+          )}
+
+          {extractedContent && (
+            <div className="content-display">
               <div className="section-header">
                 <h3>📄 Extracted Content</h3>
                 <button 
-                  onClick={() => navigator.clipboard.writeText(extractedText)}
+                  onClick={() => navigator.clipboard.writeText(extractedContent)}
                   className="copy-btn"
                 >
                   📋 Copy
                 </button>
               </div>
-              <pre className="text-content">{extractedText}</pre>
+              <pre className="content-text">{extractedContent}</pre>
+            </div>
+          )}
+
+          {isLoading && (
+            <div className="loading">
+              <div className="spinner"></div>
+              <p>Processing...</p>
             </div>
           )}
         </div>
 
         <div className="info-box">
-          <h3>✅ Features</h3>
+          <h3>✨ Quick Start</h3>
           <ul>
-            <li className="done">✅ Auto-launches Chrome with CDP on startup</li>
-            <li className="done">✅ Kills existing Chrome automatically</li>
-            <li className="done">✅ Manual restart button if needed</li>
-            <li className="done">✅ Tab listing and selection</li>
-            <li className="done">✅ Text extraction via CDP</li>
-            <li className="done">✅ Structured LeetCode extraction</li>
+            <li>🚀 Click "Open Chrome CDP"</li>
+            <li>🌐 Navigate to LeetCode</li>
+            <li>📑 Click "Get Tabs"</li>
+            <li>✅ Select & extract</li>
           </ul>
-          
-          <div className="help-note">
-            <strong>💡 How it works:</strong>
-            <p>When you launch this app, it automatically closes your regular Chrome and starts a new Chrome with remote debugging enabled.</p>
-            <p className="small">Navigate to LeetCode in the Chrome window that opens.</p>
-          </div>
         </div>
       </div>
     </div>

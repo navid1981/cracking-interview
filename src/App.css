@@ -401,3 +401,49 @@ body {
 .info-box li.done {
   color: var(--accent-green);
 }
+
+.status-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.chrome-controls {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.action-btn.secondary {
+  background: #6c757d;
+  color: white;
+}
+
+.info-banner.warning {
+  background: rgba(255, 193, 7, 0.1);
+  border-left: 4px solid #ffc107;
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.info-box {
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  margin-top: 20px;
+}
+
+.info-box h3 {
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+.info-box ul {
+  list-style: none;
+  padding: 0;
+}
+
+.info-box li {
+  padding: 8px 0;
+  font-size: 14px;
+}
