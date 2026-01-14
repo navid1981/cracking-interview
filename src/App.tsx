@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import AIResponseDisplay from './components/AIResponseDisplay';
+import TabDropdown from './components/TabDropdown';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getTemplateLabel, supportsLanguageSelection } from './services/prompts';
 import './App.css';
 
@@ -9,6 +10,22 @@ interface ChromeTab {
   url: string;
   title: string;
   tab_type: string;
+  thumbnail?: string; // Base64 data URL
+}
+
+interface DisplayInfo {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  is_main: boolean;
+  thumbnail?: string;
+}
+
+type InputSource = ChromeTab | DisplayInfo;
+
+function isDisplay(source: InputSource): source is DisplayInfo {
+  return 'width' in source && 'height' in source;
 }
 
 interface AIConfig {
@@ -18,10 +35,10 @@ interface AIConfig {
 }
 
 function App() {
-  const [cdpStatus, setCdpStatus] = useState('🔴 CDP Not Running');
+  const [cdpStatus, setCdpStatus] = useState('🔴 Chrome Not Running');
   const [cdpReady, setCdpReady] = useState(false);
-  const [tabs, setTabs] = useState<ChromeTab[]>([]);
-  const [selectedTab, setSelectedTab] = useState<ChromeTab | null>(null);
+  const [allSources, setAllSources] = useState<InputSource[]>([]);
+  const [selectedTab, setSelectedTab] = useState<InputSource | null>(null);
   const [aiResponse, setAiResponse] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isOpeningChrome, setIsOpeningChrome] = useState(false);
@@ -48,13 +65,86 @@ function App() {
   });
   
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'api' | 'prompts'>('api');
+  const [settingsTab, setSettingsTab] = useState<'models' | 'prompts' | 'input'>('models');
+  const [useScreenshot, setUseScreenshot] = useState(
+    localStorage.getItem('use_screenshot') === 'true'
+  );
+  const [googleTokenExists, setGoogleTokenExists] = useState(false);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   useEffect(() => {
     checkCdpStatus();
     const interval = setInterval(checkCdpStatus, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    // Fetch displays and tabs on mount
+    fetchTabs();
+    
+    // Check if Google tokens exist
+    checkGoogleTokens();
+  }, []);
+
+  const checkGoogleTokens = async () => {
+    try {
+      const exists = await invoke<boolean>('get_google_token_status');
+      setGoogleTokenExists(exists);
+    } catch (error) {
+      setGoogleTokenExists(false);
+    }
+  };
+
+  const signInWithGoogle = async () => {
+    setIsAuthenticating(true);
+    setMessage('🔐 Opening Google Sign-In in browser...');
+    
+    try {
+      const result = await invoke<string>('start_google_oauth');
+      setIsAuthenticating(false);
+      setMessage(`✅ ${result}`);
+      setGoogleTokenExists(true);
+    } catch (error) {
+      setIsAuthenticating(false);
+      setMessage(`❌ ${error}`);
+    }
+  };
+
+  const signOutGoogle = async () => {
+    try {
+      const result = await invoke<string>('clear_google_tokens');
+      setGoogleTokenExists(false);
+      setMessage(`✅ ${result}`);
+      await checkGoogleTokens(); // Recheck status
+    } catch (error) {
+      setMessage(`❌ ${error}`);
+    }
+  };
+
+  useEffect(() => {
+    // Fetch tabs when CDP becomes ready
+    if (cdpReady) {
+      fetchTabs();
+    } else {
+      // CDP closed - remove Chrome tabs from sources and reselect if needed
+      setAllSources(prev => {
+        const displaysOnly = prev.filter(s => isDisplay(s));
+        
+        // If current selection was a Chrome tab, switch to first display
+        if (selectedTab && !isDisplay(selectedTab)) {
+          if (displaysOnly.length > 0) {
+            setSelectedTab(displaysOnly[0]);
+            setMessage('Chrome CDP closed, switched to display');
+          } else {
+            setSelectedTab(null);
+            setMessage('Chrome CDP closed');
+          }
+        }
+        
+        return displaysOnly;
+      });
+    }
+  }, [cdpReady]);
 
   const checkCdpStatus = async () => {
     try {
@@ -87,25 +177,63 @@ function App() {
   };
 
   const fetchTabs = async () => {
-    if (!cdpReady) {
-      console.log('⚠️  CDP not ready, skipping fetch');
-      return;
-    }
-
-    console.log('📡 Fetching tabs...');
     try {
-      const chromeTabs = await invoke<ChromeTab[]>('get_chrome_tabs');
-      console.log('✅ Got tabs:', chromeTabs.length, chromeTabs);
-      setTabs(chromeTabs);
+      // Fetch displays (always available)
+      const displaysData = await invoke<DisplayInfo[]>('get_displays');
       
-      // Auto-select first tab if none selected
-      if (chromeTabs.length > 0 && !selectedTab) {
-        setSelectedTab(chromeTabs[0]);
-        console.log('✅ Auto-selected first tab:', chromeTabs[0].title);
+      // Fetch thumbnails for displays
+      const displaysWithThumbnails = await Promise.all(
+        displaysData.map(async (display) => {
+          try {
+            const thumbnail = await invoke<string>('get_display_thumbnail', { displayId: display.id });
+            return { ...display, thumbnail };
+          } catch (error) {
+            console.warn(`Failed to get display thumbnail for ${display.id}:`, error);
+            return display;
+          }
+        })
+      );
+      
+      // Fetch Chrome tabs if CDP ready
+      let chromeTabs: ChromeTab[] = [];
+      if (cdpReady) {
+        chromeTabs = await invoke<ChromeTab[]>('get_chrome_tabs');
+        
+        // Fetch thumbnails for Chrome tabs
+        chromeTabs = await Promise.all(
+          chromeTabs.map(async (tab) => {
+            try {
+              const thumbnail = await invoke<string>('get_tab_thumbnail', { tabId: tab.id });
+              return { ...tab, thumbnail };
+            } catch (error) {
+              console.warn(`Failed to get thumbnail for ${tab.id}:`, error);
+              return tab;
+            }
+          })
+        );
+      }
+      
+      // Combine all sources (Chrome tabs first, then displays)
+      const combined: InputSource[] = [...chromeTabs, ...displaysWithThumbnails];
+      setAllSources(combined);
+      
+      // If selected tab is no longer in the list, select first available source
+      if (selectedTab && !combined.find(s => s.id === selectedTab.id)) {
+        if (combined.length > 0) {
+          setSelectedTab(combined[0]);
+          setMessage('Previous selection unavailable, auto-selected first source');
+        } else {
+          setSelectedTab(null);
+          setMessage('No sources available');
+        }
+      }
+      
+      // Auto-select first source if none selected
+      else if (combined.length > 0 && !selectedTab) {
+        setSelectedTab(combined[0]);
       }
     } catch (error) {
-      console.error('❌ Failed to fetch tabs:', error);
-      setTabs([]);
+      console.error('Failed to fetch sources:', error);
     }
   };
 
@@ -122,23 +250,60 @@ function App() {
     }
 
     setIsLoading(true);
-    setMessage('📝 Extracting content...');
     setAiResponse('');
     
     try {
-      await invoke('activate_tab', { tabId: selectedTab.id });
-      await new Promise(resolve => setTimeout(resolve, 300));
+      let response: string;
       
-      setMessage('📝 Extracting text...');
-      const text = await invoke<string>('extract_tab_text', { tabId: selectedTab.id });
-      
-      setMessage('🤖 Asking AI...');
-      const prompt = buildPrompt(selectedTemplate, selectedLanguage, text);
-
-      const response = await invoke<string>('query_ai', {
-        prompt,
-        config: aiConfig,
-      });
+      if (isDisplay(selectedTab)) {
+        // Display/Screen capture - always uses screenshot
+        setMessage('📸 Capturing display...');
+        const screenshotPath = await invoke<string>('capture_display_screenshot', { 
+          displayId: selectedTab.id 
+        });
+        
+        setMessage('🤖 Analyzing screenshot with AI...');
+        const prompt = buildPrompt(selectedTemplate, selectedLanguage);
+        
+        response = await invoke<string>('query_ai_with_image', {
+          prompt,
+          imagePath: screenshotPath,
+          config: aiConfig,
+        });
+      } else if (useScreenshot) {
+        // Chrome tab - screenshot mode
+        setMessage('📸 Taking screenshot...');
+        await invoke('activate_tab', { tabId: selectedTab.id });
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const screenshotPath = await invoke<string>('capture_tab_screenshot', { 
+          tabId: selectedTab.id 
+        });
+        
+        setMessage('🤖 Analyzing screenshot with AI...');
+        const prompt = buildPrompt(selectedTemplate, selectedLanguage);
+        
+        response = await invoke<string>('query_ai_with_image', {
+          prompt,
+          imagePath: screenshotPath,
+          config: aiConfig,
+        });
+      } else {
+        // Chrome tab - text mode
+        setMessage('📝 Extracting text...');
+        await invoke('activate_tab', { tabId: selectedTab.id });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        const text = await invoke<string>('extract_tab_text', { tabId: selectedTab.id });
+        
+        setMessage('🤖 Asking AI...');
+        const prompt = buildPrompt(selectedTemplate, selectedLanguage, text);
+        
+        response = await invoke<string>('query_ai', {
+          prompt,
+          config: aiConfig,
+        });
+      }
       
       setAiResponse(response);
       setMessage('✅ Solution ready!');
@@ -155,15 +320,17 @@ function App() {
     localStorage.setItem('claude_key', aiConfig.claude_api_key);
     localStorage.setItem('prompt_template', selectedTemplate);
     localStorage.setItem('language', selectedLanguage);
+    localStorage.setItem('use_screenshot', useScreenshot.toString());
     setShowSettings(false);
     setMessage('✅ Settings saved');
   };
+
 
   return (
     <div className="app-container">
       <header className="app-header">
         <div className="header-left">
-          <span className="app-icon">💻</span>
+          <img src="/icon.png" alt="CrackingInterview" className="app-icon-img" />
           <h1>CrackingInterview</h1>
         </div>
         <div className="header-right">
@@ -171,65 +338,48 @@ function App() {
           <button 
             onClick={() => setShowSettings(true)}
             className="settings-btn"
-            title="Settings"
           >
             ⚙️
           </button>
         </div>
       </header>
 
+      <div className="top-bar">
+        <div className="input-source-container">
+          <label>Input Source</label>
+          <div className="input-with-refresh">
+            <TabDropdown
+              sources={allSources}
+              selectedSource={selectedTab}
+              onSelect={(source) => {
+                setSelectedTab(source);
+                const title = isDisplay(source) ? source.name : source.title;
+                setMessage(`Selected: ${title}`);
+              }}
+              disabled={false}
+            />
+            <button
+              onClick={fetchTabs}
+              className="refresh-btn"
+              title="Refresh sources"
+            >
+              🔄
+            </button>
+          </div>
+        </div>
+
+        <button 
+          onClick={solveWithAI}
+          disabled={isLoading || !selectedTab}
+          className="solve-button"
+        >
+          🚀 Solve
+        </button>
+      </div>
+
       <div className="content">
         <div className="main-section">
           
-          {/* Top Action Bar */}
-          <div className="action-bar">
-            <div className="input-source-group">
-              <label>Input Source</label>
-              <div className="input-with-refresh">
-                <select 
-                  value={selectedTab?.id || ''}
-                  onChange={(e) => {
-                    const tab = tabs.find(t => t.id === e.target.value);
-                    setSelectedTab(tab || null);
-                    if (tab) setMessage(`Selected: ${tab.title}`);
-                  }}
-                  className="input-source-dropdown"
-                  disabled={!cdpReady}
-                >
-                  <option value="" disabled>
-                    {!cdpReady ? 'Open Chrome CDP first' : tabs.length === 0 ? 'Click refresh to load tabs' : 'Select a Chrome tab...'}
-                  </option>
-                  {tabs.map((tab) => (
-                    <option key={tab.id} value={tab.id}>
-                      {tab.title.substring(0, 60)}{tab.title.length > 60 ? '...' : ''}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    console.log('🔄 Refresh clicked, fetching tabs...');
-                    fetchTabs();
-                  }}
-                  disabled={!cdpReady}
-                  className="refresh-btn"
-                  title="Refresh tabs"
-                >
-                  🔄
-                </button>
-              </div>
-            </div>
-
-            <button 
-              onClick={solveWithAI}
-              disabled={isLoading || !selectedTab}
-              className="solve-button"
-              title={!selectedTab ? "Select an input source first" : "Extract and solve with AI"}
-            >
-              🚀 Solve
-            </button>
-          </div>
-
           {!cdpReady && (
             <div className="info-banner warning">
               <p>⚠️  Chrome CDP not running</p>
@@ -246,7 +396,7 @@ function App() {
           )}
 
           <AIResponseDisplay 
-            response={aiResponse} 
+            response={aiResponse}
             language={selectedLanguage.toLowerCase()}
           />
 
@@ -259,7 +409,7 @@ function App() {
         </div>
       </div>
 
-      {/* Settings Modal with Tabs */}
+
       {showSettings && (
         <div className="modal-overlay" onClick={() => setShowSettings(false)}>
           <div className="modal-content settings-modal" onClick={(e) => e.stopPropagation()}>
@@ -268,13 +418,18 @@ function App() {
               <button onClick={() => setShowSettings(false)} className="close-btn">✕</button>
             </div>
 
-            {/* Settings Tabs */}
             <div className="settings-tabs">
               <button 
-                className={`tab-btn ${settingsTab === 'api' ? 'active' : ''}`}
-                onClick={() => setSettingsTab('api')}
+                className={`tab-btn ${settingsTab === 'models' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('models')}
               >
-                🔑 API Keys
+                🤖 AI Models
+              </button>
+              <button 
+                className={`tab-btn ${settingsTab === 'input' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('input')}
+              >
+                📥 Input Mode
               </button>
               <button 
                 className={`tab-btn ${settingsTab === 'prompts' ? 'active' : ''}`}
@@ -285,8 +440,7 @@ function App() {
             </div>
             
             <div className="modal-body">
-              {/* API Keys Tab */}
-              {settingsTab === 'api' && (
+              {settingsTab === 'models' && (
                 <>
                   <div className="form-group">
                     <label>AI Model:</label>
@@ -295,37 +449,103 @@ function App() {
                       onChange={(e) => setAiConfig({...aiConfig, selected_model: e.target.value})}
                       className="input-field"
                     >
-                      <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                      <option value="gemini-2.5-flash">Gemini 2.5 Flash (Free)</option>
                       <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
                       <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
                     </select>
                   </div>
 
-                  <div className="form-group">
-                    <label>Gemini API Key:</label>
-                    <input 
-                      type="password"
-                      value={aiConfig.gemini_api_key}
-                      onChange={(e) => setAiConfig({...aiConfig, gemini_api_key: e.target.value})}
-                      placeholder="Enter Gemini API key"
-                      className="input-field"
-                    />
-                  </div>
+                  {aiConfig.selected_model.startsWith('gemini') && (
+                    <div className="form-group">
+                      <label>
+                        Gemini API Key:
+                        {!aiConfig.gemini_api_key && !googleTokenExists && <span className="alert-badge">⚠️ Required</span>}
+                        {googleTokenExists && <span className="alert-badge" style={{color: '#4CAF50'}}>✓ OAuth Active</span>}
+                      </label>
+                      <input 
+                        type="password"
+                        value={aiConfig.gemini_api_key}
+                        onChange={(e) => setAiConfig({...aiConfig, gemini_api_key: e.target.value})}
+                        placeholder={googleTokenExists ? "Using OAuth token" : "Enter API key or sign in with Google"}
+                        className="input-field"
+                        disabled={googleTokenExists}
+                      />
+                      <button 
+                        className="action-btn secondary" 
+                        style={{marginTop: '8px', width: '100%'}}
+                        onClick={googleTokenExists ? signOutGoogle : signInWithGoogle}
+                        disabled={isAuthenticating}
+                      >
+                        {isAuthenticating ? '⏳ Authenticating...' : googleTokenExists ? '🚪 Sign Out from Google' : '🔐 Sign in with Google'}
+                      </button>
+                      
+                      {googleTokenExists && (
+                        <p style={{fontSize: '12px', color: '#4CAF50', marginTop: '8px', textAlign: 'center'}}>
+                          ✓ Using OAuth token - API key not needed
+                        </p>
+                      )}
+                    </div>
+                  )}
 
-                  <div className="form-group">
-                    <label>Claude API Key:</label>
-                    <input 
-                      type="password"
-                      value={aiConfig.claude_api_key}
-                      onChange={(e) => setAiConfig({...aiConfig, claude_api_key: e.target.value})}
-                      placeholder="Enter Claude API key"
-                      className="input-field"
-                    />
+                  {aiConfig.selected_model.startsWith('claude') && (
+                    <div className="form-group">
+                      <label>
+                        Claude API Key:
+                        {!aiConfig.claude_api_key && <span className="alert-badge">⚠️ Required</span>}
+                      </label>
+                      <input 
+                        type="password"
+                        value={aiConfig.claude_api_key}
+                        onChange={(e) => setAiConfig({...aiConfig, claude_api_key: e.target.value})}
+                        placeholder="Enter Claude API key"
+                        className="input-field"
+                      />
+                    </div>
+                  )}
+
+                  <div className="info-note">
+                    <p className="small">
+                      <strong>💡 Tip:</strong> Get free Gemini API key at{' '}
+                      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">
+                        aistudio.google.com/apikey
+                      </a>
+                    </p>
                   </div>
                 </>
               )}
 
-              {/* Prompts Tab */}
+              {settingsTab === 'input' && (
+                <>
+                  <div className="form-group">
+                    <label>Input Mode:</label>
+                    <div className="toggle-group">
+                      <button
+                        onClick={() => setUseScreenshot(false)}
+                        className={`toggle-btn ${!useScreenshot ? 'active' : ''}`}
+                      >
+                        📝 Text Extraction
+                      </button>
+                      <button
+                        onClick={() => setUseScreenshot(true)}
+                        className={`toggle-btn ${useScreenshot ? 'active' : ''}`}
+                      >
+                        📸 Screenshot Capture
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="info-note">
+                    <h4 style={{marginBottom: '8px'}}>Mode Comparison:</h4>
+                    <p className="small" style={{marginBottom: '12px'}}>
+                      <strong>📝 Text:</strong> Extracts text content only. Fast and efficient. Best for text-based problems.
+                    </p>
+                    <p className="small">
+                      <strong>📸 Screenshot:</strong> Captures visual content including diagrams, tables, and formatting. Best for problems with images or complex layouts.
+                    </p>
+                  </div>
+                </>
+              )}
+
               {settingsTab === 'prompts' && (
                 <>
                   <div className="form-group">
@@ -360,14 +580,15 @@ function App() {
                     </div>
                   )}
 
+
                   <div className="info-note">
                     <p><strong>Template Info:</strong></p>
                     <p className="small">
-                      {selectedTemplate === PromptTemplate.AlgorithmOptimal && 'Provides optimal time/space complexity solutions with analysis.'}
-                      {selectedTemplate === PromptTemplate.AlgorithmBeginner && 'Beginner-friendly explanations with step-by-step guidance.'}
-                      {selectedTemplate === PromptTemplate.SystemDesign && 'High-level architecture and scalability discussions.'}
-                      {selectedTemplate === PromptTemplate.CodeReview && 'Comprehensive code review with improvements.'}
-                      {selectedTemplate === PromptTemplate.ExplainConcept && 'Clear explanations of technical concepts.'}
+                      {selectedTemplate === PromptTemplate.AlgorithmOptimal && 'Optimal solutions with complexity analysis'}
+                      {selectedTemplate === PromptTemplate.AlgorithmBeginner && 'Beginner-friendly step-by-step explanations'}
+                      {selectedTemplate === PromptTemplate.SystemDesign && 'Architecture and scalability discussions'}
+                      {selectedTemplate === PromptTemplate.CodeReview && 'Comprehensive code review'}
+                      {selectedTemplate === PromptTemplate.ExplainConcept && 'Clear technical explanations'}
                     </p>
                   </div>
                 </>

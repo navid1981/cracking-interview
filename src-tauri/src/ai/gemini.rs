@@ -2,6 +2,7 @@
 
 use base64::{Engine as _, engine::general_purpose};
 use serde_json::json;
+use super::detect_image_mime_type;
 
 /// Query Gemini with text only
 pub async fn query_with_text(
@@ -13,10 +14,13 @@ pub async fn query_with_text(
         return Err("⚠️ Gemini API key not configured.".to_string());
     }
     
-    let endpoint = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        model, api_key
-    );
+    // Check if this is an OAuth token (starts with "ya29.") or API key
+    let is_oauth = api_key.starts_with("ya29.");
+    
+    let client = reqwest::Client::builder()
+        .use_rustls_tls()
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))?;
     
     let payload = json!({
         "contents": [{
@@ -24,18 +28,38 @@ pub async fn query_with_text(
         }]
     });
     
-    // Use system proxy settings
-    let client = reqwest::Client::builder()
-        .use_rustls_tls()
-        .build()
-        .map_err(|e| format!("Client build failed: {}", e))?;
-    
-    let response = client
-        .post(&endpoint)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("❌ Gemini request failed: {}", e))?;
+    let response = if is_oauth {
+        // OAuth token - use Authorization header
+        let endpoint = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            model
+        );
+        
+        println!("🔐 Using OAuth token with Authorization header");
+        
+        client
+            .post(&endpoint)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| format!("❌ Gemini request failed: {}", e))?
+    } else {
+        // API key - use query parameter
+        let endpoint = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, api_key
+        );
+        
+        println!("🔑 Using API key in query parameter");
+        
+        client
+            .post(&endpoint)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| format!("❌ Gemini request failed: {}", e))?
+    };
     
     let json: serde_json::Value = response
         .json()
@@ -63,13 +87,14 @@ pub async fn query_with_image(
         return Err("⚠️ Gemini API key not configured.".to_string());
     }
     
-    // Base64 encode image (same as Swift)
-    let base64_image = general_purpose::STANDARD.encode(image_data);
+    // Check if this is an OAuth token or API key
+    let is_oauth = api_key.starts_with("ya29.");
     
-    let endpoint = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        model, api_key
-    );
+    // Base64 encode image
+    let base64_image = general_purpose::STANDARD.encode(image_data);
+    let mime_type = detect_image_mime_type(image_data)?;
+    
+    let client = reqwest::Client::new();
     
     let payload = json!({
         "contents": [{
@@ -77,7 +102,7 @@ pub async fn query_with_image(
                 {"text": prompt},
                 {
                     "inline_data": {
-                        "mime_type": "image/png",
+                        "mime_type": mime_type,
                         "data": base64_image
                     }
                 }
@@ -85,13 +110,34 @@ pub async fn query_with_image(
         }]
     });
     
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&endpoint)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("❌ Gemini request failed: {}", e))?;
+    let response = if is_oauth {
+        // OAuth token - use Authorization header
+        let endpoint = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            model
+        );
+        
+        client
+            .post(&endpoint)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| format!("❌ Gemini request failed: {}", e))?
+    } else {
+        // API key - use query parameter
+        let endpoint = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, api_key
+        );
+        
+        client
+            .post(&endpoint)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| format!("❌ Gemini request failed: {}", e))?
+    };
     
     let json: serde_json::Value = response
         .json()

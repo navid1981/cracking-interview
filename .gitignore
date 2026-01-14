@@ -7,3 +7,10 @@ dist
 .idea
 *.log
 .vs
+
+# Environment variables with secrets
+.env
+.env.local
+
+# Credentials file
+CrackingInterview-CREDENTIALS.txt

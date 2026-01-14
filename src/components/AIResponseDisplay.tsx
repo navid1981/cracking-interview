@@ -90,26 +90,21 @@ export default function AIResponseDisplay({ response, language = 'java' }: Props
               📋 Copy Code
             </button>
           </div>
-          <div className="code-wrapper">
+          <div className="solution-content">
             <SyntaxHighlighter
               language={language.toLowerCase()}
               style={vscDarkPlus}
               showLineNumbers={true}
-              wrapLines={true}
-              wrapLongLines={true}
               customStyle={{
                 margin: 0,
-                borderRadius: '8px',
-                fontSize: '12px',
-                padding: '16px',
-                maxHeight: '500px',
-                overflowY: 'auto',
-                overflowX: 'hidden',
+                background: 'transparent',
+                fontSize: '13px',
+                padding: 0,
               }}
               codeTagProps={{
                 style: {
                   whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
+                  wordBreak: 'keep-all',
                   overflowWrap: 'break-word',
                 }
               }}

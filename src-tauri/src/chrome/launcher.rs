@@ -242,8 +242,8 @@ async fn launch_chrome_windows() -> Result<String, String> {
 /// Get CDP status
 pub async fn get_cdp_status() -> String {
     if is_cdp_accessible().await {
-        "🟢 CDP Ready".to_string()
+        "🟢 Chrome Ready".to_string()
     } else {
-        "🔴 CDP Not Running".to_string()
+        "🔴 Chrome Not Running".to_string()
     }
 }

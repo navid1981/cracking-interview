@@ -72,3 +72,26 @@ Just let me know:
 3. Ready to start?
 
 **Then I'll initialize the project and we begin!** 🚀
+## 🔐 Security Setup (IMPORTANT!)
+
+**Before running the app, you MUST configure OAuth credentials:**
+
+1. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit `.env` and add your Google OAuth credentials:
+   ```
+   GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=your-client-secret
+   ```
+
+3. Get credentials from: https://console.cloud.google.com/apis/credentials
+   - Create "Desktop app" OAuth 2.0 Client ID
+   - Copy Client ID and Client Secret to `.env`
+
+**⚠️ NEVER commit `.env` to GitHub!** (already in `.gitignore`)
+
+---
+

@@ -2,6 +2,7 @@
 
 use base64::{Engine as _, engine::general_purpose};
 use serde_json::json;
+use super::detect_image_mime_type;
 
 /// Query Claude with text only
 pub async fn query_with_text(
@@ -67,8 +68,9 @@ pub async fn query_with_image(
         return Err("⚠️ Claude API key not configured.".to_string());
     }
     
-    // Base64 encode image
+    // Base64 encode image (raw bytes; NOT a data URL)
     let base64_image = general_purpose::STANDARD.encode(image_data);
+    let media_type = detect_image_mime_type(image_data)?;
     
     let endpoint = "https://api.anthropic.com/v1/messages";
     
@@ -82,7 +84,7 @@ pub async fn query_with_image(
                     "type": "image",
                     "source": {
                         "type": "base64",
-                        "media_type": "image/png",
+                        "media_type": media_type,
                         "data": base64_image
                     }
                 },
