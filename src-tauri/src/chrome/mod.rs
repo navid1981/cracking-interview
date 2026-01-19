@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 // Re-export launcher functions
 pub use launcher::{
     launch_chrome_cdp_window,
-    is_cdp_accessible,
     get_cdp_status,
 };
 
@@ -184,7 +183,7 @@ pub async fn capture_screenshot(tab_id: &str) -> Result<Vec<u8>, String> {
                 println!("⚠️  Image too large, compressing...");
                 
                 // Load as image and re-encode with lower quality
-                use image::io::Reader as ImageReader;
+                use image::ImageReader;
                 let img = ImageReader::new(std::io::Cursor::new(&bytes))
                     .with_guessed_format()
                     .map_err(|e| format!("Failed to read image: {}", e))?

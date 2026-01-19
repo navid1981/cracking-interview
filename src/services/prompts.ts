@@ -1,4 +1,4 @@
-// Prompt Manager - ported from PromptManager.swift
+// Prompt Manager with Custom Prompts Support
 
 export enum PromptTemplate {
   AlgorithmOptimal = 'algorithm_optimal',
@@ -14,6 +14,14 @@ export enum ProgrammingLanguage {
   JavaScript = 'JavaScript',
   Cpp = 'C++',
   Swift = 'Swift',
+}
+
+export interface CustomPrompt {
+  id: string;
+  name: string;
+  systemPrompt: string;
+  userPrompt: string;
+  supportsLanguage: boolean;
 }
 
 const GENERAL_SYSTEM_PROMPT = `You are an expert technical assistant helping with coding interview preparation.
@@ -35,74 +43,132 @@ RULES:
 - Provide optimal solutions when asked
 - Explain complexity (time/space)`;
 
-export function buildPrompt(
-  template: PromptTemplate,
-  language: ProgrammingLanguage,
-  content?: string
-): string {
-  let finalPrompt = GENERAL_SYSTEM_PROMPT + '\n\n';
-
-  switch (template) {
-    case PromptTemplate.AlgorithmOptimal:
-      finalPrompt += `Solve this ${language} algorithm problem.
+// Default templates with placeholders for customization
+const DEFAULT_USER_TEMPLATES: Record<PromptTemplate, string> = {
+  [PromptTemplate.AlgorithmOptimal]: `Solve this {LANGUAGE} algorithm problem.
 
 Requirements:
 - Provide optimal time/space complexity solution
 - Include complexity analysis (O notation)
 - Write production-ready, clean code
-- Explain your approach briefly`;
-      break;
+- Explain your approach briefly
 
-    case PromptTemplate.AlgorithmBeginner:
-      finalPrompt += `Explain and solve this ${language} algorithm problem for a beginner.
+{CONTENT}`,
+
+  [PromptTemplate.AlgorithmBeginner]: `Explain and solve this {LANGUAGE} algorithm problem for a beginner.
 
 Requirements:
 - Use simple, clear language
 - Explain each step of your approach
 - Include examples to illustrate the solution
-- Provide clean, well-commented code`;
-      break;
+- Provide clean, well-commented code
 
-    case PromptTemplate.SystemDesign:
-      finalPrompt += `Design a scalable system to solve this problem.
+{CONTENT}`,
+
+  [PromptTemplate.SystemDesign]: `Design a scalable system to solve this problem.
 
 Requirements:
 - Provide high-level architecture
 - Break down into components
 - Discuss scalability considerations
-- Explain trade-offs and alternatives`;
-      break;
+- Explain trade-offs and alternatives
 
-    case PromptTemplate.CodeReview:
-      finalPrompt += `Review this code and provide comprehensive feedback.
+{CONTENT}`,
+
+  [PromptTemplate.CodeReview]: `Review this code and provide comprehensive feedback.
 
 Requirements:
 - Identify bugs and potential issues
 - Suggest improvements and optimizations
 - Provide performance tips
-- Recommend best practices`;
-      break;
+- Recommend best practices
 
-    case PromptTemplate.ExplainConcept:
-      finalPrompt += `Explain this technical concept clearly.
+{CONTENT}`,
+
+  [PromptTemplate.ExplainConcept]: `Explain this technical concept clearly.
 
 Requirements:
 - Provide clear, understandable explanation
 - Include real-world examples
 - Discuss common use cases
-- Mention related concepts`;
-      break;
+- Mention related concepts
+
+{CONTENT}`,
+};
+
+// Custom Prompts Manager
+export class CustomPromptsManager {
+  private static STORAGE_KEY = 'custom_prompts';
+
+  static getAll(): CustomPrompt[] {
+    const saved = localStorage.getItem(this.STORAGE_KEY);
+    return saved ? JSON.parse(saved) : [];
   }
 
-  if (content) {
-    finalPrompt += '\n\nQuestion:\n' + content;
+  static save(prompt: CustomPrompt): void {
+    const prompts = this.getAll();
+    const existing = prompts.findIndex(p => p.id === prompt.id);
+    
+    if (existing >= 0) {
+      prompts[existing] = prompt;
+    } else {
+      prompts.push(prompt);
+    }
+    
+    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(prompts));
+  }
+
+  static delete(id: string): void {
+    const prompts = this.getAll().filter(p => p.id !== id);
+    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(prompts));
+  }
+
+  static getById(id: string): CustomPrompt | null {
+    return this.getAll().find(p => p.id === id) || null;
+  }
+}
+
+export function buildPrompt(
+  template: PromptTemplate | string,
+  language: ProgrammingLanguage,
+  content?: string
+): string {
+  let systemPrompt = GENERAL_SYSTEM_PROMPT;
+  let userTemplate = '';
+
+  // Check if it's a custom prompt ID
+  if (!Object.values(PromptTemplate).includes(template as PromptTemplate)) {
+    const customPrompt = CustomPromptsManager.getById(template);
+    if (customPrompt) {
+      systemPrompt = customPrompt.systemPrompt;
+      userTemplate = customPrompt.userPrompt;
+    }
+  } else {
+    // Built-in template
+    userTemplate = DEFAULT_USER_TEMPLATES[template as PromptTemplate];
+  }
+
+  let finalPrompt = systemPrompt + '\n\n';
+  
+  if (userTemplate) {
+    finalPrompt += userTemplate
+      .replace(/{LANGUAGE}/g, language)
+      .replace(/{CONTENT}/g, content || '')
+      .replace(/{PROBLEM}/g, content || '');
+  } else if (content) {
+    finalPrompt += '\nQuestion:\n' + content;
   }
 
   return finalPrompt;
 }
 
-export function getTemplateLabel(template: PromptTemplate): string {
-  switch (template) {
+export function getTemplateLabel(template: PromptTemplate | string): string {
+  if (!Object.values(PromptTemplate).includes(template as PromptTemplate)) {
+    const customPrompt = CustomPromptsManager.getById(template);
+    return customPrompt ? `📝 ${customPrompt.name}` : 'Custom';
+  }
+
+  switch (template as PromptTemplate) {
     case PromptTemplate.AlgorithmOptimal:
       return 'Algorithm - Optimal';
     case PromptTemplate.AlgorithmBeginner:
@@ -116,7 +182,40 @@ export function getTemplateLabel(template: PromptTemplate): string {
   }
 }
 
-export function supportsLanguageSelection(template: PromptTemplate): boolean {
+export function supportsLanguageSelection(template: PromptTemplate | string): boolean {
+  if (!Object.values(PromptTemplate).includes(template as PromptTemplate)) {
+    const customPrompt = CustomPromptsManager.getById(template);
+    return customPrompt ? customPrompt.supportsLanguage : false;
+  }
+
   return template === PromptTemplate.AlgorithmOptimal || 
          template === PromptTemplate.AlgorithmBeginner;
+}
+
+export function isBuiltInTemplate(template: string): boolean {
+  return Object.values(PromptTemplate).includes(template as PromptTemplate);
+}
+
+export function getAllTemplates(): Array<{ id: string; label: string; isCustom: boolean }> {
+  const builtIn = Object.values(PromptTemplate).map(t => ({
+    id: t,
+    label: getTemplateLabel(t),
+    isCustom: false,
+  }));
+
+  const custom = CustomPromptsManager.getAll().map(p => ({
+    id: p.id,
+    label: `📝 ${p.name}`,
+    isCustom: true,
+  }));
+
+  return [...builtIn, ...custom];
+}
+
+export function getDefaultSystemPrompt(): string {
+  return GENERAL_SYSTEM_PROMPT;
+}
+
+export function getDefaultUserTemplate(template: PromptTemplate): string {
+  return DEFAULT_USER_TEMPLATES[template] || '';
 }

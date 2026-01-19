@@ -110,74 +110,6 @@ impl GoogleOAuthService {
         Ok(tokens)
     }
 
-    /// Get current access token (refreshes if expired)
-    pub async fn get_access_token(&self) -> Result<String, String> {
-        let guard = self.tokens.lock().await;
-        
-        if let Some(tokens) = guard.as_ref() {
-            let now = chrono::Utc::now().timestamp();
-            
-            // Token still valid
-            if now < tokens.expires_at - 300 {
-                return Ok(tokens.access_token.clone());
-            }
-            
-            // Need to refresh
-            if let Some(refresh_token) = tokens.refresh_token.clone() {
-                drop(guard); // Release lock before refresh
-                return self.refresh_access_token(&refresh_token).await;
-            }
-        }
-        
-        Err("No valid tokens - please sign in".to_string())
-    }
-
-    /// Refresh access token
-    async fn refresh_access_token(&self, refresh_token: &str) -> Result<String, String> {
-        let client = reqwest::Client::new();
-        let client_id = get_client_id();
-        let client_secret = get_client_secret();
-        
-        let params = [
-            ("client_id", client_id.as_str()),
-            ("client_secret", client_secret.as_str()),
-            ("refresh_token", refresh_token),
-            ("grant_type", "refresh_token"),
-        ];
-
-        let response = client
-            .post("https://oauth2.googleapis.com/token")
-            .form(&params)
-            .send()
-            .await
-            .map_err(|e| format!("Refresh failed: {}", e))?;
-
-        let token_response: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse: {}", e))?;
-
-        let access_token = token_response["access_token"]
-            .as_str()
-            .ok_or("No access token")?
-            .to_string();
-
-        let expires_in = token_response["expires_in"]
-            .as_i64()
-            .unwrap_or(3600);
-
-        let expires_at = chrono::Utc::now().timestamp() + expires_in;
-
-        // Update stored tokens
-        let mut guard = self.tokens.lock().await;
-        if let Some(tokens) = guard.as_mut() {
-            tokens.access_token = access_token.clone();
-            tokens.expires_at = expires_at;
-        }
-
-        Ok(access_token)
-    }
-
     /// Save tokens to file
     pub async fn save_tokens(&self, path: &str) -> Result<(), String> {
         let guard = self.tokens.lock().await;
@@ -189,20 +121,6 @@ impl GoogleOAuthService {
             std::fs::write(path, json)
                 .map_err(|e| format!("Write failed: {}", e))?;
         }
-        
-        Ok(())
-    }
-
-    /// Load tokens from file
-    pub async fn load_tokens(&self, path: &str) -> Result<(), String> {
-        let json = std::fs::read_to_string(path)
-            .map_err(|e| format!("Read failed: {}", e))?;
-        
-        let tokens: GoogleTokens = serde_json::from_str(&json)
-            .map_err(|e| format!("Parse failed: {}", e))?;
-        
-        let mut guard = self.tokens.lock().await;
-        *guard = Some(tokens);
         
         Ok(())
     }

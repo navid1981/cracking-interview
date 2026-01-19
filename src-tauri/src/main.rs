@@ -7,14 +7,17 @@ mod screenshot;
 mod oauth_server;
 mod google_oauth;
 
-use tauri::Manager;
 use std::sync::Arc;
+use tauri::Emitter;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 lazy_static::lazy_static! {
     static ref OAUTH_SERVICE: Arc<google_oauth::GoogleOAuthService> = {
         Arc::new(google_oauth::GoogleOAuthService::new())
     };
 }
+
+const SOLVE_HOTKEY: &str = "CmdOrCtrl+Shift+L";
 
 // ============================================================================
 // CHROME CDP COMMANDS
@@ -138,7 +141,7 @@ fn start_google_oauth() -> Result<String, String> {
     
     // Exchange code for tokens (need async runtime)
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let tokens = rt.block_on(OAUTH_SERVICE.exchange_code(&code))?;
+    let _tokens = rt.block_on(OAUTH_SERVICE.exchange_code(&code))?;
     
     // Save tokens
     let token_path = std::env::temp_dir().join("cracking_interview_google_tokens.json");
@@ -186,10 +189,26 @@ fn main() {
             start_google_oauth,
             get_google_token_status,
             clear_google_tokens,
+            resize_window,
         ])
-        .setup(|_| {
+        .setup(|app| {
             println!("🚀 CrackingInterview starting...");
             screenshot::request_screen_recording_permission();
+
+            // Global hotkey: trigger "Solve" without leaving the current Chrome tab.
+            // Frontend listens for `hotkey-solve` and runs the solve flow using the currently selected Input Source.
+            let handle = app.handle().clone();
+            if let Err(e) = app.global_shortcut().on_shortcut(SOLVE_HOTKEY, move |_app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    println!("⌨️ Hotkey pressed: {}", SOLVE_HOTKEY);
+                    handle.emit("hotkey-solve", ()).ok();
+                }
+            }) {
+                println!("⚠️ Failed to register hotkey {}: {}", SOLVE_HOTKEY, e);
+            } else {
+                println!("⌨️ Registered hotkey: {}", SOLVE_HOTKEY);
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -209,4 +228,16 @@ fn clear_google_tokens() -> Result<String, String> {
     } else {
         Ok("No tokens to clear".to_string())
     }
+}
+
+// ============================================================================
+// WINDOW RESIZE COMMANDS
+// ============================================================================
+
+#[tauri::command]
+async fn resize_window(window: tauri::Window, width: f64, height: f64) -> Result<(), String> {
+    use tauri::Size;
+    window.set_size(Size::Logical(tauri::LogicalSize { width, height }))
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }

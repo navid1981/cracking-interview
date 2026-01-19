@@ -3,6 +3,9 @@
 use tiny_http::{Server, Response};
 use std::sync::mpsc;
 
+// Embed icon at compile time (avoid absolute paths that break on other machines).
+static ICON_PNG: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../public/icon.png"));
+
 pub fn start_oauth_server() -> Result<(String, mpsc::Receiver<String>), String> {
     let (tx, rx) = mpsc::channel();
     
@@ -28,23 +31,12 @@ pub fn start_oauth_server() -> Result<(String, mpsc::Receiver<String>), String> 
             if url == "/icon.png" {
                 println!("📷 Serving icon");
                 
-                // Read icon file
-                let icon_path = "/Users/nsalehvaziri/cracking-interview/public/icon.png";
-                match std::fs::read(icon_path) {
-                    Ok(icon_data) => {
-                        let response = Response::from_data(icon_data)
-                            .with_header(
-                                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"image/png"[..]).unwrap()
-                            );
-                        request.respond(response).ok();
-                        requests_served += 1;
-                    }
-                    Err(e) => {
-                        println!("❌ Failed to read icon: {}", e);
-                        let response = Response::from_string("Icon not found");
-                        request.respond(response).ok();
-                    }
-                }
+                let response = Response::from_data(ICON_PNG)
+                    .with_header(
+                        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"image/png"[..]).unwrap()
+                    );
+                request.respond(response).ok();
+                requests_served += 1;
                 
                 // Close server after serving both callback and icon
                 if code_sent && requests_served >= 1 {

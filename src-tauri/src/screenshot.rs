@@ -159,8 +159,6 @@ pub fn capture_display_thumbnail(display_id: &str) -> Result<Vec<u8>, String> {
 
 #[cfg(target_os = "macos")]
 pub fn request_screen_recording_permission() -> bool {
-    use std::process::Command;
-    
     println!("🔐 Checking Screen Recording permission...");
     
     // Try to capture a screen to trigger permission dialog

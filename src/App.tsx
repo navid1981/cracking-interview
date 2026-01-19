@@ -1,8 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
 import AIResponseDisplay from './components/AIResponseDisplay';
 import TabDropdown from './components/TabDropdown';
-import { buildPrompt, PromptTemplate, ProgrammingLanguage, getTemplateLabel, supportsLanguageSelection } from './services/prompts';
+import PromptEditor from './components/PromptEditor';
+import PromptListView from './components/PromptListView';
+import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates } from './services/prompts';
 import './App.css';
 
 interface ChromeTab {
@@ -44,8 +48,8 @@ function App() {
   const [isOpeningChrome, setIsOpeningChrome] = useState(false);
   const [message, setMessage] = useState('');
   
-  const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate>(
-    (localStorage.getItem('prompt_template') as PromptTemplate) || PromptTemplate.AlgorithmOptimal
+  const [selectedTemplate, setSelectedTemplate] = useState<string>(
+    localStorage.getItem('prompt_template') || PromptTemplate.AlgorithmOptimal
   );
   const [selectedLanguage, setSelectedLanguage] = useState<ProgrammingLanguage>(
     (localStorage.getItem('language') as ProgrammingLanguage) || ProgrammingLanguage.Java
@@ -71,6 +75,12 @@ function App() {
   );
   const [googleTokenExists, setGoogleTokenExists] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [previousWindowSize, setPreviousWindowSize] = useState<{width: number, height: number} | null>(null);
+  
+  // Prompt editing state
+  const [promptEditMode, setPromptEditMode] = useState<'list' | 'edit'>('list');
+  const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
+  const solveWithAIRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     checkCdpStatus();
@@ -86,6 +96,35 @@ function App() {
     checkGoogleTokens();
   }, []);
 
+  // Global hotkey support (registered on Rust side). This lets user stay in Chrome and trigger Solve.
+  useEffect(() => {
+    let unlistenFn: (() => void) | null = null;
+    (async () => {
+      try {
+        unlistenFn = await listen('hotkey-solve', async () => {
+          if (solveWithAIRef.current) {
+            await solveWithAIRef.current();
+          }
+        });
+      } catch (e) {
+        console.warn('Failed to listen for hotkey-solve:', e);
+      }
+    })();
+    return () => {
+      try {
+        unlistenFn?.();
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
+  
+  // Keep templates registry initialized once (used by PromptEditor / PromptListView).
+  // PromptListView reads templates internally on mount; no extra state needed here.
+  useEffect(() => {
+    getAllTemplates();
+  }, []);
+
   const checkGoogleTokens = async () => {
     try {
       const exists = await invoke<boolean>('get_google_token_status');
@@ -93,6 +132,77 @@ function App() {
     } catch (error) {
       setGoogleTokenExists(false);
     }
+  };
+
+  const handleOpenSettings = async () => {
+    setMessage('🎯 Opening settings...');
+    console.log('🎯 handleOpenSettings called!');
+    setSettingsTab('models');
+    setShowSettings(true);
+    
+    try {
+      const appWindow = getCurrentWindow();
+      const currentSize = await appWindow.innerSize();
+      console.log('📏 Current window size:', currentSize.width, 'x', currentSize.height);
+      setMessage(`📏 Window: ${currentSize.width}x${currentSize.height}`);
+      
+      const SETTINGS_WIDTH = 800;
+      const SETTINGS_HEIGHT = 900;
+      const TOLERANCE = 10;
+      
+      const isDifferent = 
+        Math.abs(currentSize.width - SETTINGS_WIDTH) > TOLERANCE || 
+        Math.abs(currentSize.height - SETTINGS_HEIGHT) > TOLERANCE;
+      
+      if (isDifferent) {
+        setPreviousWindowSize({
+          width: currentSize.width,
+          height: currentSize.height
+        });
+        console.log('💾 Saved user size:', currentSize.width, 'x', currentSize.height);
+        setMessage(`💾 Saved: ${currentSize.width}x${currentSize.height}`);
+        
+        setTimeout(async () => {
+          await appWindow.setSize(new LogicalSize(SETTINGS_WIDTH, SETTINGS_HEIGHT));
+          console.log('⚙️  Resized to:', SETTINGS_WIDTH, 'x', SETTINGS_HEIGHT);
+          setMessage(`⚙️ Resized to: ${SETTINGS_WIDTH}x${SETTINGS_HEIGHT}`);
+        }, 100);
+      } else {
+        console.log('⏭️  Already at settings size');
+        setMessage('⏭️ Already at settings size');
+      }
+    } catch (error) {
+      console.error('❌ Window resize error:', error);
+      setMessage(`❌ Error: ${error}`);
+    }
+  };
+
+  const handleCloseSettings = async () => {
+    setMessage('🎯 Closing settings...');
+    console.log('🎯 handleCloseSettings called!');
+    setShowSettings(false);
+    
+    setTimeout(async () => {
+      if (previousWindowSize) {
+        try {
+          const appWindow = getCurrentWindow();
+          console.log('🔄 Restoring to:', previousWindowSize.width, 'x', previousWindowSize.height);
+          setMessage(`🔄 Restoring: ${previousWindowSize.width}x${previousWindowSize.height}`);
+          
+          await appWindow.setSize(new LogicalSize(previousWindowSize.width, previousWindowSize.height));
+          console.log('✅ Restored!');
+          setMessage('✅ Window size restored!');
+          setPreviousWindowSize(null);
+        } catch (error) {
+          console.error('❌ Restore error:', error);
+          setMessage(`❌ Restore error: ${error}`);
+          setPreviousWindowSize(null);
+        }
+      } else {
+        console.log('ℹ️  No size to restore');
+        setMessage('ℹ️ No size to restore');
+      }
+    }, 100);
   };
 
   const signInWithGoogle = async () => {
@@ -243,7 +353,7 @@ function App() {
       return;
     }
 
-    if (!aiConfig.gemini_api_key && !aiConfig.claude_api_key) {
+    if (!aiConfig.gemini_api_key && !aiConfig.claude_api_key && !googleTokenExists) {
       setMessage('❌ Configure API keys in Settings');
       setShowSettings(true);
       return;
@@ -314,16 +424,10 @@ function App() {
     }
   };
 
-  const saveSettings = () => {
-    localStorage.setItem('ai_model', aiConfig.selected_model);
-    localStorage.setItem('gemini_key', aiConfig.gemini_api_key);
-    localStorage.setItem('claude_key', aiConfig.claude_api_key);
-    localStorage.setItem('prompt_template', selectedTemplate);
-    localStorage.setItem('language', selectedLanguage);
-    localStorage.setItem('use_screenshot', useScreenshot.toString());
-    setShowSettings(false);
-    setMessage('✅ Settings saved');
-  };
+  // Keep a stable reference for the hotkey listener.
+  useEffect(() => {
+    solveWithAIRef.current = solveWithAI;
+  });
 
 
   return (
@@ -336,7 +440,7 @@ function App() {
         <div className="header-right">
           <span className="status-indicator">{cdpStatus}</span>
           <button 
-            onClick={() => setShowSettings(true)}
+            onClick={handleOpenSettings}
             className="settings-btn"
           >
             ⚙️
@@ -411,11 +515,11 @@ function App() {
 
 
       {showSettings && (
-        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+        <div className="modal-overlay" onClick={handleCloseSettings}>
           <div className="modal-content settings-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>⚙️ Settings</h2>
-              <button onClick={() => setShowSettings(false)} className="close-btn">✕</button>
+              <button onClick={handleCloseSettings} className="close-btn">✕</button>
             </div>
 
             <div className="settings-tabs">
@@ -433,7 +537,10 @@ function App() {
               </button>
               <button 
                 className={`tab-btn ${settingsTab === 'prompts' ? 'active' : ''}`}
-                onClick={() => setSettingsTab('prompts')}
+                onClick={() => {
+                  setSettingsTab('prompts');
+                  setPromptEditMode('list');
+                }}
               >
                 📝 Prompts
               </button>
@@ -548,57 +655,41 @@ function App() {
 
               {settingsTab === 'prompts' && (
                 <>
-                  <div className="form-group">
-                    <label>Prompt Template:</label>
-                    <select 
-                      value={selectedTemplate}
-                      onChange={(e) => setSelectedTemplate(e.target.value as PromptTemplate)}
-                      className="input-field"
-                    >
-                      <option value={PromptTemplate.AlgorithmOptimal}>{getTemplateLabel(PromptTemplate.AlgorithmOptimal)}</option>
-                      <option value={PromptTemplate.AlgorithmBeginner}>{getTemplateLabel(PromptTemplate.AlgorithmBeginner)}</option>
-                      <option value={PromptTemplate.SystemDesign}>{getTemplateLabel(PromptTemplate.SystemDesign)}</option>
-                      <option value={PromptTemplate.CodeReview}>{getTemplateLabel(PromptTemplate.CodeReview)}</option>
-                      <option value={PromptTemplate.ExplainConcept}>{getTemplateLabel(PromptTemplate.ExplainConcept)}</option>
-                    </select>
-                  </div>
-
-                  {supportsLanguageSelection(selectedTemplate) && (
-                    <div className="form-group">
-                      <label>Programming Language:</label>
-                      <select 
-                        value={selectedLanguage}
-                        onChange={(e) => setSelectedLanguage(e.target.value as ProgrammingLanguage)}
-                        className="input-field"
+                  {promptEditMode === 'list' ? (
+                    <PromptListView
+                      selectedTemplate={selectedTemplate}
+                      onSelectTemplate={(id: string) => {
+                        setSelectedTemplate(id);
+                        localStorage.setItem('prompt_template', id);
+                      }}
+                      onEditPrompt={(id: string) => {
+                        setEditingPromptId(id);
+                        setPromptEditMode('edit');
+                      }}
+                      selectedLanguage={selectedLanguage}
+                      onLanguageChange={(lang: ProgrammingLanguage) => {
+                        setSelectedLanguage(lang);
+                        localStorage.setItem('language', lang);
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <button 
+                        onClick={() => setPromptEditMode('list')}
+                        className="back-btn"
+                        style={{marginBottom: '16px'}}
                       >
-                        <option value={ProgrammingLanguage.Java}>{ProgrammingLanguage.Java}</option>
-                        <option value={ProgrammingLanguage.Python}>{ProgrammingLanguage.Python}</option>
-                        <option value={ProgrammingLanguage.JavaScript}>{ProgrammingLanguage.JavaScript}</option>
-                        <option value={ProgrammingLanguage.Cpp}>{ProgrammingLanguage.Cpp}</option>
-                        <option value={ProgrammingLanguage.Swift}>{ProgrammingLanguage.Swift}</option>
-                      </select>
-                    </div>
+                        ← Back to List
+                      </button>
+                      
+                      <PromptEditor
+                        key={editingPromptId}
+                        currentTemplateId={editingPromptId || PromptTemplate.AlgorithmOptimal}
+                      />
+                    </>
                   )}
-
-
-                  <div className="info-note">
-                    <p><strong>Template Info:</strong></p>
-                    <p className="small">
-                      {selectedTemplate === PromptTemplate.AlgorithmOptimal && 'Optimal solutions with complexity analysis'}
-                      {selectedTemplate === PromptTemplate.AlgorithmBeginner && 'Beginner-friendly step-by-step explanations'}
-                      {selectedTemplate === PromptTemplate.SystemDesign && 'Architecture and scalability discussions'}
-                      {selectedTemplate === PromptTemplate.CodeReview && 'Comprehensive code review'}
-                      {selectedTemplate === PromptTemplate.ExplainConcept && 'Clear technical explanations'}
-                    </p>
-                  </div>
                 </>
               )}
-
-              <div className="modal-footer">
-                <button onClick={() => saveSettings()} className="action-btn primary">
-                  💾 Save Settings
-                </button>
-              </div>
             </div>
           </div>
         </div>
