@@ -99,9 +99,9 @@ export default function PromptEditor({ currentTemplateId, onCancel, onSaved }: P
 
       <div className="editor-section">
         <div className="section-header">
-          <h3>👤 User Prompt Template</h3>
+          <h3>👤 User Prompt</h3>
           <p className="help-text">
-            Use placeholders: {'{CONTENT}'}, {'{LANGUAGE}'}, {'{PROBLEM}'}
+            Use placeholders: {'{CONTENT}'}, {'{LANGUAGE}'}
           </p>
         </div>
         <textarea

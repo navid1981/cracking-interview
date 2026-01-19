@@ -96,8 +96,7 @@ function App() {
   const [googleTokenExists, setGoogleTokenExists] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [previousWindowSize, setPreviousWindowSize] = useState<{width: number, height: number} | null>(null);
-  const [hotkeysConfig, setHotkeysConfig] = useState<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string } | null>(null);
-  const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string }>({ text: '', screenshot: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '' });
+  const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>({ text: '', screenshot: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
   
   // Prompt editing state
@@ -232,8 +231,7 @@ function App() {
 
   const loadHotkeys = async () => {
     try {
-      const cfg = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string }>('get_hotkeys');
-      setHotkeysConfig(cfg);
+      const cfg = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('get_hotkeys');
       setHotkeysDraft(cfg);
       setHotkeysStatus('');
     } catch (e) {
@@ -245,7 +243,7 @@ function App() {
   const saveHotkeys = async () => {
     try {
       setHotkeysStatus('Saving...');
-      const updated = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string }>('set_hotkeys', {
+      const updated = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('set_hotkeys', {
         textHotkey: hotkeysDraft.text,
         screenshotHotkey: hotkeysDraft.screenshot,
         scrollUpHotkey: hotkeysDraft.scroll_up,
@@ -254,8 +252,9 @@ function App() {
         moveDownHotkey: hotkeysDraft.move_down,
         moveLeftHotkey: hotkeysDraft.move_left,
         moveRightHotkey: hotkeysDraft.move_right,
+        toggleVisibilityHotkey: hotkeysDraft.toggle_visibility,
+        quitAppHotkey: hotkeysDraft.quit_app,
       });
-      setHotkeysConfig(updated);
       setHotkeysDraft(updated);
       setHotkeysStatus('Saved.');
     } catch (e) {
@@ -266,8 +265,7 @@ function App() {
   const resetHotkeys = async () => {
     try {
       setHotkeysStatus('Resetting...');
-      const updated = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string }>('reset_hotkeys_to_default');
-      setHotkeysConfig(updated);
+      const updated = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('reset_hotkeys_to_default');
       setHotkeysDraft(updated);
       setHotkeysStatus('Reset to defaults.');
     } catch (e) {
@@ -856,84 +854,108 @@ function App() {
                   <div className="form-group">
                     <label>Global Hotkeys:</label>
 
-                    {hotkeysConfig && (
-                      <div style={{marginTop: '8px', fontSize: '12px', color: '#666'}}>
-                        Current: <strong>{hotkeysConfig.text}</strong> (Extract) • <strong>{hotkeysConfig.screenshot}</strong> (Screenshot) • <strong>{hotkeysConfig.scroll_up}</strong> (Scroll Up) • <strong>{hotkeysConfig.scroll_down}</strong> (Scroll Down) • <strong>{hotkeysConfig.move_up}</strong> (Move Up) • <strong>{hotkeysConfig.move_down}</strong> (Move Down) • <strong>{hotkeysConfig.move_left}</strong> (Move Left) • <strong>{hotkeysConfig.move_right}</strong> (Move Right)
+                    <div className="hotkeys-two-col">
+                      <div className="hotkeys-col">
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Extract text → Solve</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.text}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, text: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + E' : runtimePlatform === 'windows' ? 'Alt + E' : 'Ctrl + E'}
+                          />
+                        </div>
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Scroll up (Explanation)</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.scroll_up}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_up: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + Up' : 'Ctrl + Up'}
+                          />
+                        </div>
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Move window up</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.move_up}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_up: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Up' : runtimePlatform === 'windows' ? 'Alt + Shift + Up' : 'Ctrl + Shift + Up'}
+                          />
+                        </div>
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Move window left</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.move_left}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_left: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Left' : runtimePlatform === 'windows' ? 'Alt + Shift + Left' : 'Ctrl + Shift + Left'}
+                          />
+                        </div>
                       </div>
-                    )}
 
-                    <div className="hotkeys-grid">
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">1) Extract text → Solve</div>
-                        <input
-                          className="input-field"
-                          value={hotkeysDraft.text}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, text: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + E' : runtimePlatform === 'windows' ? 'Alt + E' : 'Ctrl + E'}
-                        />
+                      <div className="hotkeys-col">
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Screenshot → Solve</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.screenshot}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, screenshot: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + S' : runtimePlatform === 'windows' ? 'Alt + S' : 'Ctrl + S'}
+                          />
+                        </div>
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Scroll down (Explanation)</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.scroll_down}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_down: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + Down' : 'Ctrl + Down'}
+                          />
+                        </div>
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Move window down</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.move_down}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_down: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Down' : runtimePlatform === 'windows' ? 'Alt + Shift + Down' : 'Ctrl + Shift + Down'}
+                          />
+                        </div>
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Move window right</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.move_right}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_right: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Right' : runtimePlatform === 'windows' ? 'Alt + Shift + Right' : 'Ctrl + Shift + Right'}
+                          />
+                        </div>
                       </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">2) Screenshot → Solve</div>
-                        <input
-                          className="input-field"
-                          value={hotkeysDraft.screenshot}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, screenshot: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + S' : runtimePlatform === 'windows' ? 'Alt + S' : 'Ctrl + S'}
-                        />
+                    </div>
+
+                    <div className="hotkeys-two-col hotkeys-two-col-single">
+                      <div className="hotkeys-col">
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Quit app</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.quit_app}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, quit_app: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Q' : runtimePlatform === 'windows' ? 'Alt + Shift + Q' : 'Ctrl + Shift + Q'}
+                          />
+                        </div>
                       </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">3) Scroll up (Explanation/Solution)</div>
-                        <input
-                          className="input-field"
-                          value={hotkeysDraft.scroll_up}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_up: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Up' : 'Ctrl + Up'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">4) Scroll down (Explanation/Solution)</div>
-                        <input
-                          className="input-field"
-                          value={hotkeysDraft.scroll_down}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_down: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Down' : 'Ctrl + Down'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">5) Move window up</div>
-                        <input
-                          className="input-field"
-                          value={hotkeysDraft.move_up}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_up: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Up' : runtimePlatform === 'windows' ? 'Alt + Shift + Up' : 'Ctrl + Shift + Up'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">6) Move window down</div>
-                        <input
-                          className="input-field"
-                          value={hotkeysDraft.move_down}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_down: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Down' : runtimePlatform === 'windows' ? 'Alt + Shift + Down' : 'Ctrl + Shift + Down'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">7) Move window left</div>
-                        <input
-                          className="input-field"
-                          value={hotkeysDraft.move_left}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_left: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Left' : runtimePlatform === 'windows' ? 'Alt + Shift + Left' : 'Ctrl + Shift + Left'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">8) Move window right</div>
-                        <input
-                          className="input-field"
-                          value={hotkeysDraft.move_right}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_right: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Right' : runtimePlatform === 'windows' ? 'Alt + Shift + Right' : 'Ctrl + Shift + Right'}
-                        />
+                      <div className="hotkeys-col">
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Show/Hide app window</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.toggle_visibility}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, toggle_visibility: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + H' : runtimePlatform === 'windows' ? 'Alt + Shift + H' : 'Ctrl + Shift + H'}
+                          />
+                        </div>
                       </div>
                     </div>
 

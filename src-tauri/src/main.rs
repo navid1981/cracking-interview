@@ -52,6 +52,8 @@ struct HotkeysConfig {
     move_down: String,
     move_left: String,
     move_right: String,
+    toggle_visibility: String,
+    quit_app: String,
 }
 
 struct HotkeysState(Mutex<HotkeysConfig>);
@@ -66,6 +68,8 @@ fn default_hotkeys() -> HotkeysConfig {
         move_down: DEFAULT_MOVE_DOWN_HOTKEY.to_string(),
         move_left: DEFAULT_MOVE_LEFT_HOTKEY.to_string(),
         move_right: DEFAULT_MOVE_RIGHT_HOTKEY.to_string(),
+        toggle_visibility: DEFAULT_TOGGLE_VISIBILITY_HOTKEY.to_string(),
+        quit_app: DEFAULT_QUIT_APP_HOTKEY.to_string(),
     }
 }
 
@@ -108,6 +112,22 @@ const DEFAULT_MOVE_LEFT_HOTKEY: &str = "Ctrl+Shift+Left";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const DEFAULT_MOVE_RIGHT_HOTKEY: &str = "Ctrl+Shift+Right";
 
+// Toggle app visibility (show/hide) defaults (configurable).
+#[cfg(target_os = "macos")]
+const DEFAULT_TOGGLE_VISIBILITY_HOTKEY: &str = "Cmd+Shift+H";
+#[cfg(target_os = "windows")]
+const DEFAULT_TOGGLE_VISIBILITY_HOTKEY: &str = "Alt+Shift+H";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const DEFAULT_TOGGLE_VISIBILITY_HOTKEY: &str = "Ctrl+Shift+H";
+
+// Quit app defaults (configurable).
+#[cfg(target_os = "macos")]
+const DEFAULT_QUIT_APP_HOTKEY: &str = "Cmd+Shift+Q";
+#[cfg(target_os = "windows")]
+const DEFAULT_QUIT_APP_HOTKEY: &str = "Alt+Shift+Q";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const DEFAULT_QUIT_APP_HOTKEY: &str = "Ctrl+Shift+Q";
+
 fn hotkeys_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -127,6 +147,8 @@ struct HotkeysConfigFile {
     move_down: Option<String>,
     move_left: Option<String>,
     move_right: Option<String>,
+    toggle_visibility: Option<String>,
+    quit_app: Option<String>,
 }
 
 fn load_hotkeys_from_disk(app: &tauri::AppHandle) -> HotkeysConfig {
@@ -154,6 +176,8 @@ fn load_hotkeys_from_disk(app: &tauri::AppHandle) -> HotkeysConfig {
                 if let Some(v) = cfg_file.move_down { if !v.trim().is_empty() { cfg.move_down = v; } }
                 if let Some(v) = cfg_file.move_left { if !v.trim().is_empty() { cfg.move_left = v; } }
                 if let Some(v) = cfg_file.move_right { if !v.trim().is_empty() { cfg.move_right = v; } }
+                if let Some(v) = cfg_file.toggle_visibility { if !v.trim().is_empty() { cfg.toggle_visibility = v; } }
+                if let Some(v) = cfg_file.quit_app { if !v.trim().is_empty() { cfg.quit_app = v; } }
                 cfg
             }
             Err(e) => {
@@ -282,7 +306,54 @@ fn register_hotkeys(app: &tauri::AppHandle, cfg: &HotkeysConfig) -> Result<(), S
     register_hotkey(app, &cfg.move_down, "hotkey-move-down", "move-down")?;
     register_hotkey(app, &cfg.move_left, "hotkey-move-left", "move-left")?;
     register_hotkey(app, &cfg.move_right, "hotkey-move-right", "move-right")?;
+    register_toggle_visibility_hotkey(app, &cfg.toggle_visibility)?;
+    register_quit_app_hotkey(app, &cfg.quit_app)?;
     Ok(())
+}
+
+fn register_toggle_visibility_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Result<(), String> {
+    let hk = hotkey.to_string();
+    let handle = app.clone();
+    app.global_shortcut()
+        .on_shortcut(hotkey, move |_app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                println!("⌨️ Hotkey pressed (toggle): {}", hk);
+                if let Some(win) = handle.get_webview_window("main") {
+                    match win.is_visible() {
+                        Ok(true) => {
+                            let _ = win.hide();
+                        }
+                        Ok(false) => {
+                            let _ = win.show();
+                            let _ = win.unminimize();
+                            let _ = win.set_focus();
+                        }
+                        Err(_) => {
+                            // Best-effort fallback
+                            let _ = win.show();
+                            let _ = win.unminimize();
+                            let _ = win.set_focus();
+                        }
+                    }
+                } else {
+                    println!("⚠️ Could not find main window to toggle visibility");
+                }
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+fn register_quit_app_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Result<(), String> {
+    let hk = hotkey.to_string();
+    let handle = app.clone();
+    app.global_shortcut()
+        .on_shortcut(hotkey, move |_app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                println!("⌨️ Hotkey pressed (quit): {}", hk);
+                handle.exit(0);
+            }
+        })
+        .map_err(|e| e.to_string())
 }
 
 fn validate_hotkey_for_global_use(hotkey: &str) -> Result<(), String> {
@@ -610,25 +681,43 @@ async fn resize_window(window: tauri::Window, width: f64, height: f64) -> Result
     println!("🪟 resize_window called: {}x{}", width, height);
     window.set_size(Size::Logical(tauri::LogicalSize { width, height }))
         .map_err(|e| e.to_string())?;
-    if let Ok(size) = window.inner_size() {
-        println!("🪟 resize_window after set_size: {}x{}", size.width, size.height);
+    if let (Ok(physical), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
+        let logical: tauri::LogicalSize<f64> = physical.to_logical(scale);
+        println!(
+            "🪟 resize_window after set_size: logical={:.0}x{:.0} scale={:.2} physical={}x{}",
+            logical.width,
+            logical.height,
+            scale,
+            physical.width,
+            physical.height
+        );
     }
     Ok(())
 }
 
 #[derive(Serialize)]
 struct WindowInnerSize {
-    width: u32,
-    height: u32,
+    /// Logical pixels (DPI-independent). This is what the frontend expects for consistent sizing across monitors.
+    width: f64,
+    height: f64,
 }
 
 #[tauri::command]
 fn get_window_inner_size(window: tauri::Window) -> Result<WindowInnerSize, String> {
-    let size = window.inner_size().map_err(|e| e.to_string())?;
-    println!("🪟 get_window_inner_size: {}x{}", size.width, size.height);
+    let physical = window.inner_size().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let logical: tauri::LogicalSize<f64> = physical.to_logical(scale);
+    println!(
+        "🪟 get_window_inner_size: logical={:.0}x{:.0} scale={:.2} physical={}x{}",
+        logical.width,
+        logical.height,
+        scale,
+        physical.width,
+        physical.height
+    );
     Ok(WindowInnerSize {
-        width: size.width,
-        height: size.height,
+        width: logical.width,
+        height: logical.height,
     })
 }
 
@@ -674,6 +763,8 @@ fn reset_hotkeys_to_default(
     unregister_hotkey_best_effort(&app, &current.move_down);
     unregister_hotkey_best_effort(&app, &current.move_left);
     unregister_hotkey_best_effort(&app, &current.move_right);
+    unregister_hotkey_best_effort(&app, &current.toggle_visibility);
+    unregister_hotkey_best_effort(&app, &current.quit_app);
 
     register_hotkeys(&app, &defaults)?;
     save_hotkeys_to_disk(&app, &defaults)?;
@@ -700,6 +791,8 @@ fn set_hotkeys(
     move_down_hotkey: String,
     move_left_hotkey: String,
     move_right_hotkey: String,
+    toggle_visibility_hotkey: String,
+    quit_app_hotkey: String,
 ) -> Result<HotkeysConfig, String> {
     let text = normalize_hotkey(&text_hotkey);
     let screenshot = normalize_hotkey(&screenshot_hotkey);
@@ -709,6 +802,8 @@ fn set_hotkeys(
     let move_down = normalize_hotkey(&move_down_hotkey);
     let move_left = normalize_hotkey(&move_left_hotkey);
     let move_right = normalize_hotkey(&move_right_hotkey);
+    let toggle_visibility = normalize_hotkey(&toggle_visibility_hotkey);
+    let quit_app = normalize_hotkey(&quit_app_hotkey);
 
     if text.is_empty()
         || screenshot.is_empty()
@@ -718,6 +813,8 @@ fn set_hotkeys(
         || move_down.is_empty()
         || move_left.is_empty()
         || move_right.is_empty()
+        || toggle_visibility.is_empty()
+        || quit_app.is_empty()
     {
         return Err("Hotkeys cannot be empty".to_string());
     }
@@ -740,6 +837,8 @@ fn set_hotkeys(
         move_down.as_str(),
         move_left.as_str(),
         move_right.as_str(),
+        toggle_visibility.as_str(),
+        quit_app.as_str(),
     ];
     for i in 0..all.len() {
         for j in (i + 1)..all.len() {
@@ -758,6 +857,8 @@ fn set_hotkeys(
     validate_hotkey_for_global_use(&move_down)?;
     validate_hotkey_for_global_use(&move_left)?;
     validate_hotkey_for_global_use(&move_right)?;
+    validate_hotkey_for_global_use(&toggle_visibility)?;
+    validate_hotkey_for_global_use(&quit_app)?;
     validate_scroll_hotkey(&scroll_up)?;
     validate_scroll_hotkey(&scroll_down)?;
     validate_move_hotkey(&move_up)?;
@@ -776,6 +877,8 @@ fn set_hotkeys(
     unregister_hotkey_best_effort(&app, &previous.move_down);
     unregister_hotkey_best_effort(&app, &previous.move_left);
     unregister_hotkey_best_effort(&app, &previous.move_right);
+    unregister_hotkey_best_effort(&app, &previous.toggle_visibility);
+    unregister_hotkey_best_effort(&app, &previous.quit_app);
 
     let next = HotkeysConfig {
         text,
@@ -786,6 +889,8 @@ fn set_hotkeys(
         move_down,
         move_left,
         move_right,
+        toggle_visibility,
+        quit_app,
     };
 
     // Register text first, then screenshot; rollback if anything fails.
@@ -857,6 +962,33 @@ fn set_hotkeys(
         unregister_hotkey_best_effort(&app, &next.move_left);
         register_hotkeys(&app, &previous).ok();
         return Err(format!("Failed to register move right hotkey: {}", e));
+    }
+
+    if let Err(e) = register_toggle_visibility_hotkey(&app, &next.toggle_visibility) {
+        unregister_hotkey_best_effort(&app, &next.text);
+        unregister_hotkey_best_effort(&app, &next.screenshot);
+        unregister_hotkey_best_effort(&app, &next.scroll_up);
+        unregister_hotkey_best_effort(&app, &next.scroll_down);
+        unregister_hotkey_best_effort(&app, &next.move_up);
+        unregister_hotkey_best_effort(&app, &next.move_down);
+        unregister_hotkey_best_effort(&app, &next.move_left);
+        unregister_hotkey_best_effort(&app, &next.move_right);
+        register_hotkeys(&app, &previous).ok();
+        return Err(format!("Failed to register toggle hotkey: {}", e));
+    }
+
+    if let Err(e) = register_quit_app_hotkey(&app, &next.quit_app) {
+        unregister_hotkey_best_effort(&app, &next.text);
+        unregister_hotkey_best_effort(&app, &next.screenshot);
+        unregister_hotkey_best_effort(&app, &next.scroll_up);
+        unregister_hotkey_best_effort(&app, &next.scroll_down);
+        unregister_hotkey_best_effort(&app, &next.move_up);
+        unregister_hotkey_best_effort(&app, &next.move_down);
+        unregister_hotkey_best_effort(&app, &next.move_left);
+        unregister_hotkey_best_effort(&app, &next.move_right);
+        unregister_hotkey_best_effort(&app, &next.toggle_visibility);
+        register_hotkeys(&app, &previous).ok();
+        return Err(format!("Failed to register quit hotkey: {}", e));
     }
 
     save_hotkeys_to_disk(&app, &next)?;
