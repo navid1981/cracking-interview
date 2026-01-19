@@ -809,7 +809,7 @@ function App() {
                       <strong>📝 Text:</strong> Extracts text content only. Fast and efficient. Best for text-based problems.
                     </p>
                     <p className="small">
-                      <strong>📸 Screenshot:</strong> Captures visual content including diagrams, tables, and formatting. Best for problems with images or complex layouts.
+                      <strong>📸 Screenshot:</strong> Captures visual content including diagrams, tables, and formatting. Best for problems with images or complex layouts. If you chose Displays, the app will automatically use the Screenshot approach even when you press the Extract hotkey.
                     </p>
                   </div>
                 </>

@@ -12,20 +12,11 @@
   border-bottom: 1px solid #e5e5e5;
 }
 
-.new-prompt-btn {
-  background: var(--primary-blue);
-  color: white;
-  border: none;
+/* Uses global `.action-btn.primary` from App.css; keep a tiny local tweak for this view */
+.prompt-new-btn {
   padding: 8px 16px;
-  border-radius: 6px;
   font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.new-prompt-btn:disabled {
-  background: #ccc;
-  cursor: not-allowed;
+  border-radius: 8px;
 }
 
 .language-selector {
@@ -91,45 +82,51 @@
 
 .prompt-actions {
   display: flex;
-  gap: 3px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
-.action-btn {
-  background: linear-gradient(135deg, #e3f2fd, #bbdefb);
-  border: 1px solid #90caf9;
-  padding: 3px 6px;
-  border-radius: 4px;
-  font-size: 9px;
+/* Prompt-row actions: match app button language (clean border, subtle hover), but compact */
+.prompt-action-btn {
+  background: white;
+  border: 1px solid #e5e5e5;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.2s;
-  min-width: 60px;
+  min-width: 92px;
   text-align: center;
-  font-weight: 500;
-  color: #1976d2;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
 }
 
-.action-btn:hover {
-  background: linear-gradient(135deg, #42a5f5, #64b5f6);
-  border-color: #2196f3;
-  color: white;
+.prompt-action-btn:hover:not(:disabled) {
+  border-color: var(--primary-blue);
+  color: var(--primary-blue);
+  background: #f0f7ff;
   transform: translateY(-1px);
 }
 
-.action-btn:active {
+.prompt-action-btn:active:not(:disabled) {
   transform: translateY(0);
 }
 
-.delete-btn {
-  background: linear-gradient(135deg, #ffebee, #ffcdd2);
-  border-color: #ef9a9a;
-  color: #c62828;
+.prompt-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
-.delete-btn:hover {
-  background: linear-gradient(135deg, #ef5350, #e57373);
-  border-color: #f44336;
+.prompt-action-btn.danger {
+  border-color: #ef9a9a;
+  color: #c62828;
+  background: #fff5f5;
+}
+
+.prompt-action-btn.danger:hover:not(:disabled) {
+  background: #c62828;
+  border-color: #c62828;
   color: white;
 }
 

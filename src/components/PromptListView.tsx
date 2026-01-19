@@ -224,7 +224,7 @@ export default function PromptListView({
       <div className="list-header">
         <button
           onClick={handleCreateNew}
-          className="new-prompt-btn"
+          className="action-btn primary prompt-new-btn"
           disabled={!canAddMore}
         >
           + New Prompt
@@ -269,19 +269,8 @@ export default function PromptListView({
             <div className="prompt-actions">
               <button
                 onClick={() => onEditPrompt(template.id)}
-                className="action-btn"
+                className="prompt-action-btn"
                 title="Edit"
-                style={{
-                  background: 'linear-gradient(135deg, #e3f2fd, #bbdefb)',
-                  border: '1px solid #90caf9',
-                  padding: '3px 6px',
-                  borderRadius: '4px',
-                  fontSize: '9px',
-                  width: '75px',
-                  color: '#1976d2',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                }}
               >
                 ✏️ Edit
               </button>
@@ -290,37 +279,15 @@ export default function PromptListView({
                 <>
                   <button
                     onClick={() => handleRestore(template.id)}
-                    className="action-btn"
+                    className="prompt-action-btn"
                     title="Restore to default"
-                    style={{
-                      background: 'linear-gradient(135deg, #e3f2fd, #bbdefb)',
-                      border: '1px solid #90caf9',
-                      padding: '3px 6px',
-                      borderRadius: '4px',
-                      fontSize: '9px',
-                      width: '75px',
-                      color: '#1976d2',
-                      cursor: 'pointer',
-                      textAlign: 'center',
-                    }}
                   >
                     🔄 Restore
                   </button>
                   <button
                     onClick={() => handleDuplicate(template.id)}
-                    className="action-btn"
+                    className="prompt-action-btn"
                     title="Duplicate"
-                    style={{
-                      background: 'linear-gradient(135deg, #e3f2fd, #bbdefb)',
-                      border: '1px solid #90caf9',
-                      padding: '3px 6px',
-                      borderRadius: '4px',
-                      fontSize: '9px',
-                      width: '75px',
-                      color: '#1976d2',
-                      cursor: 'pointer',
-                      textAlign: 'center',
-                    }}
                   >
                     📋 Duplicate
                   </button>
@@ -329,37 +296,15 @@ export default function PromptListView({
                 <>
                   <button
                     onClick={() => handleRename(template.id)}
-                    className="action-btn"
+                    className="prompt-action-btn"
                     title="Rename"
-                    style={{
-                      background: 'linear-gradient(135deg, #e3f2fd, #bbdefb)',
-                      border: '1px solid #90caf9',
-                      padding: '3px 6px',
-                      borderRadius: '4px',
-                      fontSize: '9px',
-                      width: '75px',
-                      color: '#1976d2',
-                      cursor: 'pointer',
-                      textAlign: 'center',
-                    }}
                   >
                     📝 Rename
                   </button>
                   <button
                     onClick={() => handleDelete(template.id)}
-                    className="action-btn delete-btn"
+                    className="prompt-action-btn danger"
                     title="Delete"
-                    style={{
-                      background: 'linear-gradient(135deg, #ffebee, #ffcdd2)',
-                      border: '1px solid #ef9a9a',
-                      padding: '3px 6px',
-                      borderRadius: '4px',
-                      fontSize: '9px',
-                      width: '75px',
-                      color: '#c62828',
-                      cursor: 'pointer',
-                      textAlign: 'center',
-                    }}
                   >
                     🗑️ Delete
                   </button>
