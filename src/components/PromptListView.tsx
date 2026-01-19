@@ -264,9 +264,6 @@ export default function PromptListView({
               {selectedTemplate === template.id && (
                 <span className="active-badge">Active</span>
               )}
-              {!template.isCustom && (
-                <span className="builtin-badge">Built-in</span>
-              )}
             </div>
 
             <div className="prompt-actions">

@@ -289,16 +289,17 @@ body {
   background: white;
   border-radius: 12px;
   padding: 0;
-  width: 650px;
-  height: 750px;
+  /* Responsive: never exceed window viewport (prevents clipping on smaller window sizes) */
+  width: min(650px, calc(100vw - 24px));
+  height: min(750px, calc(100vh - 24px));
   overflow: visible;
   display: flex;
   flex-direction: column;
 }
 
 .settings-modal {
-  width: 650px;
-  height: 750px;
+  width: min(650px, calc(100vw - 24px));
+  height: min(750px, calc(100vh - 24px));
 }
 
 .modal-header {

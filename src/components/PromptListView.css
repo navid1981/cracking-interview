@@ -89,14 +89,6 @@
   font-weight: 600;
 }
 
-.builtin-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  background: #e5e5e5;
-  color: #666;
-  border-radius: 12px;
-}
-
 .prompt-actions {
   display: flex;
   gap: 3px;

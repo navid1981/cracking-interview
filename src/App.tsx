@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import AIResponseDisplay from './components/AIResponseDisplay';
 import TabDropdown from './components/TabDropdown';
@@ -135,72 +134,74 @@ function App() {
   };
 
   const handleOpenSettings = async () => {
-    setMessage('🎯 Opening settings...');
+    try { await invoke('frontend_log', { message: 'handleOpenSettings clicked' }); } catch {}
     console.log('🎯 handleOpenSettings called!');
-    setSettingsTab('models');
-    setShowSettings(true);
     
     try {
-      const appWindow = getCurrentWindow();
-      const currentSize = await appWindow.innerSize();
+      const currentSize = await invoke<{ width: number; height: number }>('get_window_inner_size');
+      try { await invoke('frontend_log', { message: `currentSize=${currentSize.width}x${currentSize.height}` }); } catch {}
       console.log('📏 Current window size:', currentSize.width, 'x', currentSize.height);
-      setMessage(`📏 Window: ${currentSize.width}x${currentSize.height}`);
       
-      const SETTINGS_WIDTH = 800;
-      const SETTINGS_HEIGHT = 900;
-      const TOLERANCE = 10;
-      
-      const isDifferent = 
-        Math.abs(currentSize.width - SETTINGS_WIDTH) > TOLERANCE || 
-        Math.abs(currentSize.height - SETTINGS_HEIGHT) > TOLERANCE;
-      
-      if (isDifferent) {
-        setPreviousWindowSize({
-          width: currentSize.width,
-          height: currentSize.height
-        });
-        console.log('💾 Saved user size:', currentSize.width, 'x', currentSize.height);
-        setMessage(`💾 Saved: ${currentSize.width}x${currentSize.height}`);
-        
-        setTimeout(async () => {
-          await appWindow.setSize(new LogicalSize(SETTINGS_WIDTH, SETTINGS_HEIGHT));
-          console.log('⚙️  Resized to:', SETTINGS_WIDTH, 'x', SETTINGS_HEIGHT);
-          setMessage(`⚙️ Resized to: ${SETTINGS_WIDTH}x${SETTINGS_HEIGHT}`);
-        }, 100);
-      } else {
-        console.log('⏭️  Already at settings size');
-        setMessage('⏭️ Already at settings size');
+      // Match the app's default window size from `src-tauri/tauri.conf.json`
+      // so Settings content is always fully visible after a user resizes.
+      const DEFAULT_WIDTH = 550;
+      const DEFAULT_HEIGHT = 900;
+
+      // Always save the user's current size on Settings open so we can restore it on close.
+      setPreviousWindowSize({ width: currentSize.width, height: currentSize.height });
+      console.log('💾 Saved user size:', currentSize.width, 'x', currentSize.height);
+
+      // Force resize BEFORE opening the modal (more reliable).
+      // Prefer backend resize (native context), fall back to JS API.
+      try {
+        await invoke('resize_window', { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
+        console.log('✅ resize_window invoked');
+        try { await invoke('frontend_log', { message: `resize_window invoked ${DEFAULT_WIDTH}x${DEFAULT_HEIGHT}` }); } catch {}
+      } catch (e) {
+        console.warn('❌ resize_window command failed:', e);
+        try { await invoke('frontend_log', { message: `resize_window failed: ${String(e)}` }); } catch {}
       }
+
+      // Read back size so we can confirm resize actually happened.
+      try {
+        const after = await invoke<{ width: number; height: number }>('get_window_inner_size');
+        console.log('📏 After resize size:', after.width, 'x', after.height);
+        try { await invoke('frontend_log', { message: `afterSize=${after.width}x${after.height}` }); } catch {}
+      } catch (e) {
+        console.warn('Failed to read size after resize:', e);
+      }
+
+      console.log('⚙️ Resized to default:', DEFAULT_WIDTH, 'x', DEFAULT_HEIGHT);
+      // Give the OS a moment to apply resize before showing modal.
+      await new Promise((r) => setTimeout(r, 150));
     } catch (error) {
       console.error('❌ Window resize error:', error);
-      setMessage(`❌ Error: ${error}`);
     }
+
+    // Open modal AFTER resize attempt.
+    setSettingsTab('models');
+    setShowSettings(true);
   };
 
   const handleCloseSettings = async () => {
-    setMessage('🎯 Closing settings...');
     console.log('🎯 handleCloseSettings called!');
+    try { await invoke('frontend_log', { message: 'handleCloseSettings called' }); } catch {}
     setShowSettings(false);
     
     setTimeout(async () => {
       if (previousWindowSize) {
         try {
-          const appWindow = getCurrentWindow();
           console.log('🔄 Restoring to:', previousWindowSize.width, 'x', previousWindowSize.height);
-          setMessage(`🔄 Restoring: ${previousWindowSize.width}x${previousWindowSize.height}`);
           
-          await appWindow.setSize(new LogicalSize(previousWindowSize.width, previousWindowSize.height));
+          await invoke('resize_window', { width: previousWindowSize.width, height: previousWindowSize.height });
           console.log('✅ Restored!');
-          setMessage('✅ Window size restored!');
           setPreviousWindowSize(null);
         } catch (error) {
           console.error('❌ Restore error:', error);
-          setMessage(`❌ Restore error: ${error}`);
           setPreviousWindowSize(null);
         }
       } else {
         console.log('ℹ️  No size to restore');
-        setMessage('ℹ️ No size to restore');
       }
     }, 100);
   };
@@ -674,17 +675,13 @@ function App() {
                     />
                   ) : (
                     <>
-                      <button 
-                        onClick={() => setPromptEditMode('list')}
-                        className="back-btn"
-                        style={{marginBottom: '16px'}}
-                      >
-                        ← Back to List
-                      </button>
-                      
                       <PromptEditor
                         key={editingPromptId}
                         currentTemplateId={editingPromptId || PromptTemplate.AlgorithmOptimal}
+                        onCancel={() => {
+                          setPromptEditMode('list');
+                          setEditingPromptId(null);
+                        }}
                       />
                     </>
                   )}

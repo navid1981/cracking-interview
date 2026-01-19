@@ -297,6 +297,22 @@ Tauri:
 - `npm run tauri dev`
 - `npm run tauri build`
 
+## Quick manual / MCP test via browser (dev URL)
+
+When running in dev mode, Tauri points to the Vite dev server:
+
+- **Dev URL**: `http://127.0.0.1:1420/` (see `src-tauri/tauri.conf.json` → `build.devUrl`)
+
+This is useful for quick UI iteration and automated checks:
+
+- **Manual check**: open the dev URL in a normal browser and validate UI behavior.
+- **MCP-driven check**: if you have an MCP browser driver (e.g. Playwright/Chrome automation), you can load the dev URL and interact with the UI to verify flows end-to-end.
+
+Notes:
+
+- The URL only works **if the dev server is running** (typically via `npm run tauri dev` or `npm run dev`).
+- Some functionality (global hotkey, OS display capture permissions) requires the native Tauri context; for those, prefer `npm run tauri dev`.
+
 ## Known technical debt / refactor targets
 
 - **App.tsx is doing a lot**: UI + state + settings + prompt editing + OAuth UX. Consider splitting into:

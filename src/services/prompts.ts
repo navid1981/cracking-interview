@@ -145,7 +145,12 @@ export function buildPrompt(
     }
   } else {
     // Built-in template
-    userTemplate = DEFAULT_USER_TEMPLATES[template as PromptTemplate];
+    const builtInId = template as PromptTemplate;
+    // Allow per-template overrides stored in localStorage
+    const overriddenSystem = localStorage.getItem(`custom_${builtInId}_system`);
+    const overriddenUser = localStorage.getItem(`custom_${builtInId}_user`);
+    if (overriddenSystem) systemPrompt = overriddenSystem;
+    userTemplate = overriddenUser || DEFAULT_USER_TEMPLATES[builtInId];
   }
 
   let finalPrompt = systemPrompt + '\n\n';

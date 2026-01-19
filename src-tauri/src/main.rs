@@ -10,6 +10,7 @@ mod google_oauth;
 use std::sync::Arc;
 use tauri::Emitter;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use serde::Serialize;
 
 lazy_static::lazy_static! {
     static ref OAUTH_SERVICE: Arc<google_oauth::GoogleOAuthService> = {
@@ -190,6 +191,8 @@ fn main() {
             get_google_token_status,
             clear_google_tokens,
             resize_window,
+            get_window_inner_size,
+            frontend_log,
         ])
         .setup(|app| {
             println!("🚀 CrackingInterview starting...");
@@ -237,7 +240,34 @@ fn clear_google_tokens() -> Result<String, String> {
 #[tauri::command]
 async fn resize_window(window: tauri::Window, width: f64, height: f64) -> Result<(), String> {
     use tauri::Size;
+    println!("🪟 resize_window called: {}x{}", width, height);
     window.set_size(Size::Logical(tauri::LogicalSize { width, height }))
         .map_err(|e| e.to_string())?;
+    if let Ok(size) = window.inner_size() {
+        println!("🪟 resize_window after set_size: {}x{}", size.width, size.height);
+    }
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct WindowInnerSize {
+    width: u32,
+    height: u32,
+}
+
+#[tauri::command]
+fn get_window_inner_size(window: tauri::Window) -> Result<WindowInnerSize, String> {
+    let size = window.inner_size().map_err(|e| e.to_string())?;
+    println!("🪟 get_window_inner_size: {}x{}", size.width, size.height);
+    Ok(WindowInnerSize {
+        width: size.width,
+        height: size.height,
+    })
+}
+
+/// Simple logger so frontend can write to Rust stdout (useful for debugging in `tauri dev` terminals).
+#[tauri::command]
+fn frontend_log(message: String) -> Result<(), String> {
+    println!("🖥️ FE: {}", message);
     Ok(())
 }
