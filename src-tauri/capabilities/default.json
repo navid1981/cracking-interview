@@ -1,0 +1,17 @@
+{
+  "identifier": "main-default",
+  "description": "Allow the main window to use core APIs required by the app (including listening to backend-emitted events such as global hotkeys).",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:1420/*",
+      "http://localhost:1420/*"
+    ]
+  }
+}
+

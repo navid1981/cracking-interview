@@ -66,20 +66,45 @@ function App() {
       claude_api_key: localStorage.getItem('claude_key') || '',
     };
   });
+
+  // Persist AI model + API keys so selections survive app restarts.
+  useEffect(() => {
+    try {
+      localStorage.setItem('ai_model', aiConfig.selected_model);
+      localStorage.setItem('gemini_key', aiConfig.gemini_api_key || '');
+      localStorage.setItem('claude_key', aiConfig.claude_api_key || '');
+    } catch (e) {
+      console.warn('Failed to persist AI config:', e);
+    }
+  }, [aiConfig.selected_model, aiConfig.gemini_api_key, aiConfig.claude_api_key]);
   
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'models' | 'prompts' | 'input'>('models');
+  const [settingsTab, setSettingsTab] = useState<'models' | 'prompts' | 'input' | 'hotkeys'>('models');
+  const [runtimePlatform, setRuntimePlatform] = useState<'macos' | 'windows' | 'linux' | 'unknown'>('unknown');
   const [useScreenshot, setUseScreenshot] = useState(
     localStorage.getItem('use_screenshot') === 'true'
   );
+
+  // Persist input mode (text vs screenshot) so it survives restarts.
+  useEffect(() => {
+    try {
+      localStorage.setItem('use_screenshot', useScreenshot ? 'true' : 'false');
+    } catch (e) {
+      console.warn('Failed to persist input mode:', e);
+    }
+  }, [useScreenshot]);
   const [googleTokenExists, setGoogleTokenExists] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [previousWindowSize, setPreviousWindowSize] = useState<{width: number, height: number} | null>(null);
+  const [hotkeysConfig, setHotkeysConfig] = useState<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string } | null>(null);
+  const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string }>({ text: '', screenshot: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '' });
+  const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
   
   // Prompt editing state
   const [promptEditMode, setPromptEditMode] = useState<'list' | 'edit'>('list');
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
-  const solveWithAIRef = useRef<(() => Promise<void>) | null>(null);
+  const solveWithAIRef = useRef<((mode?: 'auto' | 'text' | 'screenshot') => Promise<void>) | null>(null);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     checkCdpStatus();
@@ -95,23 +120,89 @@ function App() {
     checkGoogleTokens();
   }, []);
 
-  // Global hotkey support (registered on Rust side). This lets user stay in Chrome and trigger Solve.
   useEffect(() => {
-    let unlistenFn: (() => void) | null = null;
+    // Determine OS so Settings can show platform-specific hotkeys.
     (async () => {
       try {
-        unlistenFn = await listen('hotkey-solve', async () => {
-          if (solveWithAIRef.current) {
-            await solveWithAIRef.current();
-          }
+        const os = await invoke<string>('get_os');
+        const normalized = os.toLowerCase();
+        if (normalized === 'macos') setRuntimePlatform('macos');
+        else if (normalized === 'windows') setRuntimePlatform('windows');
+        else if (normalized === 'linux') setRuntimePlatform('linux');
+        else setRuntimePlatform('unknown');
+      } catch {
+        // Fallback for browser-only testing (http://127.0.0.1:1420/)
+        const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : '').toLowerCase();
+        if (ua.includes('mac os') || ua.includes('macintosh')) setRuntimePlatform('macos');
+        else if (ua.includes('windows')) setRuntimePlatform('windows');
+        else if (ua.includes('linux')) setRuntimePlatform('linux');
+        else setRuntimePlatform('unknown');
+      }
+    })();
+  }, []);
+
+  // Global hotkey support (registered on Rust side). This lets user stay in Chrome and trigger Solve.
+  useEffect(() => {
+    let unlistenText: (() => void) | null = null;
+    let unlistenScreenshot: (() => void) | null = null;
+    let unlistenScrollUp: (() => void) | null = null;
+    let unlistenScrollDown: (() => void) | null = null;
+    let unlistenMoveUp: (() => void) | null = null;
+    let unlistenMoveDown: (() => void) | null = null;
+    let unlistenMoveLeft: (() => void) | null = null;
+    let unlistenMoveRight: (() => void) | null = null;
+    (async () => {
+      try {
+        unlistenText = await listen('hotkey-solve-text', async () => {
+          try { await invoke('frontend_log', { message: 'FE received hotkey-solve-text' }); } catch {}
+          if (solveWithAIRef.current) await solveWithAIRef.current('text');
+        });
+        unlistenScreenshot = await listen('hotkey-solve-screenshot', async () => {
+          try { await invoke('frontend_log', { message: 'FE received hotkey-solve-screenshot' }); } catch {}
+          if (solveWithAIRef.current) await solveWithAIRef.current('screenshot');
+        });
+        unlistenScrollUp = await listen('hotkey-scroll-up', async () => {
+          try { await invoke('frontend_log', { message: 'FE received hotkey-scroll-up' }); } catch {}
+          const el = contentScrollRef.current;
+          if (el) el.scrollBy({ top: -260, behavior: 'smooth' });
+        });
+        unlistenScrollDown = await listen('hotkey-scroll-down', async () => {
+          try { await invoke('frontend_log', { message: 'FE received hotkey-scroll-down' }); } catch {}
+          const el = contentScrollRef.current;
+          if (el) el.scrollBy({ top: 260, behavior: 'smooth' });
+        });
+
+        unlistenMoveUp = await listen('hotkey-move-up', async () => {
+          try { await invoke('frontend_log', { message: 'FE received hotkey-move-up' }); } catch {}
+          await invoke('move_window_by', { dx: 0, dy: -80 });
+        });
+        unlistenMoveDown = await listen('hotkey-move-down', async () => {
+          try { await invoke('frontend_log', { message: 'FE received hotkey-move-down' }); } catch {}
+          await invoke('move_window_by', { dx: 0, dy: 80 });
+        });
+        unlistenMoveLeft = await listen('hotkey-move-left', async () => {
+          try { await invoke('frontend_log', { message: 'FE received hotkey-move-left' }); } catch {}
+          await invoke('move_window_by', { dx: -80, dy: 0 });
+        });
+        unlistenMoveRight = await listen('hotkey-move-right', async () => {
+          try { await invoke('frontend_log', { message: 'FE received hotkey-move-right' }); } catch {}
+          await invoke('move_window_by', { dx: 80, dy: 0 });
         });
       } catch (e) {
-        console.warn('Failed to listen for hotkey-solve:', e);
+        console.warn('Failed to listen for hotkey solve events:', e);
+        try { await invoke('frontend_log', { message: `FE failed to listen hotkey events: ${String(e)}` }); } catch {}
       }
     })();
     return () => {
       try {
-        unlistenFn?.();
+        unlistenText?.();
+        unlistenScreenshot?.();
+        unlistenScrollUp?.();
+        unlistenScrollDown?.();
+        unlistenMoveUp?.();
+        unlistenMoveDown?.();
+        unlistenMoveLeft?.();
+        unlistenMoveRight?.();
       } catch {
         // ignore
       }
@@ -124,12 +215,63 @@ function App() {
     getAllTemplates();
   }, []);
 
+  useEffect(() => {
+    if (showSettings && settingsTab === 'hotkeys') {
+      loadHotkeys();
+    }
+  }, [showSettings, settingsTab]);
+
   const checkGoogleTokens = async () => {
     try {
       const exists = await invoke<boolean>('get_google_token_status');
       setGoogleTokenExists(exists);
     } catch (error) {
       setGoogleTokenExists(false);
+    }
+  };
+
+  const loadHotkeys = async () => {
+    try {
+      const cfg = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string }>('get_hotkeys');
+      setHotkeysConfig(cfg);
+      setHotkeysDraft(cfg);
+      setHotkeysStatus('');
+    } catch (e) {
+      console.warn('Failed to load hotkeys:', e);
+      setHotkeysStatus(`Failed to load hotkeys: ${String(e)}`);
+    }
+  };
+
+  const saveHotkeys = async () => {
+    try {
+      setHotkeysStatus('Saving...');
+      const updated = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string }>('set_hotkeys', {
+        textHotkey: hotkeysDraft.text,
+        screenshotHotkey: hotkeysDraft.screenshot,
+        scrollUpHotkey: hotkeysDraft.scroll_up,
+        scrollDownHotkey: hotkeysDraft.scroll_down,
+        moveUpHotkey: hotkeysDraft.move_up,
+        moveDownHotkey: hotkeysDraft.move_down,
+        moveLeftHotkey: hotkeysDraft.move_left,
+        moveRightHotkey: hotkeysDraft.move_right,
+      });
+      setHotkeysConfig(updated);
+      setHotkeysDraft(updated);
+      setHotkeysStatus('Saved.');
+    } catch (e) {
+      setHotkeysStatus(`❌ ${String(e)}`);
+    }
+  };
+
+  const resetHotkeys = async () => {
+    try {
+      setHotkeysStatus('Resetting...');
+      const updated = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string }>('reset_hotkeys_to_default');
+      setHotkeysConfig(updated);
+      setHotkeysDraft(updated);
+      setHotkeysStatus('Reset to defaults.');
+    } catch (e) {
+      setHotkeysStatus(`❌ ${String(e)}`);
     }
   };
 
@@ -348,15 +490,30 @@ function App() {
     }
   };
 
-  const solveWithAI = async () => {
-    if (!selectedTab) {
-      setMessage('❌ Select a tab from Input Source');
+  const solveWithAI = async (mode: 'auto' | 'text' | 'screenshot' = 'auto') => {
+    const sourceToUse = selectedTab ?? (allSources.length > 0 ? allSources[0] : null);
+    if (!selectedTab && sourceToUse) {
+      // Keep UI selection in sync so the user can see what was used.
+      setSelectedTab(sourceToUse);
+    }
+
+    try {
+      const selected = sourceToUse
+        ? `${isDisplay(sourceToUse) ? 'display' : 'tab'}:${sourceToUse.id}`
+        : 'none';
+      await invoke('frontend_log', { message: `solveWithAI start mode=${mode} selected=${selected}` });
+    } catch {}
+
+    if (!sourceToUse) {
+      setMessage('❌ No input source available');
+      try { await invoke('frontend_log', { message: 'solveWithAI abort: no selectedTab' }); } catch {}
       return;
     }
 
     if (!aiConfig.gemini_api_key && !aiConfig.claude_api_key && !googleTokenExists) {
       setMessage('❌ Configure API keys in Settings');
       setShowSettings(true);
+      try { await invoke('frontend_log', { message: 'solveWithAI abort: no API keys and no OAuth' }); } catch {}
       return;
     }
 
@@ -366,11 +523,11 @@ function App() {
     try {
       let response: string;
       
-      if (isDisplay(selectedTab)) {
+      if (isDisplay(sourceToUse)) {
         // Display/Screen capture - always uses screenshot
         setMessage('📸 Capturing display...');
         const screenshotPath = await invoke<string>('capture_display_screenshot', { 
-          displayId: selectedTab.id 
+          displayId: sourceToUse.id 
         });
         
         setMessage('🤖 Analyzing screenshot with AI...');
@@ -381,14 +538,14 @@ function App() {
           imagePath: screenshotPath,
           config: aiConfig,
         });
-      } else if (useScreenshot) {
+      } else if (mode === 'screenshot' || (mode === 'auto' && useScreenshot)) {
         // Chrome tab - screenshot mode
         setMessage('📸 Taking screenshot...');
-        await invoke('activate_tab', { tabId: selectedTab.id });
+        await invoke('activate_tab', { tabId: sourceToUse.id });
         await new Promise(resolve => setTimeout(resolve, 500));
         
         const screenshotPath = await invoke<string>('capture_tab_screenshot', { 
-          tabId: selectedTab.id 
+          tabId: sourceToUse.id 
         });
         
         setMessage('🤖 Analyzing screenshot with AI...');
@@ -402,10 +559,10 @@ function App() {
       } else {
         // Chrome tab - text mode
         setMessage('📝 Extracting text...');
-        await invoke('activate_tab', { tabId: selectedTab.id });
+        await invoke('activate_tab', { tabId: sourceToUse.id });
         await new Promise(resolve => setTimeout(resolve, 300));
         
-        const text = await invoke<string>('extract_tab_text', { tabId: selectedTab.id });
+        const text = await invoke<string>('extract_tab_text', { tabId: sourceToUse.id });
         
         setMessage('🤖 Asking AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage, text);
@@ -474,7 +631,7 @@ function App() {
         </div>
 
         <button 
-          onClick={solveWithAI}
+          onClick={() => solveWithAI('auto')}
           disabled={isLoading || !selectedTab}
           className="solve-button"
         >
@@ -482,7 +639,7 @@ function App() {
         </button>
       </div>
 
-      <div className="content">
+      <div className="content" ref={contentScrollRef}>
         <div className="main-section">
           
           {!cdpReady && (
@@ -544,6 +701,12 @@ function App() {
                 }}
               >
                 📝 Prompts
+              </button>
+              <button 
+                className={`tab-btn ${settingsTab === 'hotkeys' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('hotkeys')}
+              >
+                ⌨️ HotKeys
               </button>
             </div>
             
@@ -685,6 +848,118 @@ function App() {
                       />
                     </>
                   )}
+                </>
+              )}
+
+              {settingsTab === 'hotkeys' && (
+                <>
+                  <div className="form-group">
+                    <label>Global Hotkeys:</label>
+
+                    {hotkeysConfig && (
+                      <div style={{marginTop: '8px', fontSize: '12px', color: '#666'}}>
+                        Current: <strong>{hotkeysConfig.text}</strong> (Extract) • <strong>{hotkeysConfig.screenshot}</strong> (Screenshot) • <strong>{hotkeysConfig.scroll_up}</strong> (Scroll Up) • <strong>{hotkeysConfig.scroll_down}</strong> (Scroll Down) • <strong>{hotkeysConfig.move_up}</strong> (Move Up) • <strong>{hotkeysConfig.move_down}</strong> (Move Down) • <strong>{hotkeysConfig.move_left}</strong> (Move Left) • <strong>{hotkeysConfig.move_right}</strong> (Move Right)
+                      </div>
+                    )}
+
+                    <div className="hotkeys-grid">
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">1) Extract text → Solve</div>
+                        <input
+                          className="input-field"
+                          value={hotkeysDraft.text}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, text: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + E' : runtimePlatform === 'windows' ? 'Alt + E' : 'Ctrl + E'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">2) Screenshot → Solve</div>
+                        <input
+                          className="input-field"
+                          value={hotkeysDraft.screenshot}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, screenshot: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + S' : runtimePlatform === 'windows' ? 'Alt + S' : 'Ctrl + S'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">3) Scroll up (Explanation/Solution)</div>
+                        <input
+                          className="input-field"
+                          value={hotkeysDraft.scroll_up}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_up: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Up' : 'Ctrl + Up'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">4) Scroll down (Explanation/Solution)</div>
+                        <input
+                          className="input-field"
+                          value={hotkeysDraft.scroll_down}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_down: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Down' : 'Ctrl + Down'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">5) Move window up</div>
+                        <input
+                          className="input-field"
+                          value={hotkeysDraft.move_up}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_up: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Up' : runtimePlatform === 'windows' ? 'Alt + Shift + Up' : 'Ctrl + Shift + Up'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">6) Move window down</div>
+                        <input
+                          className="input-field"
+                          value={hotkeysDraft.move_down}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_down: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Down' : runtimePlatform === 'windows' ? 'Alt + Shift + Down' : 'Ctrl + Shift + Down'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">7) Move window left</div>
+                        <input
+                          className="input-field"
+                          value={hotkeysDraft.move_left}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_left: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Left' : runtimePlatform === 'windows' ? 'Alt + Shift + Left' : 'Ctrl + Shift + Left'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">8) Move window right</div>
+                        <input
+                          className="input-field"
+                          value={hotkeysDraft.move_right}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_right: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Right' : runtimePlatform === 'windows' ? 'Alt + Shift + Right' : 'Ctrl + Shift + Right'}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{display: 'flex', gap: '8px', marginTop: '12px'}}>
+                      <button className="action-btn primary" style={{flex: 1}} onClick={saveHotkeys}>
+                        Save
+                      </button>
+                      <button className="action-btn secondary" style={{flex: 1}} onClick={resetHotkeys}>
+                        Reset to defaults
+                      </button>
+                    </div>
+
+                    {hotkeysStatus && (
+                      <div style={{marginTop: '10px', fontSize: '12px', color: hotkeysStatus.startsWith('❌') ? '#c62828' : '#666'}}>
+                        {hotkeysStatus}
+                      </div>
+                    )}
+
+                    <p style={{fontSize: '12px', color: '#666', marginTop: '10px'}}>
+                      If your selected Input Source is a Display, the app will automatically use the Screenshot approach even when you press the Extract hotkey.
+                    </p>
+
+                    <p style={{fontSize: '12px', color: '#666', marginTop: '12px'}}>
+                      Tip: avoid Shift-only shortcuts (e.g. Shift+L). Use Cmd/Ctrl/Alt (and optionally Shift).
+                    </p>
+                  </div>
                 </>
               )}
             </div>
