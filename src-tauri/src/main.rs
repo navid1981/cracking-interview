@@ -4,6 +4,7 @@
 mod chrome;
 mod ai;
 mod screenshot;
+mod audio;
 mod oauth_server;
 mod google_oauth;
 
@@ -42,10 +43,19 @@ const DEFAULT_SOLVE_TEXT_HOTKEY: &str = "Ctrl+E";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const DEFAULT_SOLVE_SCREENSHOT_HOTKEY: &str = "Ctrl+S";
 
+// Audio (system) hotkey default (configurable).
+#[cfg(target_os = "macos")]
+const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Cmd+A";
+#[cfg(target_os = "windows")]
+const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Alt+A";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Ctrl+A";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct HotkeysConfig {
     text: String,
     screenshot: String,
+    audio_toggle: String,
     scroll_up: String,
     scroll_down: String,
     move_up: String,
@@ -62,6 +72,7 @@ fn default_hotkeys() -> HotkeysConfig {
     HotkeysConfig {
         text: DEFAULT_SOLVE_TEXT_HOTKEY.to_string(),
         screenshot: DEFAULT_SOLVE_SCREENSHOT_HOTKEY.to_string(),
+        audio_toggle: DEFAULT_AUDIO_TOGGLE_HOTKEY.to_string(),
         scroll_up: DEFAULT_SCROLL_UP_HOTKEY.to_string(),
         scroll_down: DEFAULT_SCROLL_DOWN_HOTKEY.to_string(),
         move_up: DEFAULT_MOVE_UP_HOTKEY.to_string(),
@@ -141,6 +152,7 @@ fn hotkeys_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 struct HotkeysConfigFile {
     text: Option<String>,
     screenshot: Option<String>,
+    audio_toggle: Option<String>,
     scroll_up: Option<String>,
     scroll_down: Option<String>,
     move_up: Option<String>,
@@ -170,6 +182,7 @@ fn load_hotkeys_from_disk(app: &tauri::AppHandle) -> HotkeysConfig {
                 let mut cfg = default_hotkeys();
                 if let Some(v) = cfg_file.text { if !v.trim().is_empty() { cfg.text = v; } }
                 if let Some(v) = cfg_file.screenshot { if !v.trim().is_empty() { cfg.screenshot = v; } }
+                if let Some(v) = cfg_file.audio_toggle { if !v.trim().is_empty() { cfg.audio_toggle = v; } }
                 if let Some(v) = cfg_file.scroll_up { if !v.trim().is_empty() { cfg.scroll_up = v; } }
                 if let Some(v) = cfg_file.scroll_down { if !v.trim().is_empty() { cfg.scroll_down = v; } }
                 if let Some(v) = cfg_file.move_up { if !v.trim().is_empty() { cfg.move_up = v; } }
@@ -178,6 +191,19 @@ fn load_hotkeys_from_disk(app: &tauri::AppHandle) -> HotkeysConfig {
                 if let Some(v) = cfg_file.move_right { if !v.trim().is_empty() { cfg.move_right = v; } }
                 if let Some(v) = cfg_file.toggle_visibility { if !v.trim().is_empty() { cfg.toggle_visibility = v; } }
                 if let Some(v) = cfg_file.quit_app { if !v.trim().is_empty() { cfg.quit_app = v; } }
+
+                // Migrate legacy default audio hotkey to new default (Cmd+A / Alt+A) so existing users
+                // pick up the change automatically unless they had customized it.
+                let legacy_audio = [
+                    "Cmd+Shift+A",
+                    "Alt+Shift+A",
+                    "Ctrl+Shift+A",
+                ];
+                if legacy_audio.contains(&cfg.audio_toggle.as_str()) {
+                    cfg.audio_toggle = DEFAULT_AUDIO_TOGGLE_HOTKEY.to_string();
+                    // Best-effort persist so it sticks across restarts.
+                    save_hotkeys_to_disk(app, &cfg).ok();
+                }
                 cfg
             }
             Err(e) => {
@@ -300,6 +326,7 @@ fn register_hotkey(
 fn register_hotkeys(app: &tauri::AppHandle, cfg: &HotkeysConfig) -> Result<(), String> {
     register_hotkey(app, &cfg.text, "hotkey-solve-text", "text")?;
     register_hotkey(app, &cfg.screenshot, "hotkey-solve-screenshot", "screenshot")?;
+    register_hotkey(app, &cfg.audio_toggle, "hotkey-audio-toggle", "audio-toggle")?;
     register_hotkey(app, &cfg.scroll_up, "hotkey-scroll-up", "scroll-up")?;
     register_hotkey(app, &cfg.scroll_down, "hotkey-scroll-down", "scroll-down")?;
     register_hotkey(app, &cfg.move_up, "hotkey-move-up", "move-up")?;
@@ -484,6 +511,27 @@ async fn capture_display_screenshot(display_id: String) -> Result<String, String
     Ok(screenshot_path.to_str().ok_or("Invalid path")?.to_string())
 }
 
+// ============================================================================
+// AUDIO RECORDING (SYSTEM AUDIO / LOOPBACK)
+// ============================================================================
+
+#[tauri::command]
+async fn start_audio_recording() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| audio::start_system_audio_recording())
+        .await
+        .map_err(|e| format!("Failed to start audio recording task: {e}"))?
+}
+
+#[tauri::command]
+fn stop_audio_recording() -> Result<String, String> {
+    audio::stop_system_audio_recording()
+}
+
+#[tauri::command]
+fn is_audio_recording() -> Result<bool, String> {
+    Ok(audio::is_recording())
+}
+
 #[tauri::command]
 async fn get_display_thumbnail(display_id: String) -> Result<String, String> {
     let thumbnail_bytes = screenshot::capture_display_thumbnail(&display_id)?;
@@ -513,6 +561,62 @@ async fn query_ai_with_image(
     ai::query_with_image(&prompt, &image_data, &config).await
 }
 
+#[tauri::command]
+async fn query_ai_with_audio(
+    prompt: String,
+    audio_path: String,
+    config: ai::AIConfig,
+) -> Result<String, String> {
+    let audio_bytes = std::fs::read(&audio_path)
+        .map_err(|e| format!("Failed to read audio at {}: {}", audio_path, e))?;
+
+    // Validate that we captured actual WAV audio samples.
+    // A header-only file (often ~4KB due to filesystem block size) means we received no audio buffers.
+    let meta_len = std::fs::metadata(&audio_path)
+        .map(|m| m.len() as usize)
+        .unwrap_or(audio_bytes.len());
+    if meta_len < 128 {
+        return Err(format!(
+            "Recorded audio file is too small ({} bytes) at {}. This feature records **system output audio** (sound coming from your speakers/headphones), not your microphone. Play something (e.g., YouTube) or make sure Zoom meeting audio is audible, then record for a few seconds.",
+            meta_len,
+            audio_path
+        ));
+    }
+    match hound::WavReader::open(&audio_path) {
+        Ok(reader) => {
+            let spec = reader.spec();
+            let samples = reader.duration() as u64;
+            if samples == 0 {
+                return Err(format!(
+                    "No audio samples were captured (file is header-only, {} bytes) at {}. This records **system output audio** (other people speaking / app audio), not your microphone. Ensure system audio is playing and record for a few seconds.",
+                    meta_len,
+                    audio_path
+                ));
+            }
+            // If it's extremely short, still allow sending to Gemini, but warn in logs.
+            let channels = spec.channels.max(1) as u64;
+            let frames = samples / channels;
+            if frames < (spec.sample_rate as u64 / 5) {
+                println!(
+                    "🎙️ audio: very short recording: frames={} (~{}ms) spec={{rate={}, ch={}}} path={}",
+                    frames,
+                    (frames * 1000) / (spec.sample_rate as u64).max(1),
+                    spec.sample_rate,
+                    spec.channels,
+                    audio_path
+                );
+            }
+        }
+        Err(e) => {
+            return Err(format!(
+                "Recorded audio is not a valid WAV file at {} ({} bytes). Error: {}",
+                audio_path, meta_len, e
+            ));
+        }
+    }
+    ai::query_with_audio(&prompt, &audio_bytes, &config).await
+}
+
 
 // ============================================================================
 // GOOGLE OAUTH COMMANDS
@@ -520,8 +624,9 @@ async fn query_ai_with_image(
 
 #[tauri::command]
 fn start_google_oauth() -> Result<String, String> {
-    let (_, code_receiver) = oauth_server::start_oauth_server()?;
-    let auth_url = OAUTH_SERVICE.get_auth_url();
+    let (redirect_uri, code_receiver) = oauth_server::start_oauth_server()?;
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let auth_url = rt.block_on(OAUTH_SERVICE.get_auth_url(&redirect_uri));
     
     println!("🔐 Auth URL: {}", auth_url);
     
@@ -532,14 +637,25 @@ fn start_google_oauth() -> Result<String, String> {
     std::process::Command::new("cmd").args(["/C", "start", &auth_url]).spawn().ok();
     
     // Wait for code (blocks this thread for up to 120 seconds)
-    let code = code_receiver.recv_timeout(std::time::Duration::from_secs(120))
+    let (code, state) = code_receiver.recv_timeout(std::time::Duration::from_secs(120))
         .map_err(|_| "Authentication timeout - please try again".to_string())?;
     
     println!("✅ Got authorization code");
     
-    // Exchange code for tokens (need async runtime)
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _tokens = rt.block_on(OAUTH_SERVICE.exchange_code(&code))?;
+    // Exchange code for tokens (PKCE desktop flow; no client_secret needed)
+    match rt.block_on(OAUTH_SERVICE.exchange_code(&code, &state, &redirect_uri)) {
+        Ok(tokens) => {
+            println!(
+                "✅ OAuth token exchange success. refresh_token_present={} user_email={}",
+                tokens.refresh_token.is_some(),
+                tokens.user_email.clone().unwrap_or_else(|| "<unknown>".to_string())
+            );
+        }
+        Err(e) => {
+            println!("❌ OAuth token exchange failed: {}", e);
+            return Err(e);
+        }
+    }
     
     // Save tokens
     let token_path = std::env::temp_dir().join("cracking_interview_google_tokens.json");
@@ -564,7 +680,7 @@ fn main() {
     // Load environment variables from .env file (must be in project root)
     if let Err(e) = dotenv::from_filename("../.env") {
         println!("⚠️  Warning: Could not load .env file: {}", e);
-        println!("💡 Google OAuth will not work without GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET");
+        println!("💡 Google OAuth will not work without GOOGLE_CLIENT_ID");
     } else {
         println!("✅ Loaded environment variables from .env");
     }
@@ -582,8 +698,12 @@ fn main() {
             get_displays,
             capture_display_screenshot,
             get_display_thumbnail,
+            start_audio_recording,
+            stop_audio_recording,
+            is_audio_recording,
             query_ai,
             query_ai_with_image,
+            query_ai_with_audio,
             start_google_oauth,
             get_google_token_status,
             clear_google_tokens,
@@ -757,6 +877,7 @@ fn reset_hotkeys_to_default(
     let current = get_hotkeys(state.clone())?;
     unregister_hotkey_best_effort(&app, &current.text);
     unregister_hotkey_best_effort(&app, &current.screenshot);
+    unregister_hotkey_best_effort(&app, &current.audio_toggle);
     unregister_hotkey_best_effort(&app, &current.scroll_up);
     unregister_hotkey_best_effort(&app, &current.scroll_down);
     unregister_hotkey_best_effort(&app, &current.move_up);
@@ -785,6 +906,7 @@ fn set_hotkeys(
     state: tauri::State<'_, HotkeysState>,
     text_hotkey: String,
     screenshot_hotkey: String,
+    audio_toggle_hotkey: String,
     scroll_up_hotkey: String,
     scroll_down_hotkey: String,
     move_up_hotkey: String,
@@ -796,6 +918,7 @@ fn set_hotkeys(
 ) -> Result<HotkeysConfig, String> {
     let text = normalize_hotkey(&text_hotkey);
     let screenshot = normalize_hotkey(&screenshot_hotkey);
+    let audio_toggle = normalize_hotkey(&audio_toggle_hotkey);
     let scroll_up = normalize_hotkey(&scroll_up_hotkey);
     let scroll_down = normalize_hotkey(&scroll_down_hotkey);
     let move_up = normalize_hotkey(&move_up_hotkey);
@@ -807,6 +930,7 @@ fn set_hotkeys(
 
     if text.is_empty()
         || screenshot.is_empty()
+        || audio_toggle.is_empty()
         || scroll_up.is_empty()
         || scroll_down.is_empty()
         || move_up.is_empty()
@@ -821,6 +945,9 @@ fn set_hotkeys(
     if text == screenshot {
         return Err("Text and Screenshot hotkeys must be different".to_string());
     }
+    if audio_toggle == text || audio_toggle == screenshot {
+        return Err("Audio hotkey must be different from Text/Screenshot hotkeys".to_string());
+    }
     if scroll_up == scroll_down {
         return Err("Scroll Up and Scroll Down hotkeys must be different".to_string());
     }
@@ -831,6 +958,7 @@ fn set_hotkeys(
     let all = [
         text.as_str(),
         screenshot.as_str(),
+        audio_toggle.as_str(),
         scroll_up.as_str(),
         scroll_down.as_str(),
         move_up.as_str(),
@@ -851,6 +979,7 @@ fn set_hotkeys(
     // Validate before touching current registrations, so we never leave the app without working hotkeys.
     validate_hotkey_for_global_use(&text)?;
     validate_hotkey_for_global_use(&screenshot)?;
+    validate_hotkey_for_global_use(&audio_toggle)?;
     validate_hotkey_for_global_use(&scroll_up)?;
     validate_hotkey_for_global_use(&scroll_down)?;
     validate_hotkey_for_global_use(&move_up)?;
@@ -871,6 +1000,7 @@ fn set_hotkeys(
     // Remove previous registrations, then attempt to register the new ones.
     unregister_hotkey_best_effort(&app, &previous.text);
     unregister_hotkey_best_effort(&app, &previous.screenshot);
+    unregister_hotkey_best_effort(&app, &previous.audio_toggle);
     unregister_hotkey_best_effort(&app, &previous.scroll_up);
     unregister_hotkey_best_effort(&app, &previous.scroll_down);
     unregister_hotkey_best_effort(&app, &previous.move_up);
@@ -883,6 +1013,7 @@ fn set_hotkeys(
     let next = HotkeysConfig {
         text,
         screenshot,
+        audio_toggle,
         scroll_up,
         scroll_down,
         move_up,
@@ -907,9 +1038,17 @@ fn set_hotkeys(
         return Err(format!("Failed to register screenshot hotkey: {}", e));
     }
 
+    if let Err(e) = register_hotkey(&app, &next.audio_toggle, "hotkey-audio-toggle", "audio-toggle") {
+        unregister_hotkey_best_effort(&app, &next.text);
+        unregister_hotkey_best_effort(&app, &next.screenshot);
+        register_hotkeys(&app, &previous).ok();
+        return Err(format!("Failed to register audio hotkey: {}", e));
+    }
+
     if let Err(e) = register_hotkey(&app, &next.scroll_up, "hotkey-scroll-up", "scroll-up") {
         unregister_hotkey_best_effort(&app, &next.text);
         unregister_hotkey_best_effort(&app, &next.screenshot);
+        unregister_hotkey_best_effort(&app, &next.audio_toggle);
         register_hotkeys(&app, &previous).ok();
         return Err(format!("Failed to register scroll up hotkey: {}", e));
     }
@@ -917,6 +1056,7 @@ fn set_hotkeys(
     if let Err(e) = register_hotkey(&app, &next.scroll_down, "hotkey-scroll-down", "scroll-down") {
         unregister_hotkey_best_effort(&app, &next.text);
         unregister_hotkey_best_effort(&app, &next.screenshot);
+        unregister_hotkey_best_effort(&app, &next.audio_toggle);
         unregister_hotkey_best_effort(&app, &next.scroll_up);
         register_hotkeys(&app, &previous).ok();
         return Err(format!("Failed to register scroll down hotkey: {}", e));
@@ -925,6 +1065,7 @@ fn set_hotkeys(
     if let Err(e) = register_hotkey(&app, &next.move_up, "hotkey-move-up", "move-up") {
         unregister_hotkey_best_effort(&app, &next.text);
         unregister_hotkey_best_effort(&app, &next.screenshot);
+        unregister_hotkey_best_effort(&app, &next.audio_toggle);
         unregister_hotkey_best_effort(&app, &next.scroll_up);
         unregister_hotkey_best_effort(&app, &next.scroll_down);
         register_hotkeys(&app, &previous).ok();
@@ -934,6 +1075,7 @@ fn set_hotkeys(
     if let Err(e) = register_hotkey(&app, &next.move_down, "hotkey-move-down", "move-down") {
         unregister_hotkey_best_effort(&app, &next.text);
         unregister_hotkey_best_effort(&app, &next.screenshot);
+        unregister_hotkey_best_effort(&app, &next.audio_toggle);
         unregister_hotkey_best_effort(&app, &next.scroll_up);
         unregister_hotkey_best_effort(&app, &next.scroll_down);
         unregister_hotkey_best_effort(&app, &next.move_up);
@@ -944,6 +1086,7 @@ fn set_hotkeys(
     if let Err(e) = register_hotkey(&app, &next.move_left, "hotkey-move-left", "move-left") {
         unregister_hotkey_best_effort(&app, &next.text);
         unregister_hotkey_best_effort(&app, &next.screenshot);
+        unregister_hotkey_best_effort(&app, &next.audio_toggle);
         unregister_hotkey_best_effort(&app, &next.scroll_up);
         unregister_hotkey_best_effort(&app, &next.scroll_down);
         unregister_hotkey_best_effort(&app, &next.move_up);
@@ -955,6 +1098,7 @@ fn set_hotkeys(
     if let Err(e) = register_hotkey(&app, &next.move_right, "hotkey-move-right", "move-right") {
         unregister_hotkey_best_effort(&app, &next.text);
         unregister_hotkey_best_effort(&app, &next.screenshot);
+        unregister_hotkey_best_effort(&app, &next.audio_toggle);
         unregister_hotkey_best_effort(&app, &next.scroll_up);
         unregister_hotkey_best_effort(&app, &next.scroll_down);
         unregister_hotkey_best_effort(&app, &next.move_up);
@@ -967,6 +1111,7 @@ fn set_hotkeys(
     if let Err(e) = register_toggle_visibility_hotkey(&app, &next.toggle_visibility) {
         unregister_hotkey_best_effort(&app, &next.text);
         unregister_hotkey_best_effort(&app, &next.screenshot);
+        unregister_hotkey_best_effort(&app, &next.audio_toggle);
         unregister_hotkey_best_effort(&app, &next.scroll_up);
         unregister_hotkey_best_effort(&app, &next.scroll_down);
         unregister_hotkey_best_effort(&app, &next.move_up);
@@ -980,6 +1125,7 @@ fn set_hotkeys(
     if let Err(e) = register_quit_app_hotkey(&app, &next.quit_app) {
         unregister_hotkey_best_effort(&app, &next.text);
         unregister_hotkey_best_effort(&app, &next.screenshot);
+        unregister_hotkey_best_effort(&app, &next.audio_toggle);
         unregister_hotkey_best_effort(&app, &next.scroll_up);
         unregister_hotkey_best_effort(&app, &next.scroll_down);
         unregister_hotkey_best_effort(&app, &next.move_up);

@@ -28,6 +28,7 @@ chrono = "0.4"
 rand = "0.8"
 tiny_http = "0.12"
 dotenv = "0.15"
+sha2 = "0.10"
 
 # WebSocket for CDP
 tokio-tungstenite = "0.21"
@@ -38,12 +39,15 @@ lazy_static = "1.5"
 
 # Image processing
 image = "0.25"
+hound = "3.5"
 
 # Windows-specific dependencies
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
     "Win32_UI_WindowsAndMessaging",
 ] }
 screenshots = "0.7"

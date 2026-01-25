@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getAllTemplates, CustomPromptsManager, PromptTemplate, ProgrammingLanguage, supportsLanguageSelection, getDefaultSystemPrompt, getDefaultUserTemplate } from '../services/prompts';
+import { getAllTemplates, CustomPromptsManager, PromptTemplate, ProgrammingLanguage, supportsLanguageSelection, getDefaultSystemPromptForTemplate, getDefaultUserTemplate } from '../services/prompts';
 import './PromptListView.css';
 
 interface PromptListViewProps {
@@ -116,7 +116,7 @@ export default function PromptListView({
       }
     } else {
       // Copying a built-in template - get its default content
-      systemPrompt = getDefaultSystemPrompt();
+      systemPrompt = getDefaultSystemPromptForTemplate(targetTemplateId as PromptTemplate);
       userPrompt = getDefaultUserTemplate(targetTemplateId as PromptTemplate);
       supportsLang = supportsLanguageSelection(targetTemplateId);
     }

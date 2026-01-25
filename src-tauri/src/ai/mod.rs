@@ -116,6 +116,35 @@ pub async fn query_with_image(
     }
 }
 
+/// Query AI with audio bytes.
+///
+/// Policy decision (per product): Audio input requires Gemini.
+pub async fn query_with_audio(
+    prompt: &str,
+    audio_data: &[u8],
+    config: &AIConfig,
+) -> Result<String, String> {
+    let model = AIModel::from_string(&config.selected_model)
+        .ok_or("Invalid AI model selected")?;
+
+    if !model.is_gemini() {
+        return Err("⚠️ Audio input requires Gemini. Please select Gemini in Settings → AI Models.".to_string());
+    }
+
+    let api_key = if !config.gemini_api_key.is_empty() {
+        config.gemini_api_key.clone()
+    } else {
+        match get_google_oauth_token().await {
+            Ok(token) => token,
+            Err(e) => {
+                return Err(format!("⚠️ Gemini API key not configured and OAuth not available: {}", e));
+            }
+        }
+    };
+
+    gemini::query_with_audio(prompt, audio_data, &api_key, model.model_string()).await
+}
+
 // Helper to get OAuth token
 async fn get_google_oauth_token() -> Result<String, String> {
     // Load tokens from file
@@ -140,13 +169,10 @@ async fn get_google_oauth_token() -> Result<String, String> {
 
             let client_id = std::env::var("GOOGLE_CLIENT_ID")
                 .map_err(|_| "OAuth token expired - missing GOOGLE_CLIENT_ID; please set Gemini API key or configure Google OAuth".to_string())?;
-            let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")
-                .map_err(|_| "OAuth token expired - missing GOOGLE_CLIENT_SECRET; please set Gemini API key or configure Google OAuth".to_string())?;
 
             let client = reqwest::Client::new();
             let params = [
                 ("client_id", client_id.as_str()),
-                ("client_secret", client_secret.as_str()),
                 ("refresh_token", refresh_token.as_str()),
                 ("grant_type", "refresh_token"),
             ];
@@ -176,6 +202,8 @@ async fn get_google_oauth_token() -> Result<String, String> {
                 access_token: access_token.clone(),
                 refresh_token: Some(refresh_token),
                 expires_at: chrono::Utc::now().timestamp() + expires_in,
+                id_token: None,
+                user_email: None,
             };
 
             // Persist refreshed token back to file so future calls succeed.

@@ -6,6 +6,7 @@ export enum PromptTemplate {
   SystemDesign = 'system_design',
   CodeReview = 'code_review',
   ExplainConcept = 'explain_concept',
+  VerbalInterviewAudio = 'verbal_interview_audio',
 }
 
 export enum ProgrammingLanguage {
@@ -42,6 +43,12 @@ RULES:
 - Focus on understanding, not just answers
 - Provide optimal solutions when asked
 - Explain complexity (time/space)`;
+
+const DEFAULT_SYSTEM_PROMPTS: Partial<Record<PromptTemplate, string>> = {
+  // Revert Audio template to the original "coding interview" system prompt format
+  // (includes SOLUTION_START / SOLUTION_END markers).
+  [PromptTemplate.VerbalInterviewAudio]: GENERAL_SYSTEM_PROMPT,
+};
 
 // Default templates with placeholders for customization
 const DEFAULT_USER_TEMPLATES: Record<PromptTemplate, string> = {
@@ -94,6 +101,20 @@ Requirements:
 - Mention related concepts
 
 {CONTENT}`,
+
+  [PromptTemplate.VerbalInterviewAudio]: `You will receive an AUDIO recording containing a verbal interview question.
+
+Your tasks:
+1) Transcribe the question clearly (include any important details, constraints, numbers, names, or terminology).
+2) Answer the question with a strong, structured response appropriate for the role/context.
+3) If the question is ambiguous, list the key clarifying questions you would ask, then provide a best-effort answer based on reasonable assumptions.
+
+Guidelines:
+- Keep the answer professional, confident, and concise.
+- Use bullet points where helpful.
+- If the question involves a scenario, propose a clear plan and tradeoffs.
+
+Note: The audio is attached; you must use it. Do not ask the user to paste the audio.`,
 };
 
 // Custom Prompts Manager
@@ -149,7 +170,7 @@ export function buildPrompt(
     // Allow per-template overrides stored in localStorage
     const overriddenSystem = localStorage.getItem(`custom_${builtInId}_system`);
     const overriddenUser = localStorage.getItem(`custom_${builtInId}_user`);
-    if (overriddenSystem) systemPrompt = overriddenSystem;
+    systemPrompt = overriddenSystem || DEFAULT_SYSTEM_PROMPTS[builtInId] || GENERAL_SYSTEM_PROMPT;
     userTemplate = overriddenUser || DEFAULT_USER_TEMPLATES[builtInId];
   }
 
@@ -184,6 +205,8 @@ export function getTemplateLabel(template: PromptTemplate | string): string {
       return 'Code Review';
     case PromptTemplate.ExplainConcept:
       return 'Explain Concept';
+    case PromptTemplate.VerbalInterviewAudio:
+      return 'Verbal Interview (Audio)';
   }
 }
 
@@ -219,6 +242,10 @@ export function getAllTemplates(): Array<{ id: string; label: string; isCustom: 
 
 export function getDefaultSystemPrompt(): string {
   return GENERAL_SYSTEM_PROMPT;
+}
+
+export function getDefaultSystemPromptForTemplate(template: PromptTemplate): string {
+  return DEFAULT_SYSTEM_PROMPTS[template] || GENERAL_SYSTEM_PROMPT;
 }
 
 export function getDefaultUserTemplate(template: PromptTemplate): string {

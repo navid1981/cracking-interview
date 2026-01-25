@@ -6,14 +6,15 @@ use std::sync::mpsc;
 // Embed icon at compile time (avoid absolute paths that break on other machines).
 static ICON_PNG: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../public/icon.png"));
 
-pub fn start_oauth_server() -> Result<(String, mpsc::Receiver<String>), String> {
+pub fn start_oauth_server() -> Result<(String, mpsc::Receiver<(String, String)>), String> {
     let (tx, rx) = mpsc::channel();
     
     let port = 8080;
     let server = Server::http(format!("127.0.0.1:{}", port))
         .map_err(|e| format!("Failed to start server: {}", e))?;
     
-    let redirect_uri = format!("http://localhost:{}/oauth/callback", port);
+    // Use 127.0.0.1 consistently to avoid redirect URI mismatches.
+    let redirect_uri = format!("http://127.0.0.1:{}/oauth/callback", port);
     let redirect_uri_clone = redirect_uri.clone();
     
     // Spawn server thread
@@ -48,7 +49,7 @@ pub fn start_oauth_server() -> Result<(String, mpsc::Receiver<String>), String> 
             
             // Parse authorization code from URL
             if url.starts_with("/oauth/callback") {
-                if let Some(code) = extract_code_from_url(&url) {
+                if let (Some(code), Some(state)) = (extract_code_from_url(&url), extract_state_from_url(&url)) {
                     println!("✅ Got authorization code");
                     
                     // Send success HTML response with local icon
@@ -125,7 +126,7 @@ pub fn start_oauth_server() -> Result<(String, mpsc::Receiver<String>), String> 
                     request.respond(response).ok();
                     
                     // Send code to receiver
-                    tx.send(code).ok();
+                    tx.send((code, state)).ok();
                     code_sent = true;
                     
                     // Don't break yet - need to serve icon request
@@ -160,6 +161,16 @@ fn extract_code_from_url(url: &str) -> Option<String> {
         .split('&')
         .find(|param| param.starts_with("code="))?
         .strip_prefix("code=")?
+        .to_string()
+        .into()
+}
+
+fn extract_state_from_url(url: &str) -> Option<String> {
+    url.split('?')
+        .nth(1)?
+        .split('&')
+        .find(|param| param.starts_with("state="))?
+        .strip_prefix("state=")?
         .to_string()
         .into()
 }

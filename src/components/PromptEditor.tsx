@@ -4,7 +4,7 @@ import {
   PromptTemplate,
   isBuiltInTemplate,
   getTemplateLabel,
-  getDefaultSystemPrompt,
+  getDefaultSystemPromptForTemplate,
   getDefaultUserTemplate,
 } from '../services/prompts';
 import './PromptEditor.css';
@@ -29,7 +29,7 @@ export default function PromptEditor({ currentTemplateId, onCancel, onSaved }: P
     if (isBuiltInTemplate(templateId)) {
       const overriddenSystem = localStorage.getItem(`custom_${templateId}_system`);
       const overriddenUser = localStorage.getItem(`custom_${templateId}_user`);
-      setSystemPrompt(overriddenSystem || getDefaultSystemPrompt());
+      setSystemPrompt(overriddenSystem || getDefaultSystemPromptForTemplate(templateId as PromptTemplate));
       setUserPrompt(overriddenUser || getDefaultUserTemplate(templateId as PromptTemplate));
       setSupportsLanguage(false);
     } else {

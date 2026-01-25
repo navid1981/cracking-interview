@@ -51,6 +51,17 @@
   flex-shrink: 0;
 }
 
+.trigger-audio-icon {
+  width: 32px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
 .trigger-text {
   white-space: nowrap;
   overflow: hidden;

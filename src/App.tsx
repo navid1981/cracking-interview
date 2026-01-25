@@ -25,10 +25,21 @@ interface DisplayInfo {
   thumbnail?: string;
 }
 
-type InputSource = ChromeTab | DisplayInfo;
+interface AudioSource {
+  id: string;
+  name: string;
+  source_type: 'audio';
+  thumbnail?: string;
+}
+
+type InputSource = ChromeTab | DisplayInfo | AudioSource;
 
 function isDisplay(source: InputSource): source is DisplayInfo {
   return 'width' in source && 'height' in source;
+}
+
+function isAudio(source: InputSource): source is AudioSource {
+  return (source as any).source_type === 'audio';
 }
 
 interface AIConfig {
@@ -41,6 +52,7 @@ function App() {
   const [cdpStatus, setCdpStatus] = useState('🔴 Chrome Not Running');
   const [cdpReady, setCdpReady] = useState(false);
   const [allSources, setAllSources] = useState<InputSource[]>([]);
+  const allSourcesRef = useRef<InputSource[]>([]);
   const [selectedTab, setSelectedTab] = useState<InputSource | null>(null);
   const [aiResponse, setAiResponse] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -96,7 +108,13 @@ function App() {
   const [googleTokenExists, setGoogleTokenExists] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [previousWindowSize, setPreviousWindowSize] = useState<{width: number, height: number} | null>(null);
-  const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>({ text: '', screenshot: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [audioSeconds, setAudioSeconds] = useState(0);
+  const audioTimerRef = useRef<number | null>(null);
+  const isRecordingAudioRef = useRef(false);
+  const audioToggleInFlightRef = useRef(false);
+  const lastAudioToggleAtRef = useRef(0);
+  const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
   
   // Prompt editing state
@@ -118,6 +136,114 @@ function App() {
     // Check if Google tokens exist
     checkGoogleTokens();
   }, []);
+
+  useEffect(() => {
+    allSourcesRef.current = allSources;
+  }, [allSources]);
+
+  // Cleanup audio timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (audioTimerRef.current) {
+        window.clearInterval(audioTimerRef.current);
+        audioTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Keep a ref in sync so hotkey-driven toggles don't depend on render timing.
+  useEffect(() => {
+    isRecordingAudioRef.current = isRecordingAudio;
+  }, [isRecordingAudio]);
+
+  const toggleAudioRecording = async () => {
+    // Guard against duplicate hotkey events (React StrictMode/dev can double-register listeners)
+    // and against rapid double presses.
+    const now = Date.now();
+    if (audioToggleInFlightRef.current) return;
+    if (now - lastAudioToggleAtRef.current < 350) return;
+    lastAudioToggleAtRef.current = now;
+
+    if (!aiConfig.selected_model.startsWith('gemini')) {
+      setMessage('⚠️ Audio input requires Gemini. Please select Gemini in Settings → AI Models.');
+      return;
+    }
+
+    // Start recording
+    if (!isRecordingAudioRef.current) {
+      audioToggleInFlightRef.current = true;
+      try {
+        // Avoid duplicating the recording banner; the UI shows a dedicated timer banner while recording.
+        setMessage('');
+        try { await invoke('frontend_log', { message: 'audio: start recording' }); } catch {}
+        // Flip ref immediately to avoid races on repeated triggers.
+        isRecordingAudioRef.current = true;
+        setIsRecordingAudio(true);
+        setAudioSeconds(0);
+        if (audioTimerRef.current) window.clearInterval(audioTimerRef.current);
+        audioTimerRef.current = window.setInterval(() => setAudioSeconds((s) => s + 1), 1000);
+
+        await invoke('start_audio_recording');
+      } catch (e) {
+        // Roll back state on failure.
+        isRecordingAudioRef.current = false;
+        setIsRecordingAudio(false);
+        if (audioTimerRef.current) {
+          window.clearInterval(audioTimerRef.current);
+          audioTimerRef.current = null;
+        }
+        setMessage(`❌ Error: ${String(e)}`);
+      } finally {
+        audioToggleInFlightRef.current = false;
+      }
+      return;
+    }
+
+    // Stop recording and solve
+    audioToggleInFlightRef.current = true;
+    setIsLoading(true);
+    setAiResponse('');
+    setMessage('⏹️ Stopping recording...');
+    try { await invoke('frontend_log', { message: 'audio: stop recording' }); } catch {}
+    try {
+      const audioPath = await invoke<string>('stop_audio_recording');
+      try { await invoke('frontend_log', { message: `audio: saved to ${audioPath}` }); } catch {}
+
+      isRecordingAudioRef.current = false;
+      setIsRecordingAudio(false);
+      if (audioTimerRef.current) {
+        window.clearInterval(audioTimerRef.current);
+        audioTimerRef.current = null;
+      }
+
+      setMessage('📝 Transcribing + solving with Gemini...');
+      const audioInstructions =
+        'You will receive an AUDIO recording of an interview question. First transcribe the question clearly. Then solve it. Provide a clear Explanation and a final Solution.';
+      const prompt = buildPrompt(selectedTemplate, selectedLanguage, audioInstructions);
+      const response = await invoke<string>('query_ai_with_audio', {
+        prompt,
+        audioPath,
+        config: aiConfig,
+      });
+      setAiResponse(response);
+      setMessage('✅ Solution ready!');
+    } catch (e) {
+      try { await invoke('frontend_log', { message: `audio: stop failed: ${String(e)}` }); } catch {}
+      setMessage(`❌ Error: ${String(e)}`);
+    } finally {
+      setIsLoading(false);
+      audioToggleInFlightRef.current = false;
+
+      // Even if stopping failed, we likely already terminated the helper or cleared backend state.
+      // Ensure the UI doesn't remain stuck in "recording".
+      isRecordingAudioRef.current = false;
+      setIsRecordingAudio(false);
+      if (audioTimerRef.current) {
+        window.clearInterval(audioTimerRef.current);
+        audioTimerRef.current = null;
+      }
+    }
+  };
 
   useEffect(() => {
     // Determine OS so Settings can show platform-specific hotkeys.
@@ -142,68 +268,90 @@ function App() {
 
   // Global hotkey support (registered on Rust side). This lets user stay in Chrome and trigger Solve.
   useEffect(() => {
-    let unlistenText: (() => void) | null = null;
-    let unlistenScreenshot: (() => void) | null = null;
-    let unlistenScrollUp: (() => void) | null = null;
-    let unlistenScrollDown: (() => void) | null = null;
-    let unlistenMoveUp: (() => void) | null = null;
-    let unlistenMoveDown: (() => void) | null = null;
-    let unlistenMoveLeft: (() => void) | null = null;
-    let unlistenMoveRight: (() => void) | null = null;
+    // React StrictMode (dev) mounts/unmounts components to detect side effects.
+    // `listen()` is async; if we unmount before it resolves, we may leak a listener.
+    // Use a cancellation-safe pattern: store unsubs and if cancelled, immediately unlisten.
+    let cancelled = false;
+    const unsubs: Array<() => void> = [];
+
     (async () => {
       try {
-        unlistenText = await listen('hotkey-solve-text', async () => {
+        const uText = await listen('hotkey-solve-text', async () => {
           try { await invoke('frontend_log', { message: 'FE received hotkey-solve-text' }); } catch {}
           if (solveWithAIRef.current) await solveWithAIRef.current('text');
         });
-        unlistenScreenshot = await listen('hotkey-solve-screenshot', async () => {
+        if (cancelled) { uText(); return; }
+        unsubs.push(uText);
+
+        const uShot = await listen('hotkey-solve-screenshot', async () => {
           try { await invoke('frontend_log', { message: 'FE received hotkey-solve-screenshot' }); } catch {}
           if (solveWithAIRef.current) await solveWithAIRef.current('screenshot');
         });
-        unlistenScrollUp = await listen('hotkey-scroll-up', async () => {
+        if (cancelled) { uShot(); return; }
+        unsubs.push(uShot);
+
+        const uAudio = await listen('hotkey-audio-toggle', async () => {
+          try { await invoke('frontend_log', { message: 'FE received hotkey-audio-toggle' }); } catch {}
+          const audio = (allSourcesRef.current || []).find((s) => isAudio(s) && s.id === 'audio') as any;
+          setSelectedTab(audio || ({ id: 'audio', name: 'Audio (System)', source_type: 'audio' } as any));
+          await toggleAudioRecording();
+        });
+        if (cancelled) { uAudio(); return; }
+        unsubs.push(uAudio);
+
+        const uScrollUp = await listen('hotkey-scroll-up', async () => {
           try { await invoke('frontend_log', { message: 'FE received hotkey-scroll-up' }); } catch {}
           const el = contentScrollRef.current;
           if (el) el.scrollBy({ top: -260, behavior: 'smooth' });
         });
-        unlistenScrollDown = await listen('hotkey-scroll-down', async () => {
+        if (cancelled) { uScrollUp(); return; }
+        unsubs.push(uScrollUp);
+
+        const uScrollDown = await listen('hotkey-scroll-down', async () => {
           try { await invoke('frontend_log', { message: 'FE received hotkey-scroll-down' }); } catch {}
           const el = contentScrollRef.current;
           if (el) el.scrollBy({ top: 260, behavior: 'smooth' });
         });
+        if (cancelled) { uScrollDown(); return; }
+        unsubs.push(uScrollDown);
 
-        unlistenMoveUp = await listen('hotkey-move-up', async () => {
+        const uMoveUp = await listen('hotkey-move-up', async () => {
           try { await invoke('frontend_log', { message: 'FE received hotkey-move-up' }); } catch {}
           await invoke('move_window_by', { dx: 0, dy: -80 });
         });
-        unlistenMoveDown = await listen('hotkey-move-down', async () => {
+        if (cancelled) { uMoveUp(); return; }
+        unsubs.push(uMoveUp);
+
+        const uMoveDown = await listen('hotkey-move-down', async () => {
           try { await invoke('frontend_log', { message: 'FE received hotkey-move-down' }); } catch {}
           await invoke('move_window_by', { dx: 0, dy: 80 });
         });
-        unlistenMoveLeft = await listen('hotkey-move-left', async () => {
+        if (cancelled) { uMoveDown(); return; }
+        unsubs.push(uMoveDown);
+
+        const uMoveLeft = await listen('hotkey-move-left', async () => {
           try { await invoke('frontend_log', { message: 'FE received hotkey-move-left' }); } catch {}
           await invoke('move_window_by', { dx: -80, dy: 0 });
         });
-        unlistenMoveRight = await listen('hotkey-move-right', async () => {
+        if (cancelled) { uMoveLeft(); return; }
+        unsubs.push(uMoveLeft);
+
+        const uMoveRight = await listen('hotkey-move-right', async () => {
           try { await invoke('frontend_log', { message: 'FE received hotkey-move-right' }); } catch {}
           await invoke('move_window_by', { dx: 80, dy: 0 });
         });
+        if (cancelled) { uMoveRight(); return; }
+        unsubs.push(uMoveRight);
       } catch (e) {
         console.warn('Failed to listen for hotkey solve events:', e);
         try { await invoke('frontend_log', { message: `FE failed to listen hotkey events: ${String(e)}` }); } catch {}
       }
     })();
+
     return () => {
-      try {
-        unlistenText?.();
-        unlistenScreenshot?.();
-        unlistenScrollUp?.();
-        unlistenScrollDown?.();
-        unlistenMoveUp?.();
-        unlistenMoveDown?.();
-        unlistenMoveLeft?.();
-        unlistenMoveRight?.();
-      } catch {
-        // ignore
+      cancelled = true;
+      for (const u of unsubs) {
+        try { u(); } catch {}
       }
     };
   }, []);
@@ -231,7 +379,7 @@ function App() {
 
   const loadHotkeys = async () => {
     try {
-      const cfg = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('get_hotkeys');
+      const cfg = await invoke<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('get_hotkeys');
       setHotkeysDraft(cfg);
       setHotkeysStatus('');
     } catch (e) {
@@ -243,9 +391,10 @@ function App() {
   const saveHotkeys = async () => {
     try {
       setHotkeysStatus('Saving...');
-      const updated = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('set_hotkeys', {
+      const updated = await invoke<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('set_hotkeys', {
         textHotkey: hotkeysDraft.text,
         screenshotHotkey: hotkeysDraft.screenshot,
+        audioToggleHotkey: hotkeysDraft.audio_toggle,
         scrollUpHotkey: hotkeysDraft.scroll_up,
         scrollDownHotkey: hotkeysDraft.scroll_down,
         moveUpHotkey: hotkeysDraft.move_up,
@@ -265,7 +414,7 @@ function App() {
   const resetHotkeys = async () => {
     try {
       setHotkeysStatus('Resetting...');
-      const updated = await invoke<{ text: string; screenshot: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('reset_hotkeys_to_default');
+      const updated = await invoke<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('reset_hotkeys_to_default');
       setHotkeysDraft(updated);
       setHotkeysStatus('Reset to defaults.');
     } catch (e) {
@@ -464,8 +613,13 @@ function App() {
         );
       }
       
-      // Combine all sources (Chrome tabs first, then displays)
-      const combined: InputSource[] = [...chromeTabs, ...displaysWithThumbnails];
+      // Add Audio source (always available) + combine all sources (Chrome tabs, displays, then Audio)
+      const audioSource: AudioSource = {
+        id: 'audio',
+        name: 'Audio (System)',
+        source_type: 'audio',
+      };
+      const combined: InputSource[] = [...chromeTabs, ...displaysWithThumbnails, audioSource];
       setAllSources(combined);
       
       // If selected tab is no longer in the list, select first available source
@@ -497,7 +651,7 @@ function App() {
 
     try {
       const selected = sourceToUse
-        ? `${isDisplay(sourceToUse) ? 'display' : 'tab'}:${sourceToUse.id}`
+        ? `${isAudio(sourceToUse) ? 'audio' : isDisplay(sourceToUse) ? 'display' : 'tab'}:${sourceToUse.id}`
         : 'none';
       await invoke('frontend_log', { message: `solveWithAI start mode=${mode} selected=${selected}` });
     } catch {}
@@ -512,6 +666,12 @@ function App() {
       setMessage('❌ Configure API keys in Settings');
       setShowSettings(true);
       try { await invoke('frontend_log', { message: 'solveWithAI abort: no API keys and no OAuth' }); } catch {}
+      return;
+    }
+
+    // Audio source: toggle recording or stop+solve (Gemini-only).
+    if (isAudio(sourceToUse)) {
+      await toggleAudioRecording();
       return;
     }
 
@@ -613,7 +773,7 @@ function App() {
               selectedSource={selectedTab}
               onSelect={(source) => {
                 setSelectedTab(source);
-                const title = isDisplay(source) ? source.name : source.title;
+                const title = isAudio(source) ? source.name : isDisplay(source) ? source.name : source.title;
                 setMessage(`Selected: ${title}`);
               }}
               disabled={false}
@@ -633,9 +793,17 @@ function App() {
           disabled={isLoading || !selectedTab}
           className="solve-button"
         >
-          🚀 Solve
+          {selectedTab && isAudio(selectedTab)
+            ? (isRecordingAudio ? `⏹️ Stop (${audioSeconds}s)` : '🎙️ Record')
+            : '🚀 Solve'}
         </button>
       </div>
+
+      {isRecordingAudio && (
+        <div className="message-box" style={{ margin: '0 20px 12px 20px' }}>
+          🎙️ Recording system audio… <strong>{audioSeconds}s</strong> (press Stop / Audio hotkey to send)
+        </div>
+      )}
 
       <div className="content" ref={contentScrollRef}>
         <div className="main-section">
@@ -649,7 +817,7 @@ function App() {
             </div>
           )}
 
-          {message && (
+          {message && !isRecordingAudio && (
             <div className="message-box">
               {message}
             </div>
@@ -735,9 +903,9 @@ function App() {
                         type="password"
                         value={aiConfig.gemini_api_key}
                         onChange={(e) => setAiConfig({...aiConfig, gemini_api_key: e.target.value})}
-                        placeholder={googleTokenExists ? "Using OAuth token" : "Enter API key or sign in with Google"}
+                        placeholder={googleTokenExists ? "Optional: paste your own API key to use your own quota (otherwise OAuth will be used)" : "Enter API key or sign in with Google"}
                         className="input-field"
-                        disabled={googleTokenExists}
+                        disabled={false}
                       />
                       <button 
                         className="action-btn secondary" 
@@ -750,7 +918,7 @@ function App() {
                       
                       {googleTokenExists && (
                         <p style={{fontSize: '12px', color: '#4CAF50', marginTop: '8px', textAlign: 'center'}}>
-                          ✓ Using OAuth token - API key not needed
+                          ✓ OAuth token is active. If you hit quota limits, paste your own Gemini API key above to use your own project/quota.
                         </p>
                       )}
                     </div>
@@ -932,6 +1100,21 @@ function App() {
                           />
                         </div>
                       </div>
+                    </div>
+
+                    <div className="hotkeys-two-col hotkeys-two-col-single">
+                      <div className="hotkeys-col">
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Audio toggle (System)</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.audio_toggle}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, audio_toggle: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + A' : runtimePlatform === 'windows' ? 'Alt + A' : 'Ctrl + A'}
+                          />
+                        </div>
+                      </div>
+                      <div className="hotkeys-col hotkeys-col-spacer" />
                     </div>
 
                     <div className="hotkeys-two-col hotkeys-two-col-single">

@@ -19,15 +19,29 @@ interface DisplayInfo {
   thumbnail?: string;
 }
 
-type InputSource = ChromeTab | DisplayInfo;
+interface AudioSource {
+  id: string;
+  name: string;
+  source_type: 'audio';
+  thumbnail?: string;
+}
+
+type InputSource = ChromeTab | DisplayInfo | AudioSource;
 
 function isDisplay(source: InputSource): source is DisplayInfo {
   return 'width' in source && 'height' in source;
 }
 
+function isAudio(source: InputSource): source is AudioSource {
+  return (source as any).source_type === 'audio';
+}
+
 function getSourceTitle(source: InputSource): string {
   if (isDisplay(source)) {
     return `${source.name} (${source.width}x${source.height})${source.is_main ? ' - Main' : ''}`;
+  }
+  if (isAudio(source)) {
+    return source.name;
   }
   return source.title;
 }
@@ -35,6 +49,9 @@ function getSourceTitle(source: InputSource): string {
 function getSourceSubtitle(source: InputSource): string {
   if (isDisplay(source)) {
     return source.is_main ? 'Main Display' : 'External Display';
+  }
+  if (isAudio(source)) {
+    return 'Records system audio (loopback)';
   }
   return source.url;
 }
@@ -74,6 +91,9 @@ export default function TabDropdown({ sources, selectedSource, onSelect, disable
             <>
               {selectedSource.thumbnail && (
                 <img src={selectedSource.thumbnail} alt="" className="trigger-thumbnail" />
+              )}
+              {!selectedSource.thumbnail && isAudio(selectedSource) && (
+                <span className="trigger-audio-icon">🎙️</span>
               )}
               <span className="trigger-text">{getSourceTitle(selectedSource)}</span>
             </>
