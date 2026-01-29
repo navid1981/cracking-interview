@@ -142,7 +142,9 @@ Deno.serve(async (req) => {
         const customerId = subscription.customer;
 
         console.log(`[Webhook] Subscription ${event.type.split(".")[2]} - customer: ${customerId}`);
-        console.log(`[Webhook] Stripe status: ${subscription.status}, cancel_at_period_end: ${subscription.cancel_at_period_end}`);
+        console.log(`[Webhook] Stripe status: ${subscription.status}`);
+        console.log(`[Webhook] cancel_at_period_end: ${subscription.cancel_at_period_end}, cancel_at: ${subscription.cancel_at}`);
+        console.log(`[Webhook] cancellation_details: ${JSON.stringify(subscription.cancellation_details)}`);
 
         // Extract period dates (handle different Stripe response formats)
         let rawStart = subscription.current_period_start;
@@ -159,13 +161,22 @@ Deno.serve(async (req) => {
         const periodStart = Number(rawStart);
         const periodEnd = Number(rawEnd);
 
-        // Determine our subscription_status based on Stripe status + cancel_at_period_end
+        // Determine our subscription_status based on Stripe status + cancellation indicators
         // - "active" = subscription is healthy and will renew
         // - "cancelling" = user cancelled but still has access until period end
         // - "past_due" = payment failed, needs attention
         // - "cancelled" = fully cancelled (no access)
+        //
+        // Stripe indicates pending cancellation in TWO ways:
+        // 1. cancel_at_period_end = true (older method)
+        // 2. cancel_at = <timestamp> (newer method - explicit cancellation date)
         let ourStatus = subscription.status;
-        if (subscription.status === "active" && subscription.cancel_at_period_end === true) {
+        const hasPendingCancellation = 
+          subscription.cancel_at_period_end === true || 
+          subscription.cancel_at !== null ||
+          subscription.cancellation_details?.reason === "cancellation_requested";
+        
+        if (subscription.status === "active" && hasPendingCancellation) {
           ourStatus = "cancelling"; // User cancelled but still has access
           console.log("[Webhook] Detected pending cancellation - setting status to 'cancelling'");
         }
