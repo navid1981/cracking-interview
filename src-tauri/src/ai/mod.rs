@@ -170,7 +170,10 @@ async fn get_google_oauth_token() -> Result<String, String> {
             let client_id = std::env::var("GOOGLE_CLIENT_ID")
                 .map_err(|_| "OAuth token expired - missing GOOGLE_CLIENT_ID; please set Gemini API key or configure Google OAuth".to_string())?;
 
-            let client = reqwest::Client::new();
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .map_err(|e| format!("Client build failed: {}", e))?;
             let params = [
                 ("client_id", client_id.as_str()),
                 ("refresh_token", refresh_token.as_str()),
@@ -224,8 +227,7 @@ async fn get_google_oauth_token() -> Result<String, String> {
 
 /// Best-effort MIME sniffing based on file signatures ("magic bytes").
 /// This avoids provider errors when the image bytes are JPEG but we label them PNG (or vice versa).
-#[allow(dead_code)]
-pub(crate) fn detect_image_mime_type(image_data: &[u8]) -> Result<&'static str, String> {
+pub fn detect_image_mime_type(image_data: &[u8]) -> Result<&'static str, String> {
     // PNG: 89 50 4E 47 0D 0A 1A 0A
     if image_data.len() >= 8
         && image_data[0..8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]

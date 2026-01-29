@@ -15,6 +15,7 @@ use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use serde::{Serialize, Deserialize};
+use base64::{Engine as _, engine::general_purpose};
 
 lazy_static::lazy_static! {
     static ref OAUTH_SERVICE: Arc<google_oauth::GoogleOAuthService> = {
@@ -617,6 +618,433 @@ async fn query_ai_with_audio(
     ai::query_with_audio(&prompt, &audio_bytes, &config).await
 }
 
+/// Response from the AI proxy Edge Function
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AIProxyResponse {
+    pub response: String,
+    pub usage: Option<AIProxyUsage>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AIProxyUsage {
+    pub requests_used: i32,
+    pub requests_limit: i32,
+    pub period_end: Option<String>,
+    pub is_paid: bool,
+}
+
+/// Open a URL in the default system browser
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    println!("[OpenURL] Opening: {}", url);
+    
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+    
+    Ok(())
+}
+
+/// Create a Stripe checkout session via the Supabase Edge Function
+#[tauri::command]
+async fn create_checkout_session(
+    user_id: String,
+    user_email: String,
+) -> Result<String, String> {
+    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
+    // Supabase anon key - required for Edge Function calls
+    const SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1ZHdwY2p4Ynd0c3poaGNneWJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ5MTAzMDksImV4cCI6MjA4MDQ4NjMwOX0.wKsiXAAK3q2pQdR8UGT7gXeBsXUDki-YAuB0CtJ9ZUI";
+    
+    println!("[Checkout] Creating session for user: {}", user_id);
+    
+    // Note: danger_accept_invalid_certs is used to work around corporate proxy SSL interception
+    // In production with proper certificates, this should be removed
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let payload = serde_json::json!({
+        "userId": user_id,
+        "userEmail": user_email
+    });
+
+    println!("[Checkout] Sending request to Edge Function...");
+    
+    let response = client
+        .post(format!("{}/functions/v1/create-checkout-test", SUPABASE_URL))
+        .header("Content-Type", "application/json")
+        .header("apikey", SUPABASE_ANON_KEY)
+        .header("Authorization", format!("Bearer {}", SUPABASE_ANON_KEY))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("❌ Checkout request failed: {}", e))?;
+
+    let status = response.status();
+    let response_text = response.text().await
+        .map_err(|e| format!("❌ Failed to read checkout response: {}", e))?;
+
+    println!("[Checkout] Response status: {}, body: {}", status, response_text);
+
+    if !status.is_success() {
+        return Err(format!("❌ Checkout failed ({}): {}", status, response_text));
+    }
+
+    // Parse the response to get the URL
+    let data: serde_json::Value = serde_json::from_str(&response_text)
+        .map_err(|e| format!("❌ Failed to parse checkout response: {}", e))?;
+    
+    let checkout_url = data["url"]
+        .as_str()
+        .ok_or("❌ No checkout URL in response")?
+        .to_string();
+
+    println!("[Checkout] Got checkout URL: {}", checkout_url);
+    
+    Ok(checkout_url)
+}
+
+/// Create a Stripe billing portal session for subscription management
+#[tauri::command]
+async fn create_billing_portal_session(
+    customer_id: String,
+) -> Result<String, String> {
+    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
+    const SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1ZHdwY2p4Ynd0c3poaGNneWJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ5MTAzMDksImV4cCI6MjA4MDQ4NjMwOX0.wKsiXAAK3q2pQdR8UGT7gXeBsXUDki-YAuB0CtJ9ZUI";
+    
+    println!("[Billing Portal] Creating session for customer: {}", customer_id);
+    
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let payload = serde_json::json!({
+        "customerId": customer_id
+    });
+
+    let response = client
+        .post(format!("{}/functions/v1/create-billing-portal-test", SUPABASE_URL))
+        .header("Content-Type", "application/json")
+        .header("apikey", SUPABASE_ANON_KEY)
+        .header("Authorization", format!("Bearer {}", SUPABASE_ANON_KEY))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("❌ Billing portal request failed: {}", e))?;
+
+    let status = response.status();
+    let response_text = response.text().await
+        .map_err(|e| format!("❌ Failed to read billing portal response: {}", e))?;
+
+    println!("[Billing Portal] Response status: {}, body: {}", status, response_text);
+
+    if !status.is_success() {
+        return Err(format!("❌ Billing portal failed ({}): {}", status, response_text));
+    }
+
+    let data: serde_json::Value = serde_json::from_str(&response_text)
+        .map_err(|e| format!("❌ Failed to parse billing portal response: {}", e))?;
+    
+    let portal_url = data["url"]
+        .as_str()
+        .ok_or("❌ No portal URL in response")?
+        .to_string();
+
+    println!("[Billing Portal] Got portal URL: {}", portal_url);
+    
+    Ok(portal_url)
+}
+
+/// Sign up a new user via Supabase Auth (bypasses SSL inspection on corporate VPN)
+#[tauri::command]
+async fn supabase_sign_up(
+    email: String,
+    password: String,
+) -> Result<serde_json::Value, String> {
+    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
+    const SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1ZHdwY2p4Ynd0c3poaGNneWJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ5MTAzMDksImV4cCI6MjA4MDQ4NjMwOX0.wKsiXAAK3q2pQdR8UGT7gXeBsXUDki-YAuB0CtJ9ZUI";
+    
+    println!("[Auth] Signing up user: {}", email);
+    
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let payload = serde_json::json!({
+        "email": email,
+        "password": password
+    });
+
+    let response = client
+        .post(format!("{}/auth/v1/signup", SUPABASE_URL))
+        .header("Content-Type", "application/json")
+        .header("apikey", SUPABASE_ANON_KEY)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("❌ Sign up request failed: {}", e))?;
+
+    let status = response.status();
+    let response_text = response.text().await
+        .map_err(|e| format!("❌ Failed to read sign up response: {}", e))?;
+
+    println!("[Auth] Sign up response status: {}", status);
+    println!("[Auth] Sign up response body: {}", response_text);
+
+    let data: serde_json::Value = serde_json::from_str(&response_text)
+        .map_err(|e| format!("❌ Failed to parse sign up response: {}", e))?;
+
+    if !status.is_success() {
+        let error_msg = data["error_description"]
+            .as_str()
+            .or(data["msg"].as_str())
+            .or(data["message"].as_str())
+            .unwrap_or(&response_text);
+        return Err(format!("❌ Sign up failed: {}", error_msg));
+    }
+
+    // Supabase returns user data at root level (id, email directly in response)
+    // Not nested under "user" key
+    println!("[Auth] Sign up success - user id: {:?}, email: {:?}", data.get("id"), data.get("email"));
+    
+    Ok(data)
+}
+
+/// Sign in a user via Supabase Auth (bypasses SSL inspection on corporate VPN)
+#[tauri::command]
+async fn supabase_sign_in(
+    email: String,
+    password: String,
+) -> Result<serde_json::Value, String> {
+    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
+    const SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1ZHdwY2p4Ynd0c3poaGNneWJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ5MTAzMDksImV4cCI6MjA4MDQ4NjMwOX0.wKsiXAAK3q2pQdR8UGT7gXeBsXUDki-YAuB0CtJ9ZUI";
+    
+    println!("[Auth] Signing in user: {}", email);
+    
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let payload = serde_json::json!({
+        "email": email,
+        "password": password
+    });
+
+    let response = client
+        .post(format!("{}/auth/v1/token?grant_type=password", SUPABASE_URL))
+        .header("Content-Type", "application/json")
+        .header("apikey", SUPABASE_ANON_KEY)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("❌ Sign in request failed: {}", e))?;
+
+    let status = response.status();
+    let response_text = response.text().await
+        .map_err(|e| format!("❌ Failed to read sign in response: {}", e))?;
+
+    println!("[Auth] Sign in response status: {}", status);
+    println!("[Auth] Sign in response body: {}", response_text);
+
+    let data: serde_json::Value = serde_json::from_str(&response_text)
+        .map_err(|e| format!("❌ Failed to parse sign in response: {}", e))?;
+
+    if !status.is_success() {
+        let error_msg = data["error_description"]
+            .as_str()
+            .or(data["msg"].as_str())
+            .or(data["message"].as_str())
+            .unwrap_or(&response_text);
+        return Err(format!("❌ Sign in failed: {}", error_msg));
+    }
+
+    Ok(data)
+}
+
+/// Query AI via the Supabase Edge Function proxy
+/// This enforces quotas and uses OpenRouter as the backend
+#[tauri::command]
+async fn query_ai_via_proxy(
+    prompt: String,
+    model: String,
+    access_token: String,
+) -> Result<AIProxyResponse, String> {
+    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
+    
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let messages = serde_json::json!([
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ]);
+
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+        "max_tokens": 4096
+    });
+
+    let response = client
+        .post(format!("{}/functions/v1/ai-proxy", SUPABASE_URL))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("❌ AI Proxy request failed: {}", e))?;
+
+    let status = response.status();
+    let response_text = response.text().await
+        .map_err(|e| format!("❌ Failed to read AI Proxy response: {}", e))?;
+
+    // Parse the response
+    let proxy_response: serde_json::Value = serde_json::from_str(&response_text)
+        .unwrap_or_else(|_| serde_json::json!({ "error": response_text }));
+
+    if !status.is_success() {
+        let error_msg = proxy_response["error"]
+            .as_str()
+            .unwrap_or(&response_text);
+        return Err(format!("❌ AI Proxy Error ({}): {}", status.as_u16(), error_msg));
+    }
+
+    // Parse usage info
+    let usage = proxy_response["usage"].as_object().map(|u| AIProxyUsage {
+        requests_used: u["requests_used"].as_i64().unwrap_or(0) as i32,
+        requests_limit: u["requests_limit"].as_i64().unwrap_or(0) as i32,
+        period_end: u["period_end"].as_str().map(|s| s.to_string()),
+        is_paid: u["is_paid"].as_bool().unwrap_or(false),
+    });
+
+    let response_text = proxy_response["response"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    Ok(AIProxyResponse {
+        response: response_text,
+        usage,
+        error: None,
+    })
+}
+
+/// Query AI via proxy with an image (base64 encoded)
+#[tauri::command]
+async fn query_ai_via_proxy_with_image(
+    prompt: String,
+    image_path: String,
+    model: String,
+    access_token: String,
+) -> Result<AIProxyResponse, String> {
+    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
+
+    // Read and encode image
+    let image_data = std::fs::read(&image_path)
+        .map_err(|e| format!("Failed to read image: {}", e))?;
+    
+    let mime_type = ai::detect_image_mime_type(&image_data)?;
+    let base64_image = general_purpose::STANDARD.encode(&image_data);
+
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let messages = serde_json::json!([
+        {
+            "role": "user",
+            "content": [
+                { "type": "text", "text": prompt },
+                { 
+                    "type": "image_url", 
+                    "image_url": { 
+                        "url": format!("data:{};base64,{}", mime_type, base64_image)
+                    }
+                }
+            ]
+        }
+    ]);
+
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+        "max_tokens": 4096
+    });
+
+    let response = client
+        .post(format!("{}/functions/v1/ai-proxy", SUPABASE_URL))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("❌ AI Proxy request failed: {}", e))?;
+
+    let status = response.status();
+    let response_text = response.text().await
+        .map_err(|e| format!("❌ Failed to read AI Proxy response: {}", e))?;
+
+    let proxy_response: serde_json::Value = serde_json::from_str(&response_text)
+        .unwrap_or_else(|_| serde_json::json!({ "error": response_text }));
+
+    if !status.is_success() {
+        let error_msg = proxy_response["error"]
+            .as_str()
+            .unwrap_or(&response_text);
+        return Err(format!("❌ AI Proxy Error ({}): {}", status.as_u16(), error_msg));
+    }
+
+    let usage = proxy_response["usage"].as_object().map(|u| AIProxyUsage {
+        requests_used: u["requests_used"].as_i64().unwrap_or(0) as i32,
+        requests_limit: u["requests_limit"].as_i64().unwrap_or(0) as i32,
+        period_end: u["period_end"].as_str().map(|s| s.to_string()),
+        is_paid: u["is_paid"].as_bool().unwrap_or(false),
+    });
+
+    let response_text = proxy_response["response"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    Ok(AIProxyResponse {
+        response: response_text,
+        usage,
+        error: None,
+    })
+}
+
 
 // ============================================================================
 // GOOGLE OAUTH COMMANDS
@@ -704,6 +1132,13 @@ fn main() {
             query_ai,
             query_ai_with_image,
             query_ai_with_audio,
+            query_ai_via_proxy,
+            query_ai_via_proxy_with_image,
+            create_checkout_session,
+            create_billing_portal_session,
+            supabase_sign_up,
+            supabase_sign_in,
+            open_external_url,
             start_google_oauth,
             get_google_token_status,
             clear_google_tokens,

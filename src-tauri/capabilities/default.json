@@ -10,7 +10,10 @@
   "remote": {
     "urls": [
       "http://127.0.0.1:1420/*",
-      "http://localhost:1420/*"
+      "http://localhost:1420/*",
+      "https://*.supabase.co/*",
+      "https://api.stripe.com/*",
+      "https://checkout.stripe.com/*"
     ]
   }
 }

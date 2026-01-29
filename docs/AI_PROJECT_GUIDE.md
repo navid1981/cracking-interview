@@ -229,12 +229,18 @@ Displays:
 - `capture_display_screenshot(display_id: String) -> String` (returns temp file path)
 - `get_display_thumbnail(display_id: String) -> String` (data URL)
 
-AI:
+AI (Direct calls - user's API key):
 
 - `query_ai(prompt: String, config: AIConfig) -> String`
 - `query_ai_with_image(prompt: String, image_path: String, config: AIConfig) -> String`
+- `query_ai_with_audio(prompt: String, audio_path: String, config: AIConfig) -> String`
 
-OAuth:
+AI (Proxy calls - via Supabase Edge Function):
+
+- `query_ai_via_proxy(prompt: String, model: String, access_token: String) -> AIProxyResponse`
+- `query_ai_via_proxy_with_image(prompt: String, image_path: String, model: String, access_token: String) -> AIProxyResponse`
+
+OAuth (Google - for direct Gemini API):
 
 - `start_google_oauth() -> String`
 - `get_google_token_status() -> bool`
@@ -313,13 +319,109 @@ Notes:
 - The URL only works **if the dev server is running** (typically via `npm run tauri dev` or `npm run dev`).
 - Some functionality (global hotkey, OS display capture permissions) requires the native Tauri context; for those, prefer `npm run tauri dev`.
 
+## Authentication & Subscription System
+
+The app includes a full authentication and subscription system using Supabase and Stripe.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Tauri Desktop App                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│  AuthScreen (sign up/in)  →  MainApp (CDP, prompts, AI)                 │
+│                                                                          │
+│  Settings → Account Tab → Subscription status, quota display, upgrade    │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Supabase Backend                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│  auth.users (Supabase Auth)                                              │
+│  users table (subscription_status, lifetime_ai_calls, stripe IDs)        │
+│  api_usage table (tracks each AI request)                                │
+│                                                                          │
+│  Edge Functions:                                                         │
+│    - create-checkout (Stripe checkout session)                           │
+│    - stripe-webhook (subscription lifecycle)                             │
+│    - ai-proxy (OpenRouter proxy with quota enforcement)                  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    ▼                               ▼
+            ┌─────────────┐                 ┌─────────────┐
+            │   Stripe    │                 │ OpenRouter  │
+            │ (payments)  │                 │ (AI models) │
+            └─────────────┘                 └─────────────┘
+```
+
+### Key Files
+
+- `src/services/supabase.ts`: Supabase client, auth helpers, usage stats
+- `src/components/AuthScreen.tsx`: Sign in/up flow container
+- `src/components/SignInForm.tsx`: Email/password sign in
+- `src/components/SignUpForm.tsx`: Email/password sign up
+- `src/components/AuthScreen.css`: Auth UI styling
+- `supabase/functions/ai-proxy/index.ts`: OpenRouter proxy with quota logic
+- `supabase/migrations/001_add_quota_columns.sql`: Database schema changes
+
+### Subscription Tiers
+
+| Tier | Cost | AI Quota | API Key |
+|------|------|----------|---------|
+| Free | $0 | 2 lifetime calls | Own key only |
+| Pro | $10/month | 150 requests/month | Via OpenRouter proxy |
+
+### AI Routing Logic
+
+The app supports two AI request paths:
+
+1. **Direct API calls** (user provides their own API key)
+   - No quota limits
+   - Uses `query_ai`, `query_ai_with_image`, `query_ai_with_audio` commands
+   - Calls Gemini/Claude APIs directly
+
+2. **Proxy via Edge Function** (uses app's OpenRouter account)
+   - Quota enforced (150/month for paid, 2 lifetime for free)
+   - Uses `query_ai_via_proxy`, `query_ai_via_proxy_with_image` commands
+   - Calls Supabase Edge Function → OpenRouter
+
+### Database Schema
+
+**users table** (extends auth.users):
+- `id` (UUID, FK to auth.users.id)
+- `email` (text)
+- `subscription_status` (text: 'active', 'inactive', 'cancelled')
+- `subscription_tier` (text)
+- `stripe_customer_id` (text)
+- `stripe_subscription_id` (text)
+- `lifetime_ai_calls` (int, for free tier tracking)
+- `subscription_start_date`, `subscription_end_date` (timestamp)
+
+**api_usage table**:
+- `id` (UUID)
+- `user_id` (UUID, FK to users.id)
+- `ai_model` (text)
+- `tokens_used` (int)
+- `request_count` (int, default 1)
+- `created_at` (timestamp)
+
+### Environment Setup
+
+Add to Supabase Edge Function secrets:
+- `OPENROUTER_API_KEY`: Your OpenRouter API key
+
+See `docs/OPENROUTER_SETUP.md` for full setup instructions.
+
 ## Known technical debt / refactor targets
 
-- **App.tsx is doing a lot**: UI + state + settings + prompt editing + OAuth UX. Consider splitting into:
+- **App.tsx is doing a lot**: UI + state + settings + prompt editing + OAuth UX + Auth state. Consider splitting into:
   - `useCdpSources()` hook
   - `useAiSettings()` hook
   - `useSolveFlow()` hook
+  - `useAuth()` hook (for Supabase auth state)
 - **CDP commands use a constant `"id": 1`** for WebSocket requests. If you ever add concurrency, switch to incrementing IDs and matching responses.
-- **GoogleOAuthService has refresh helpers** that aren’t wired into the “load token from file then refresh” path; if you want robust OAuth, load tokens on startup and refresh automatically.
-
+- **GoogleOAuthService has refresh helpers** that aren't wired into the "load token from file then refresh" path; if you want robust OAuth, load tokens on startup and refresh automatically.
+- **AI routing could be smarter**: Currently the frontend must decide whether to use direct calls or proxy. Consider moving this logic to a unified helper that checks subscription status.
 

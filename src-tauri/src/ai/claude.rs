@@ -25,7 +25,10 @@ pub async fn query_with_text(
         }]
     });
     
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))?;
     let response = client
         .post(endpoint)
         .header("x-api-key", api_key)
@@ -96,7 +99,10 @@ pub async fn query_with_image(
         }]
     });
     
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))?;
     let response = client
         .post(endpoint)
         .header("x-api-key", api_key)

@@ -5,7 +5,20 @@ import AIResponseDisplay from './components/AIResponseDisplay';
 import TabDropdown from './components/TabDropdown';
 import PromptEditor from './components/PromptEditor';
 import PromptListView from './components/PromptListView';
+import AuthScreen from './components/AuthScreen';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates } from './services/prompts';
+import { 
+  supabase, 
+  onAuthStateChange, 
+  getSession, 
+  getUserSubscription, 
+  getUsageStats,
+  createCheckoutSession,
+  signOut as supabaseSignOut,
+  UserSubscription,
+  UsageStats,
+} from './services/supabase';
+import type { User, Session } from '@supabase/supabase-js';
 import './App.css';
 
 interface ChromeTab {
@@ -49,6 +62,15 @@ interface AIConfig {
 }
 
 function App() {
+  // ========== AUTH STATE ==========
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authSession, setAuthSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [subscription, setSubscription] = useState<UserSubscription | null>(null);
+  const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
+  const [isSubscribing, setIsSubscribing] = useState(false);
+
+  // ========== APP STATE ==========
   const [cdpStatus, setCdpStatus] = useState('🔴 Chrome Not Running');
   const [cdpReady, setCdpReady] = useState(false);
   const [allSources, setAllSources] = useState<InputSource[]>([]);
@@ -91,7 +113,7 @@ function App() {
   }, [aiConfig.selected_model, aiConfig.gemini_api_key, aiConfig.claude_api_key]);
   
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'models' | 'prompts' | 'input' | 'hotkeys'>('models');
+  const [settingsTab, setSettingsTab] = useState<'account' | 'models' | 'prompts' | 'input' | 'hotkeys'>('models');
   const [runtimePlatform, setRuntimePlatform] = useState<'macos' | 'windows' | 'linux' | 'unknown'>('unknown');
   const [useScreenshot, setUseScreenshot] = useState(
     localStorage.getItem('use_screenshot') === 'true'
@@ -122,6 +144,73 @@ function App() {
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
   const solveWithAIRef = useRef<((mode?: 'auto' | 'text' | 'screenshot') => Promise<void>) | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // ========== AUTH INITIALIZATION ==========
+  useEffect(() => {
+    // Clear session on app start - user must sign in each time
+    // But preserve the remembered email for convenience
+    const clearSessionOnStart = () => {
+      const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
+      const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+      
+      // Check if there's a stored session and save the email before clearing
+      const storedSession = localStorage.getItem(storageKey);
+      if (storedSession) {
+        try {
+          const session = JSON.parse(storedSession);
+          if (session.user?.email) {
+            // Save email for auto-fill on next sign-in
+            localStorage.setItem('cracking_interview_remembered_email', session.user.email);
+            console.log('[App] Remembered email:', session.user.email);
+          }
+        } catch (e) {
+          console.error('[App] Failed to parse stored session:', e);
+        }
+      }
+      
+      // Clear the auth session (force sign-in each time)
+      localStorage.removeItem(storageKey);
+      console.log('[App] Cleared auth session on startup');
+    };
+
+    clearSessionOnStart();
+    setAuthLoading(false);
+
+    // Listen for auth state changes (in case Supabase JS client fires events)
+    const { data: { subscription: authSubscription } } = onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event);
+      setAuthSession(session);
+      setAuthUser(session?.user || null);
+      
+      if (session?.user) {
+        const sub = await getUserSubscription(session.user.id);
+        setSubscription(sub);
+        const stats = await getUsageStats(session.user.id);
+        setUsageStats(stats);
+      } else {
+        setSubscription(null);
+        setUsageStats(null);
+      }
+    });
+
+    return () => {
+      authSubscription.unsubscribe();
+    };
+  }, []);
+
+  // Refresh usage stats periodically when user is logged in
+  useEffect(() => {
+    if (!authUser) return;
+    
+    const refreshStats = async () => {
+      const stats = await getUsageStats(authUser.id);
+      setUsageStats(stats);
+    };
+
+    // Refresh every 30 seconds while app is open
+    const interval = setInterval(refreshStats, 30000);
+    return () => clearInterval(interval);
+  }, [authUser]);
 
   useEffect(() => {
     checkCdpStatus();
@@ -521,6 +610,125 @@ function App() {
     }
   };
 
+  // ========== SUPABASE AUTH HANDLERS ==========
+  const handleAuthSuccess = async () => {
+    console.log('[App] handleAuthSuccess called');
+    
+    // Since we bypass Supabase JS client, onAuthStateChange doesn't fire
+    // We need to manually get the session from localStorage and update state
+    const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
+    const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+    const storedSession = localStorage.getItem(storageKey);
+    
+    if (storedSession) {
+      try {
+        const session = JSON.parse(storedSession);
+        console.log('[App] Found session in localStorage:', session.user?.email);
+        
+        setAuthSession(session);
+        setAuthUser(session.user);
+        
+        // Save email for auto-fill on next sign-in (after app restart)
+        if (session.user?.email) {
+          localStorage.setItem('cracking_interview_remembered_email', session.user.email);
+        }
+        
+        // Fetch subscription and usage data
+        if (session.user?.id) {
+          const sub = await getUserSubscription(session.user.id);
+          setSubscription(sub);
+          const stats = await getUsageStats(session.user.id);
+          setUsageStats(stats);
+        }
+      } catch (e) {
+        console.error('[App] Failed to parse stored session:', e);
+      }
+    } else {
+      console.log('[App] No session found in localStorage');
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await supabaseSignOut();
+      setAuthUser(null);
+      setAuthSession(null);
+      setSubscription(null);
+      setUsageStats(null);
+      setMessage('✅ Signed out successfully');
+    } catch (error) {
+      setMessage(`❌ Sign out failed: ${error}`);
+    }
+  };
+
+  const handleSubscribe = async () => {
+    console.log('[Subscribe] Button clicked!');
+    console.log('[Subscribe] authUser:', authUser);
+    
+    if (!authUser || !authUser.email) {
+      console.log('[Subscribe] No user or email, aborting');
+      setMessage('❌ Please sign in first');
+      return;
+    }
+
+    console.log('[Subscribe] Starting checkout for:', authUser.id, authUser.email);
+    setIsSubscribing(true);
+    setMessage('🔄 Opening Stripe checkout...');
+
+    try {
+      const checkoutUrl = await createCheckoutSession(authUser.id, authUser.email);
+      
+      if (checkoutUrl) {
+        // Open Stripe checkout in system browser using Tauri command
+        console.log('[Subscribe] Opening checkout URL:', checkoutUrl);
+        try {
+          await invoke('open_external_url', { url: checkoutUrl });
+          setMessage('✅ Checkout opened in browser. Complete payment there.');
+        } catch (e) {
+          // Fallback to window.open
+          window.open(checkoutUrl, '_blank');
+          setMessage('✅ Checkout opened. Complete payment to activate subscription.');
+        }
+      } else {
+        setMessage('❌ Failed to create checkout session');
+      }
+    } catch (error) {
+      setMessage(`❌ Subscription error: ${error}`);
+    } finally {
+      setIsSubscribing(false);
+    }
+  };
+
+  // Helper to check if user can use AI proxy (has quota remaining)
+  const canUseAIProxy = (): { allowed: boolean; reason?: string } => {
+    if (!subscription) {
+      return { allowed: false, reason: 'Not signed in' };
+    }
+
+    const isPaid = subscription.subscription_status === 'active';
+
+    if (isPaid) {
+      // Paid user - check monthly quota
+      if (usageStats && usageStats.requests_used >= usageStats.requests_limit) {
+        return { 
+          allowed: false, 
+          reason: `Monthly quota exceeded (${usageStats.requests_limit} requests). Resets on ${usageStats.period_end.toLocaleDateString()}`
+        };
+      }
+      return { allowed: true };
+    } else {
+      // Free user - check lifetime quota
+      const lifetimeUsed = subscription.lifetime_ai_calls || 0;
+      if (lifetimeUsed >= 2) {
+        return { 
+          allowed: false, 
+          reason: 'Free trial expired (2 lifetime calls used). Subscribe or use your own API key.'
+        };
+      }
+      return { allowed: true };
+    }
+  };
+
   useEffect(() => {
     // Fetch tabs when CDP becomes ready
     if (cdpReady) {
@@ -745,6 +953,26 @@ function App() {
     solveWithAIRef.current = solveWithAI;
   });
 
+  // ========== AUTH LOADING STATE ==========
+  if (authLoading) {
+    return (
+      <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <div className="loading">
+          <div className="spinner"></div>
+          <p>Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ========== AUTH SCREEN (NOT LOGGED IN) ==========
+  if (!authUser) {
+    return <AuthScreen onAuthSuccess={handleAuthSuccess} />;
+  }
+
+  // ========== MAIN APP (LOGGED IN) ==========
+  const isPaidUser = subscription?.subscription_status === 'active';
+  const quotaInfo = canUseAIProxy();
 
   return (
     <div className="app-container">
@@ -754,6 +982,16 @@ function App() {
           <h1>CrackingInterview</h1>
         </div>
         <div className="header-right">
+          {/* Quota Display */}
+          {subscription && (
+            <span className="quota-badge" title={isPaidUser ? 'Monthly quota' : 'Lifetime free calls'}>
+              {isPaidUser ? (
+                <>📊 {usageStats ? `${usageStats.requests_used}/${usageStats.requests_limit}` : '...'}</>
+              ) : (
+                <>🎁 {2 - (subscription.lifetime_ai_calls || 0)}/2 free</>
+              )}
+            </span>
+          )}
           <span className="status-indicator">{cdpStatus}</span>
           <button 
             onClick={handleOpenSettings}
@@ -848,6 +1086,12 @@ function App() {
 
             <div className="settings-tabs">
               <button 
+                className={`tab-btn ${settingsTab === 'account' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('account')}
+              >
+                👤 Account
+              </button>
+              <button 
                 className={`tab-btn ${settingsTab === 'models' ? 'active' : ''}`}
                 onClick={() => setSettingsTab('models')}
               >
@@ -877,6 +1121,107 @@ function App() {
             </div>
             
             <div className="modal-body">
+              {settingsTab === 'account' && (
+                <>
+                  <div className="account-section">
+                    <div className="account-info">
+                      <div className="account-avatar">
+                        {authUser?.email?.charAt(0).toUpperCase() || '?'}
+                      </div>
+                      <div className="account-details">
+                        <div className="account-email">{authUser?.email}</div>
+                        <div className="account-tier">
+                          {isPaidUser ? (
+                            <span className="tier-badge pro">✨ Pro Subscriber</span>
+                          ) : (
+                            <span className="tier-badge free">🎁 Free Tier</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Usage This Month:</label>
+                    <div className="usage-bar-container">
+                      <div 
+                        className="usage-bar" 
+                        style={{ 
+                          width: isPaidUser && usageStats 
+                            ? `${Math.min(100, (usageStats.requests_used / usageStats.requests_limit) * 100)}%` 
+                            : `${Math.min(100, ((subscription?.lifetime_ai_calls || 0) / 2) * 100)}%`
+                        }}
+                      />
+                    </div>
+                    <div className="usage-text">
+                      {isPaidUser ? (
+                        <>
+                          <span>{usageStats?.requests_used || 0} / {usageStats?.requests_limit || 150} requests</span>
+                          <span className="usage-reset">Resets {usageStats?.period_end?.toLocaleDateString()}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>{subscription?.lifetime_ai_calls || 0} / 2 lifetime free calls used</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {!isPaidUser && (
+                    <div className="upgrade-section">
+                      <h4>🚀 Upgrade to Pro</h4>
+                      <ul className="upgrade-benefits">
+                        <li>✓ 150 AI requests per month</li>
+                        <li>✓ Access to Claude Sonnet 4.5</li>
+                        <li>✓ Priority support</li>
+                        <li>✓ No API key required</li>
+                      </ul>
+                      <button 
+                        className="action-btn primary upgrade-btn"
+                        onClick={handleSubscribe}
+                        disabled={isSubscribing}
+                      >
+                        {isSubscribing ? '⏳ Loading...' : '💳 Subscribe $10/month'}
+                      </button>
+                    </div>
+                  )}
+
+                  {isPaidUser && subscription?.stripe_customer_id && (
+                    <div className="manage-subscription">
+                      <button 
+                        className="action-btn secondary"
+                        style={{ width: '100%' }}
+                        onClick={async () => {
+                          try {
+                            setMessage('Opening billing portal...');
+                            const portalUrl = await invoke<string>('create_billing_portal_session', {
+                              customerId: subscription.stripe_customer_id
+                            });
+                            // Open in external browser
+                            await invoke('open_external_url', { url: portalUrl });
+                            setMessage('✅ Billing portal opened in browser');
+                          } catch (e) {
+                            setMessage(`❌ Failed to open billing portal: ${e}`);
+                          }
+                        }}
+                      >
+                        📋 Manage Subscription
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="sign-out-section">
+                    <button 
+                      className="action-btn secondary"
+                      onClick={handleSignOut}
+                      style={{ width: '100%', marginTop: '20px' }}
+                    >
+                      🚪 Sign Out
+                    </button>
+                  </div>
+                </>
+              )}
+
               {settingsTab === 'models' && (
                 <>
                   <div className="form-group">

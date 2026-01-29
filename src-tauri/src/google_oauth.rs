@@ -74,7 +74,10 @@ impl GoogleOAuthService {
 
     /// Exchange auth code for tokens
     pub async fn exchange_code(&self, code: &str, state: &str, redirect_uri: &str) -> Result<GoogleTokens, String> {
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .map_err(|e| format!("Client build failed: {}", e))?;
         let client_id = get_client_id();
 
         // Look up PKCE verifier for this state

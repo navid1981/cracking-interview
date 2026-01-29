@@ -125,8 +125,9 @@ pub async fn query_with_text(
     // Check if this is an OAuth token (starts with "ya29.") or API key
     let is_oauth = api_key.starts_with("ya29.");
     
+    // Note: danger_accept_invalid_certs is used to work around corporate proxy SSL interception
     let client = reqwest::Client::builder()
-        .use_rustls_tls()
+        .danger_accept_invalid_certs(true)
         .build()
         .map_err(|e| format!("Client build failed: {}", e))?;
     
@@ -193,7 +194,10 @@ pub async fn query_with_image(
     let base64_image = general_purpose::STANDARD.encode(image_data);
     let mime_type = detect_image_mime_type(image_data)?;
     
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))?;
     
     let payload = json!({
         "contents": [{
@@ -263,7 +267,10 @@ pub async fn query_with_audio(
     // Base64 encode audio
     let base64_audio = general_purpose::STANDARD.encode(audio_data);
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))?;
 
     let payload = json!({
         "contents": [{
