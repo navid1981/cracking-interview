@@ -8,9 +8,7 @@ import PromptListView from './components/PromptListView';
 import AuthScreen from './components/AuthScreen';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates } from './services/prompts';
 import { 
-  supabase, 
   onAuthStateChange, 
-  getSession, 
   getUserSubscription, 
   getUsageStats,
   createCheckoutSession,
@@ -57,14 +55,30 @@ function isAudio(source: InputSource): source is AudioSource {
 
 interface AIConfig {
   selected_model: string;
-  gemini_api_key: string;
-  claude_api_key: string;
 }
+
+// Available AI models
+const PRO_MODELS = [
+  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', provider: 'OpenAI' },
+  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic' },
+  { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google' },
+  { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
+];
+
+const FREE_MODEL = { id: 'grok-code-fast', name: 'Grok Code Fast', provider: 'xAI' };
+
+// Allowed domains for free users
+const FREE_TIER_ALLOWED_DOMAINS = [
+  'leetcode.com',
+  'codewars.com',
+  'codeforces.com',
+  'neetcode.io',
+];
 
 function App() {
   // ========== AUTH STATE ==========
   const [authUser, setAuthUser] = useState<User | null>(null);
-  const [authSession, setAuthSession] = useState<Session | null>(null);
+  const [_authSession, setAuthSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [subscription, setSubscription] = useState<UserSubscription | null>(null);
   const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
@@ -89,28 +103,28 @@ function App() {
   );
   
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
+    // Migrate old model selections to new default
     const storedModel = localStorage.getItem('ai_model');
-    if (storedModel === 'gemini-2.0-flash-exp' || storedModel === 'gemini-2.0-flash' || storedModel === 'gemini-1.5-pro') {
-      localStorage.setItem('ai_model', 'gemini-2.5-flash');
+    const oldModels = ['gemini-2.0-flash-exp', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-2.5-flash', 
+                       'claude-sonnet-4-20250514', 'claude-3-5-haiku-20241022'];
+    if (!storedModel || oldModels.includes(storedModel)) {
+      // Reset to default model (will be set based on subscription status)
+      localStorage.removeItem('ai_model');
     }
     
     return {
-      selected_model: localStorage.getItem('ai_model') || 'gemini-2.5-flash',
-      gemini_api_key: localStorage.getItem('gemini_key') || '',
-      claude_api_key: localStorage.getItem('claude_key') || '',
+      selected_model: localStorage.getItem('ai_model') || 'gpt-5.2-codex',
     };
   });
 
-  // Persist AI model + API keys so selections survive app restarts.
+  // Persist AI model selection so it survives app restarts.
   useEffect(() => {
     try {
       localStorage.setItem('ai_model', aiConfig.selected_model);
-      localStorage.setItem('gemini_key', aiConfig.gemini_api_key || '');
-      localStorage.setItem('claude_key', aiConfig.claude_api_key || '');
     } catch (e) {
       console.warn('Failed to persist AI config:', e);
     }
-  }, [aiConfig.selected_model, aiConfig.gemini_api_key, aiConfig.claude_api_key]);
+  }, [aiConfig.selected_model]);
   
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'account' | 'models' | 'prompts' | 'input' | 'hotkeys'>('models');
@@ -127,8 +141,6 @@ function App() {
       console.warn('Failed to persist input mode:', e);
     }
   }, [useScreenshot]);
-  const [googleTokenExists, setGoogleTokenExists] = useState(false);
-  const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [previousWindowSize, setPreviousWindowSize] = useState<{width: number, height: number} | null>(null);
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [audioSeconds, setAudioSeconds] = useState(0);
@@ -221,9 +233,6 @@ function App() {
   useEffect(() => {
     // Fetch displays and tabs on mount
     fetchTabs();
-    
-    // Check if Google tokens exist
-    checkGoogleTokens();
   }, []);
 
   useEffect(() => {
@@ -253,8 +262,10 @@ function App() {
     if (now - lastAudioToggleAtRef.current < 350) return;
     lastAudioToggleAtRef.current = now;
 
-    if (!aiConfig.selected_model.startsWith('gemini')) {
-      setMessage('⚠️ Audio input requires Gemini. Please select Gemini in Settings → AI Models.');
+    // Audio is only available for Pro users (active or cancelling status)
+    const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+    if (!isPro) {
+      setMessage('⚠️ Audio input requires Pro subscription.');
       return;
     }
 
@@ -295,8 +306,10 @@ function App() {
     setMessage('⏹️ Stopping recording...');
     try { await invoke('frontend_log', { message: 'audio: stop recording' }); } catch {}
     try {
-      const audioPath = await invoke<string>('stop_audio_recording');
-      try { await invoke('frontend_log', { message: `audio: saved to ${audioPath}` }); } catch {}
+      // Use Vosk to transcribe the audio locally
+      setMessage('🎙️ Transcribing audio...');
+      const transcribedText = await invoke<string>('stop_audio_recording_and_transcribe');
+      try { await invoke('frontend_log', { message: `audio: transcribed: ${transcribedText.substring(0, 100)}...` }); } catch {}
 
       isRecordingAudioRef.current = false;
       setIsRecordingAudio(false);
@@ -305,17 +318,64 @@ function App() {
         audioTimerRef.current = null;
       }
 
-      setMessage('📝 Transcribing + solving with Gemini...');
-      const audioInstructions =
-        'You will receive an AUDIO recording of an interview question. First transcribe the question clearly. Then solve it. Provide a clear Explanation and a final Solution.';
+      if (!transcribedText.trim()) {
+        setMessage('⚠️ No speech detected in audio. Please speak clearly and try again.');
+        setIsLoading(false);
+        audioToggleInFlightRef.current = false;
+        return;
+      }
+
+      // Get access token for proxy calls
+      const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
+      const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+      const storedSession = localStorage.getItem(storageKey);
+      let accessToken = '';
+      
+      if (storedSession) {
+        try {
+          const session = JSON.parse(storedSession);
+          accessToken = session.access_token || '';
+        } catch {
+          setMessage('❌ Session error. Please sign in again.');
+          setIsLoading(false);
+          audioToggleInFlightRef.current = false;
+          return;
+        }
+      }
+
+      // Determine model based on subscription
+      const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+      const modelToUse = isPro ? aiConfig.selected_model : FREE_MODEL.id;
+
+      setMessage('🤖 Solving with AI...');
+      const audioInstructions = `You received a transcribed interview question from audio:\n\n"${transcribedText}"\n\nSolve this question. Provide a clear Explanation and a final Solution.`;
       const prompt = buildPrompt(selectedTemplate, selectedLanguage, audioInstructions);
-      const response = await invoke<string>('query_ai_with_audio', {
+      
+      const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy', {
         prompt,
-        audioPath,
-        config: aiConfig,
+        model: modelToUse,
+        accessToken,
       });
-      setAiResponse(response);
+      
+      if (proxyResponse.error) {
+        throw new Error(proxyResponse.error);
+      }
+      
+      setAiResponse(proxyResponse.response);
       setMessage('✅ Solution ready!');
+      
+      // Update usage stats if returned
+      if (proxyResponse.usage) {
+        setUsageStats(prev => prev ? {
+          ...prev,
+          requests_used: proxyResponse.usage!.requests_used,
+        } : prev);
+        // Also refresh subscription for free users (lifetime_ai_calls updated)
+        if (!proxyResponse.usage.is_paid && authUser?.id) {
+          const updatedSub = await getUserSubscription(authUser.id);
+          if (updatedSub) setSubscription(updatedSub);
+        }
+      }
     } catch (e) {
       try { await invoke('frontend_log', { message: `audio: stop failed: ${String(e)}` }); } catch {}
       setMessage(`❌ Error: ${String(e)}`);
@@ -457,14 +517,6 @@ function App() {
     }
   }, [showSettings, settingsTab]);
 
-  const checkGoogleTokens = async () => {
-    try {
-      const exists = await invoke<boolean>('get_google_token_status');
-      setGoogleTokenExists(exists);
-    } catch (error) {
-      setGoogleTokenExists(false);
-    }
-  };
 
   const loadHotkeys = async () => {
     try {
@@ -584,31 +636,6 @@ function App() {
     }, 100);
   };
 
-  const signInWithGoogle = async () => {
-    setIsAuthenticating(true);
-    setMessage('🔐 Opening Google Sign-In in browser...');
-    
-    try {
-      const result = await invoke<string>('start_google_oauth');
-      setIsAuthenticating(false);
-      setMessage(`✅ ${result}`);
-      setGoogleTokenExists(true);
-    } catch (error) {
-      setIsAuthenticating(false);
-      setMessage(`❌ ${error}`);
-    }
-  };
-
-  const signOutGoogle = async () => {
-    try {
-      const result = await invoke<string>('clear_google_tokens');
-      setGoogleTokenExists(false);
-      setMessage(`✅ ${result}`);
-      await checkGoogleTokens(); // Recheck status
-    } catch (error) {
-      setMessage(`❌ ${error}`);
-    }
-  };
 
   // ========== SUPABASE AUTH HANDLERS ==========
   const handleAuthSuccess = async () => {
@@ -705,7 +732,7 @@ function App() {
       return { allowed: false, reason: 'Not signed in' };
     }
 
-    const isPaid = subscription.subscription_status === 'active';
+    const isPaid = subscription.subscription_status === 'active' || subscription.subscription_status === 'cancelling';
 
     if (isPaid) {
       // Paid user - check monthly quota
@@ -717,12 +744,12 @@ function App() {
       }
       return { allowed: true };
     } else {
-      // Free user - check lifetime quota
+      // Free user - check lifetime quota (3 calls)
       const lifetimeUsed = subscription.lifetime_ai_calls || 0;
-      if (lifetimeUsed >= 2) {
+      if (lifetimeUsed >= 3) {
         return { 
           allowed: false, 
-          reason: 'Free trial expired (2 lifetime calls used). Subscribe or use your own API key.'
+          reason: 'Free trial expired (3 lifetime calls used). Subscribe to continue.'
         };
       }
       return { allowed: true };
@@ -870,24 +897,80 @@ function App() {
       return;
     }
 
-    if (!aiConfig.gemini_api_key && !aiConfig.claude_api_key && !googleTokenExists) {
-      setMessage('❌ Configure API keys in Settings');
-      setShowSettings(true);
-      try { await invoke('frontend_log', { message: 'solveWithAI abort: no API keys and no OAuth' }); } catch {}
+    // Check if user is authenticated
+    if (!authUser) {
+      setMessage('❌ Please sign in first');
       return;
     }
 
-    // Audio source: toggle recording or stop+solve (Gemini-only).
+    // Determine user tier
+    const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+
+    // Free user restrictions
+    if (!isPro) {
+      // Free users can only use Chrome tabs (no display capture)
+      if (isDisplay(sourceToUse)) {
+        setMessage('⚠️ Display capture requires Pro subscription. Please select a Chrome tab.');
+        return;
+      }
+
+      // Free users can only use allowed domains
+      if (!isAudio(sourceToUse)) {
+        const tab = sourceToUse as ChromeTab;
+        const url = tab.url || '';
+        const isAllowedDomain = FREE_TIER_ALLOWED_DOMAINS.some(domain => 
+          url.includes(domain)
+        );
+        
+        if (!isAllowedDomain) {
+          setMessage(`⚠️ Free tier only works on: ${FREE_TIER_ALLOWED_DOMAINS.join(', ')}. Upgrade to Pro for unlimited access.`);
+          return;
+        }
+      }
+    }
+
+    // Audio source: toggle recording or stop+solve
     if (isAudio(sourceToUse)) {
       await toggleAudioRecording();
       return;
     }
 
+    // Check quota before making request
+    const quotaCheck = canUseAIProxy();
+    if (!quotaCheck.allowed) {
+      setMessage(`⚠️ ${quotaCheck.reason}`);
+      return;
+    }
+
+    // Get access token for proxy calls
+    const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
+    const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+    const storedSession = localStorage.getItem(storageKey);
+    let accessToken = '';
+    
+    if (storedSession) {
+      try {
+        const session = JSON.parse(storedSession);
+        accessToken = session.access_token || '';
+      } catch {
+        setMessage('❌ Session error. Please sign in again.');
+        return;
+      }
+    }
+    
+    if (!accessToken) {
+      setMessage('❌ Please sign in to use AI features.');
+      return;
+    }
+
+    // Determine which model to use
+    const modelToUse = isPro ? aiConfig.selected_model : FREE_MODEL.id;
+
     setIsLoading(true);
     setAiResponse('');
     
     try {
-      let response: string;
+      let responseText: string;
       
       if (isDisplay(sourceToUse)) {
         // Display/Screen capture - always uses screenshot
@@ -899,11 +982,30 @@ function App() {
         setMessage('🤖 Analyzing screenshot with AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage);
         
-        response = await invoke<string>('query_ai_with_image', {
+        const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
           prompt,
           imagePath: screenshotPath,
-          config: aiConfig,
+          model: modelToUse,
+          accessToken,
         });
+        
+        if (proxyResponse.error) {
+          throw new Error(proxyResponse.error);
+        }
+        responseText = proxyResponse.response;
+        
+        // Update usage stats if returned
+        if (proxyResponse.usage) {
+          setUsageStats(prev => prev ? {
+            ...prev,
+            requests_used: proxyResponse.usage!.requests_used,
+          } : prev);
+          // Refresh subscription for free users (lifetime_ai_calls updated)
+          if (!proxyResponse.usage.is_paid && authUser?.id) {
+            const updatedSub = await getUserSubscription(authUser.id);
+            if (updatedSub) setSubscription(updatedSub);
+          }
+        }
       } else if (mode === 'screenshot' || (mode === 'auto' && useScreenshot)) {
         // Chrome tab - screenshot mode
         setMessage('📸 Taking screenshot...');
@@ -917,11 +1019,29 @@ function App() {
         setMessage('🤖 Analyzing screenshot with AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage);
         
-        response = await invoke<string>('query_ai_with_image', {
+        const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
           prompt,
           imagePath: screenshotPath,
-          config: aiConfig,
+          model: modelToUse,
+          accessToken,
         });
+        
+        if (proxyResponse.error) {
+          throw new Error(proxyResponse.error);
+        }
+        responseText = proxyResponse.response;
+        
+        if (proxyResponse.usage) {
+          setUsageStats(prev => prev ? {
+            ...prev,
+            requests_used: proxyResponse.usage!.requests_used,
+          } : prev);
+          // Refresh subscription for free users (lifetime_ai_calls updated)
+          if (!proxyResponse.usage.is_paid && authUser?.id) {
+            const updatedSub = await getUserSubscription(authUser.id);
+            if (updatedSub) setSubscription(updatedSub);
+          }
+        }
       } else {
         // Chrome tab - text mode
         setMessage('📝 Extracting text...');
@@ -933,13 +1053,31 @@ function App() {
         setMessage('🤖 Asking AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage, text);
         
-        response = await invoke<string>('query_ai', {
+        const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy', {
           prompt,
-          config: aiConfig,
+          model: modelToUse,
+          accessToken,
         });
+        
+        if (proxyResponse.error) {
+          throw new Error(proxyResponse.error);
+        }
+        responseText = proxyResponse.response;
+        
+        if (proxyResponse.usage) {
+          setUsageStats(prev => prev ? {
+            ...prev,
+            requests_used: proxyResponse.usage!.requests_used,
+          } : prev);
+          // Refresh subscription for free users (lifetime_ai_calls updated)
+          if (!proxyResponse.usage.is_paid && authUser?.id) {
+            const updatedSub = await getUserSubscription(authUser.id);
+            if (updatedSub) setSubscription(updatedSub);
+          }
+        }
       }
       
-      setAiResponse(response);
+      setAiResponse(responseText);
       setMessage('✅ Solution ready!');
     } catch (error) {
       setMessage(`❌ Error: ${error}`);
@@ -971,8 +1109,8 @@ function App() {
   }
 
   // ========== MAIN APP (LOGGED IN) ==========
-  const isPaidUser = subscription?.subscription_status === 'active';
-  const quotaInfo = canUseAIProxy();
+  // Pro users include 'active' and 'cancelling' (still have access until period end)
+  const isPaidUser = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
 
   return (
     <div className="app-container">
@@ -988,7 +1126,7 @@ function App() {
               {isPaidUser ? (
                 <>📊 {usageStats ? `${usageStats.requests_used}/${usageStats.requests_limit}` : '...'}</>
               ) : (
-                <>🎁 {2 - (subscription.lifetime_ai_calls || 0)}/2 free</>
+                <>🎁 {subscription.lifetime_ai_calls || 0}/3 free</>
               )}
             </span>
           )}
@@ -1142,14 +1280,14 @@ function App() {
                   </div>
 
                   <div className="form-group">
-                    <label>Usage This Month:</label>
+                    <label>Usage {isPaidUser ? 'This Month' : '(Lifetime)'}:</label>
                     <div className="usage-bar-container">
                       <div 
                         className="usage-bar" 
                         style={{ 
                           width: isPaidUser && usageStats 
                             ? `${Math.min(100, (usageStats.requests_used / usageStats.requests_limit) * 100)}%` 
-                            : `${Math.min(100, ((subscription?.lifetime_ai_calls || 0) / 2) * 100)}%`
+                            : `${Math.min(100, ((subscription?.lifetime_ai_calls || 0) / 3) * 100)}%`
                         }}
                       />
                     </div>
@@ -1161,7 +1299,7 @@ function App() {
                         </>
                       ) : (
                         <>
-                          <span>{subscription?.lifetime_ai_calls || 0} / 2 lifetime free calls used</span>
+                          <span>{subscription?.lifetime_ai_calls || 0} / 3 lifetime free calls used</span>
                         </>
                       )}
                     </div>
@@ -1172,9 +1310,9 @@ function App() {
                       <h4>🚀 Upgrade to Pro</h4>
                       <ul className="upgrade-benefits">
                         <li>✓ 150 AI requests per month</li>
-                        <li>✓ Access to Claude Sonnet 4.5</li>
-                        <li>✓ Priority support</li>
-                        <li>✓ No API key required</li>
+                        <li>✓ GPT-5.2 Codex, Claude 4.5, Gemini 3, Grok 4.1</li>
+                        <li>✓ Any website + screen capture</li>
+                        <li>✓ Audio input with transcription</li>
                       </ul>
                       <button 
                         className="action-btn primary upgrade-btn"
@@ -1226,73 +1364,57 @@ function App() {
                 <>
                   <div className="form-group">
                     <label>AI Model:</label>
-                    <select 
-                      value={aiConfig.selected_model}
-                      onChange={(e) => setAiConfig({...aiConfig, selected_model: e.target.value})}
-                      className="input-field"
-                    >
-                      <option value="gemini-2.5-flash">Gemini 2.5 Flash (Free)</option>
-                      <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                      <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-                    </select>
-                  </div>
-
-                  {aiConfig.selected_model.startsWith('gemini') && (
-                    <div className="form-group">
-                      <label>
-                        Gemini API Key:
-                        {!aiConfig.gemini_api_key && !googleTokenExists && <span className="alert-badge">⚠️ Required</span>}
-                        {googleTokenExists && <span className="alert-badge" style={{color: '#4CAF50'}}>✓ OAuth Active</span>}
-                      </label>
-                      <input 
-                        type="password"
-                        value={aiConfig.gemini_api_key}
-                        onChange={(e) => setAiConfig({...aiConfig, gemini_api_key: e.target.value})}
-                        placeholder={googleTokenExists ? "Optional: paste your own API key to use your own quota (otherwise OAuth will be used)" : "Enter API key or sign in with Google"}
+                    {isPaidUser ? (
+                      <select 
+                        value={aiConfig.selected_model}
+                        onChange={(e) => setAiConfig({...aiConfig, selected_model: e.target.value})}
                         className="input-field"
-                        disabled={false}
-                      />
-                      <button 
-                        className="action-btn secondary" 
-                        style={{marginTop: '8px', width: '100%'}}
-                        onClick={googleTokenExists ? signOutGoogle : signInWithGoogle}
-                        disabled={isAuthenticating}
                       >
-                        {isAuthenticating ? '⏳ Authenticating...' : googleTokenExists ? '🚪 Sign Out from Google' : '🔐 Sign in with Google'}
-                      </button>
-                      
-                      {googleTokenExists && (
-                        <p style={{fontSize: '12px', color: '#4CAF50', marginTop: '8px', textAlign: 'center'}}>
-                          ✓ OAuth token is active. If you hit quota limits, paste your own Gemini API key above to use your own project/quota.
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {aiConfig.selected_model.startsWith('claude') && (
-                    <div className="form-group">
-                      <label>
-                        Claude API Key:
-                        {!aiConfig.claude_api_key && <span className="alert-badge">⚠️ Required</span>}
-                      </label>
-                      <input 
-                        type="password"
-                        value={aiConfig.claude_api_key}
-                        onChange={(e) => setAiConfig({...aiConfig, claude_api_key: e.target.value})}
-                        placeholder="Enter Claude API key"
-                        className="input-field"
-                      />
-                    </div>
-                  )}
-
-                  <div className="info-note">
-                    <p className="small">
-                      <strong>💡 Tip:</strong> Get free Gemini API key at{' '}
-                      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">
-                        aistudio.google.com/apikey
-                      </a>
-                    </p>
+                        {PRO_MODELS.map(model => (
+                          <option key={model.id} value={model.id}>
+                            {model.name} ({model.provider})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="input-field" style={{ backgroundColor: '#f5f5f5', cursor: 'not-allowed' }}>
+                        {FREE_MODEL.name} ({FREE_MODEL.provider}) - Free Tier
+                      </div>
+                    )}
                   </div>
+
+                  {!isPaidUser && (
+                    <div className="info-note" style={{ marginTop: '16px' }}>
+                      <h4 style={{ marginBottom: '8px' }}>🔒 Free Tier Limitations</h4>
+                      <ul style={{ fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
+                        <li>Grok Code Fast model only</li>
+                        <li>3 lifetime AI requests</li>
+                        <li>Chrome tabs only (no screen capture)</li>
+                        <li>Only works on: {FREE_TIER_ALLOWED_DOMAINS.join(', ')}</li>
+                      </ul>
+                      <button 
+                        className="action-btn primary"
+                        style={{ marginTop: '12px', width: '100%' }}
+                        onClick={handleSubscribe}
+                        disabled={isSubscribing}
+                      >
+                        {isSubscribing ? '⏳ Loading...' : '🚀 Upgrade to Pro - $10/month'}
+                      </button>
+                    </div>
+                  )}
+
+                  {isPaidUser && (
+                    <div className="info-note" style={{ marginTop: '16px' }}>
+                      <h4 style={{ marginBottom: '8px' }}>✨ Pro Features</h4>
+                      <ul style={{ fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
+                        <li>All 4 premium AI models</li>
+                        <li>150 requests per month</li>
+                        <li>Any Chrome tab or website</li>
+                        <li>Display/screen capture</li>
+                        <li>Audio input with transcription</li>
+                      </ul>
+                    </div>
+                  )}
                 </>
               )}
 

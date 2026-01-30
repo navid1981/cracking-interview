@@ -299,6 +299,27 @@ mod macos {
     }
 }
 
+/// Transcribe audio from a WAV file
+/// TODO: Install libvosk native library and uncomment vosk dependency in Cargo.toml to enable local transcription
+/// For now, returns a placeholder message - audio will be sent to AI models that support it
+pub fn transcribe_audio(wav_path: &str) -> Result<String, String> {
+    println!("[Transcribe] Audio file recorded at: {}", wav_path);
+    
+    // Check if file exists and has content
+    let metadata = std::fs::metadata(wav_path)
+        .map_err(|e| format!("Cannot read audio file: {}", e))?;
+    
+    if metadata.len() < 1000 {
+        return Err("Audio file is too small - recording may have failed".to_string());
+    }
+    
+    println!("[Transcribe] Audio file size: {} bytes", metadata.len());
+    
+    // Return path for now - frontend will handle sending to AI
+    // When vosk is installed, this will do local transcription
+    Err(format!("LOCAL_TRANSCRIPTION_DISABLED:{}", wav_path))
+}
+
 #[cfg(target_os = "windows")]
 mod windows {
     use super::WindowsRecordingState;

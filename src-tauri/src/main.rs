@@ -21,6 +21,16 @@ lazy_static::lazy_static! {
     static ref OAUTH_SERVICE: Arc<google_oauth::GoogleOAuthService> = {
         Arc::new(google_oauth::GoogleOAuthService::new())
     };
+    
+    // Reusable HTTP client for AI proxy requests (avoids TLS handshake per request)
+    static ref AI_PROXY_CLIENT: reqwest::Client = {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .timeout(std::time::Duration::from_secs(30))
+            .pool_max_idle_per_host(5)
+            .build()
+            .expect("Failed to create AI proxy HTTP client")
+    };
 }
 
 // Two dedicated hotkeys:
@@ -533,6 +543,21 @@ fn is_audio_recording() -> Result<bool, String> {
     Ok(audio::is_recording())
 }
 
+/// Stop audio recording and transcribe the result using Vosk
+#[tauri::command]
+fn stop_audio_recording_and_transcribe() -> Result<String, String> {
+    let wav_path = audio::stop_system_audio_recording()?;
+    println!("[Audio] Recording stopped, transcribing: {}", wav_path);
+    let text = audio::transcribe_audio(&wav_path)?;
+    Ok(text)
+}
+
+/// Transcribe an existing audio file
+#[tauri::command]
+fn transcribe_audio_file(wav_path: String) -> Result<String, String> {
+    audio::transcribe_audio(&wav_path)
+}
+
 #[tauri::command]
 async fn get_display_thumbnail(display_id: String) -> Result<String, String> {
     let thumbnail_bytes = screenshot::capture_display_thumbnail(&display_id)?;
@@ -896,10 +921,13 @@ async fn query_ai_via_proxy(
 ) -> Result<AIProxyResponse, String> {
     const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
     
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    println!("[Rust AI Proxy] Starting request to ai-proxy...");
+    println!("[Rust AI Proxy] Model: {}", model);
+    println!("[Rust AI Proxy] Prompt length: {} chars", prompt.len());
+    
+    
+    // Use static client (reuses TLS connections)
+    let client = &*AI_PROXY_CLIENT;
 
     let messages = serde_json::json!([
         {
@@ -915,6 +943,9 @@ async fn query_ai_via_proxy(
         "max_tokens": 4096
     });
 
+    println!("[Rust AI Proxy] Sending POST to {}/functions/v1/ai-proxy", SUPABASE_URL);
+    let start = std::time::Instant::now();
+    
     let response = client
         .post(format!("{}/functions/v1/ai-proxy", SUPABASE_URL))
         .header("Authorization", format!("Bearer {}", access_token))
@@ -922,38 +953,67 @@ async fn query_ai_via_proxy(
         .json(&payload)
         .send()
         .await
-        .map_err(|e| format!("❌ AI Proxy request failed: {}", e))?;
+        .map_err(|e| {
+            let elapsed = start.elapsed();
+            println!("[Rust AI Proxy] Request FAILED after {:?}", elapsed);
+            if e.is_timeout() {
+                println!("[Rust AI Proxy] Error type: TIMEOUT");
+                "❌ AI request timed out after 30 seconds. Please try again.".to_string()
+            } else {
+                println!("[Rust AI Proxy] Error type: {}", e);
+                format!("❌ AI Proxy request failed: {}", e)
+            }
+        })?;
 
+    let elapsed = start.elapsed();
+    println!("[Rust AI Proxy] Response received after {:?}", elapsed);
+    
     let status = response.status();
+    println!("[Rust AI Proxy] Response status: {}", status);
+    
+    println!("[Rust AI Proxy] Reading response body...");
+    let body_start = std::time::Instant::now();
     let response_text = response.text().await
-        .map_err(|e| format!("❌ Failed to read AI Proxy response: {}", e))?;
+        .map_err(|e| {
+            println!("[Rust AI Proxy] Body read FAILED after {:?}", body_start.elapsed());
+            format!("❌ Failed to read AI Proxy response: {}", e)
+        })?;
+    
+    println!("[Rust AI Proxy] Body read in {:?}, length: {} chars", body_start.elapsed(), response_text.len());
 
     // Parse the response
+    println!("[Rust AI Proxy] Parsing JSON response...");
     let proxy_response: serde_json::Value = serde_json::from_str(&response_text)
-        .unwrap_or_else(|_| serde_json::json!({ "error": response_text }));
+        .unwrap_or_else(|e| {
+            println!("[Rust AI Proxy] JSON parse error: {}", e);
+            serde_json::json!({ "error": response_text })
+        });
 
     if !status.is_success() {
         let error_msg = proxy_response["error"]
             .as_str()
             .unwrap_or(&response_text);
+        println!("[Rust AI Proxy] Non-success status, error: {}", error_msg);
         return Err(format!("❌ AI Proxy Error ({}): {}", status.as_u16(), error_msg));
     }
 
-    // Parse usage info
+    // Parse usage info (use .get() to avoid panic on missing keys)
     let usage = proxy_response["usage"].as_object().map(|u| AIProxyUsage {
-        requests_used: u["requests_used"].as_i64().unwrap_or(0) as i32,
-        requests_limit: u["requests_limit"].as_i64().unwrap_or(0) as i32,
-        period_end: u["period_end"].as_str().map(|s| s.to_string()),
-        is_paid: u["is_paid"].as_bool().unwrap_or(false),
+        requests_used: u.get("requests_used").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        requests_limit: u.get("requests_limit").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        period_end: u.get("period_end").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        is_paid: u.get("is_paid").and_then(|v| v.as_bool()).unwrap_or(false),
     });
 
-    let response_text = proxy_response["response"]
+    let ai_response_text = proxy_response["response"]
         .as_str()
         .unwrap_or("")
         .to_string();
 
+    println!("[Rust AI Proxy] SUCCESS! Response length: {} chars", ai_response_text.len());
+    
     Ok(AIProxyResponse {
-        response: response_text,
+        response: ai_response_text,
         usage,
         error: None,
     })
@@ -969,17 +1029,22 @@ async fn query_ai_via_proxy_with_image(
 ) -> Result<AIProxyResponse, String> {
     const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
 
+    println!("[Rust AI Proxy Image] Starting request to ai-proxy...");
+    println!("[Rust AI Proxy Image] Model: {}", model);
+    println!("[Rust AI Proxy Image] Prompt length: {} chars", prompt.len());
+    println!("[Rust AI Proxy Image] Image path: {}", image_path);
+
+
     // Read and encode image
     let image_data = std::fs::read(&image_path)
         .map_err(|e| format!("Failed to read image: {}", e))?;
     
     let mime_type = ai::detect_image_mime_type(&image_data)?;
     let base64_image = general_purpose::STANDARD.encode(&image_data);
+    println!("[Rust AI Proxy Image] Image size: {} bytes, mime: {}", image_data.len(), mime_type);
 
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    // Use static client (reuses TLS connections)
+    let client = &*AI_PROXY_CLIENT;
 
     let messages = serde_json::json!([
         {
@@ -1003,6 +1068,9 @@ async fn query_ai_via_proxy_with_image(
         "max_tokens": 4096
     });
 
+    println!("[Rust AI Proxy Image] Sending POST to {}/functions/v1/ai-proxy", SUPABASE_URL);
+    let start = std::time::Instant::now();
+
     let response = client
         .post(format!("{}/functions/v1/ai-proxy", SUPABASE_URL))
         .header("Authorization", format!("Bearer {}", access_token))
@@ -1010,36 +1078,66 @@ async fn query_ai_via_proxy_with_image(
         .json(&payload)
         .send()
         .await
-        .map_err(|e| format!("❌ AI Proxy request failed: {}", e))?;
+        .map_err(|e| {
+            let elapsed = start.elapsed();
+            println!("[Rust AI Proxy Image] Request FAILED after {:?}", elapsed);
+            if e.is_timeout() {
+                println!("[Rust AI Proxy Image] Error type: TIMEOUT");
+                "❌ AI request timed out after 30 seconds. Please try again.".to_string()
+            } else {
+                println!("[Rust AI Proxy Image] Error type: {}", e);
+                format!("❌ AI Proxy request failed: {}", e)
+            }
+        })?;
+
+    let elapsed = start.elapsed();
+    println!("[Rust AI Proxy Image] Response received after {:?}", elapsed);
 
     let status = response.status();
-    let response_text = response.text().await
-        .map_err(|e| format!("❌ Failed to read AI Proxy response: {}", e))?;
+    println!("[Rust AI Proxy Image] Response status: {}", status);
 
+    println!("[Rust AI Proxy Image] Reading response body...");
+    let body_start = std::time::Instant::now();
+    let response_text = response.text().await
+        .map_err(|e| {
+            println!("[Rust AI Proxy Image] Body read FAILED after {:?}", body_start.elapsed());
+            format!("❌ Failed to read AI Proxy response: {}", e)
+        })?;
+
+    println!("[Rust AI Proxy Image] Body read in {:?}, length: {} chars", body_start.elapsed(), response_text.len());
+
+    println!("[Rust AI Proxy Image] Parsing JSON response...");
     let proxy_response: serde_json::Value = serde_json::from_str(&response_text)
-        .unwrap_or_else(|_| serde_json::json!({ "error": response_text }));
+        .unwrap_or_else(|e| {
+            println!("[Rust AI Proxy Image] JSON parse error: {}", e);
+            serde_json::json!({ "error": response_text })
+        });
 
     if !status.is_success() {
         let error_msg = proxy_response["error"]
             .as_str()
             .unwrap_or(&response_text);
+        println!("[Rust AI Proxy Image] Non-success status, error: {}", error_msg);
         return Err(format!("❌ AI Proxy Error ({}): {}", status.as_u16(), error_msg));
     }
 
+    // Parse usage info (use .get() to avoid panic on missing keys)
     let usage = proxy_response["usage"].as_object().map(|u| AIProxyUsage {
-        requests_used: u["requests_used"].as_i64().unwrap_or(0) as i32,
-        requests_limit: u["requests_limit"].as_i64().unwrap_or(0) as i32,
-        period_end: u["period_end"].as_str().map(|s| s.to_string()),
-        is_paid: u["is_paid"].as_bool().unwrap_or(false),
+        requests_used: u.get("requests_used").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        requests_limit: u.get("requests_limit").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        period_end: u.get("period_end").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        is_paid: u.get("is_paid").and_then(|v| v.as_bool()).unwrap_or(false),
     });
 
-    let response_text = proxy_response["response"]
+    let ai_response_text = proxy_response["response"]
         .as_str()
         .unwrap_or("")
         .to_string();
 
+    println!("[Rust AI Proxy Image] SUCCESS! Response length: {} chars", ai_response_text.len());
+
     Ok(AIProxyResponse {
-        response: response_text,
+        response: ai_response_text,
         usage,
         error: None,
     })
@@ -1129,6 +1227,8 @@ fn main() {
             start_audio_recording,
             stop_audio_recording,
             is_audio_recording,
+            stop_audio_recording_and_transcribe,
+            transcribe_audio_file,
             query_ai,
             query_ai_with_image,
             query_ai_with_audio,

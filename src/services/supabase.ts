@@ -43,7 +43,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: 
 export interface UserSubscription {
   id: string;
   email: string;
-  subscription_status: 'active' | 'inactive' | 'cancelled' | null;
+  subscription_status: 'active' | 'inactive' | 'cancelled' | 'cancelling' | null;
   subscription_tier: string | null;
   stripe_customer_id: string | null;
   lifetime_ai_calls: number;
@@ -359,7 +359,8 @@ export async function checkAIQuota(userId: string): Promise<{
     return { allowed: false, reason: 'User not found', isPaid: false };
   }
 
-  const isPaid = subscription.subscription_status === 'active';
+  // Include 'cancelling' as paid - they still have access until period ends
+  const isPaid = subscription.subscription_status === 'active' || subscription.subscription_status === 'cancelling';
 
   if (isPaid) {
     // Paid user - check monthly quota
@@ -381,9 +382,9 @@ export async function checkAIQuota(userId: string): Promise<{
       isPaid: true,
     };
   } else {
-    // Free user - check lifetime quota
+    // Free user - check lifetime quota (3 calls)
     const lifetimeUsed = subscription.lifetime_ai_calls || 0;
-    const remaining = 2 - lifetimeUsed;
+    const remaining = 3 - lifetimeUsed;
 
     if (remaining <= 0) {
       return {

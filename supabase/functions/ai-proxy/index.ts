@@ -7,13 +7,14 @@
  * - Authenticates requests via Supabase JWT
  * - Checks user subscription status
  * - Enforces monthly quota (150 requests for paid users)
- * - Enforces lifetime quota (2 calls for free users)
+ * - Enforces lifetime quota (3 calls for free users)
+ * - Free users can only use Grok Code Fast model
  * - Logs usage to api_usage table
  * - Supports streaming responses
  */
 
-// Use import map from deno.json (no external URLs needed)
-import { createClient } from "@supabase/supabase-js";
+// Direct import for Supabase Dashboard deployment
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,7 +24,17 @@ const corsHeaders = {
 // Monthly request limit for paid subscribers
 const MONTHLY_REQUEST_LIMIT = 150;
 // Lifetime limit for free users
-const FREE_LIFETIME_LIMIT = 2;
+const FREE_LIFETIME_LIMIT = 3;
+
+// Free tier model - using Grok Code Fast for better latency
+const FREE_MODEL = 'grok-code-fast';
+const FREE_MODEL_OPENROUTER = 'x-ai/grok-code-fast-1';
+
+// Pro models available for paid subscribers
+const PRO_MODELS = ['gpt-5.2-codex', 'claude-sonnet-4.5', 'gemini-3-flash', 'grok-4.1-fast'];
+
+// Timeout for OpenRouter API calls (30 seconds)
+const API_TIMEOUT_MS = 30000;
 
 interface AIRequest {
   model: string;
@@ -37,20 +48,28 @@ interface AIRequest {
 
 interface UserSubscription {
   id: string;
-  subscription_status: 'active' | 'inactive' | 'cancelled' | null;
+  subscription_status: 'active' | 'inactive' | 'cancelled' | 'cancelling' | null;
   lifetime_ai_calls: number;
 }
 
 Deno.serve(async (req) => {
+  console.log('[ai-proxy] ========== REQUEST START ==========');
+  console.log('[ai-proxy] Method:', req.method);
+  console.log('[ai-proxy] URL:', req.url);
+
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
+    console.log('[ai-proxy] CORS preflight request');
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     // Get authorization header
     const authHeader = req.headers.get('Authorization');
+    console.log('[ai-proxy] Auth header present:', !!authHeader);
+    
     if (!authHeader) {
+      console.log('[ai-proxy] ERROR: Missing authorization header');
       return new Response(
         JSON.stringify({ error: 'Missing authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -60,18 +79,29 @@ Deno.serve(async (req) => {
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    console.log('[ai-proxy] Supabase URL configured:', !!supabaseUrl);
+    console.log('[ai-proxy] Service key configured:', !!supabaseServiceKey);
+    
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Verify JWT and get user
     const token = authHeader.replace('Bearer ', '');
+    console.log('[ai-proxy] Token length:', token.length);
+    
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    console.log('[ai-proxy] User found:', !!user);
+    console.log('[ai-proxy] Auth error:', authError?.message || 'none');
 
     if (authError || !user) {
+      console.log('[ai-proxy] ERROR: Invalid or expired token');
       return new Response(
         JSON.stringify({ error: 'Invalid or expired token' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log('[ai-proxy] User ID:', user.id);
+    console.log('[ai-proxy] User email:', user.email);
 
     // Get user subscription status
     const { data: subscription, error: subError } = await supabase
@@ -80,14 +110,20 @@ Deno.serve(async (req) => {
       .eq('id', user.id)
       .single();
 
+    console.log('[ai-proxy] Subscription found:', !!subscription);
+    console.log('[ai-proxy] Subscription error:', subError?.message || 'none');
+
     if (subError || !subscription) {
+      console.log('[ai-proxy] Creating new user record...');
       // User exists in auth but not in users table - create entry
       const { error: insertError } = await supabase
         .from('users')
         .insert({ id: user.id, email: user.email, lifetime_ai_calls: 0 });
       
       if (insertError) {
-        console.error('Failed to create user record:', insertError);
+        console.error('[ai-proxy] Failed to create user record:', insertError);
+      } else {
+        console.log('[ai-proxy] User record created successfully');
       }
 
       // Treat as free user with 0 lifetime calls
@@ -99,10 +135,14 @@ Deno.serve(async (req) => {
       return await processRequest(req, user.id, newSubscription, supabase);
     }
 
+    console.log('[ai-proxy] Subscription status:', subscription.subscription_status);
+    console.log('[ai-proxy] Lifetime AI calls:', subscription.lifetime_ai_calls);
+    
     return await processRequest(req, user.id, subscription as UserSubscription, supabase);
 
   } catch (error) {
-    console.error('AI Proxy error:', error);
+    console.error('[ai-proxy] CRITICAL ERROR:', error);
+    console.error('[ai-proxy] Error stack:', (error as Error).stack);
     return new Response(
       JSON.stringify({ error: `Server error: ${(error as Error).message}` }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -116,12 +156,50 @@ async function processRequest(
   subscription: UserSubscription,
   supabase: ReturnType<typeof createClient>
 ): Promise<Response> {
-  const isPaid = subscription.subscription_status === 'active';
+  console.log('[ai-proxy] ========== PROCESS REQUEST ==========');
+  
+  // Include 'cancelling' as paid - they still have access until period ends
+  const isPaid = subscription.subscription_status === 'active' || subscription.subscription_status === 'cancelling';
   const lifetimeCalls = subscription.lifetime_ai_calls || 0;
+  
+  console.log('[ai-proxy] isPaid:', isPaid);
+  console.log('[ai-proxy] lifetimeCalls:', lifetimeCalls);
 
-  // Parse request body
-  const body: AIRequest = await req.json();
-  const { model, messages, stream = false, max_tokens = 4096 } = body;
+  // Parse request body with timeout
+  console.log('[ai-proxy] Parsing request body...');
+  let body: AIRequest;
+  try {
+    // Clone request to avoid body consumption issues
+    const bodyText = await req.text();
+    console.log('[ai-proxy] Body size:', bodyText.length, 'chars');
+    body = JSON.parse(bodyText);
+  } catch (parseError) {
+    console.error('[ai-proxy] Body parse error:', parseError);
+    return new Response(
+      JSON.stringify({ error: `Failed to parse request body: ${(parseError as Error).message}` }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+  let { model, messages, stream = false, max_tokens = 4096 } = body;
+  
+  console.log('[ai-proxy] Requested model:', model);
+  console.log('[ai-proxy] Messages count:', messages?.length);
+  console.log('[ai-proxy] Stream:', stream);
+  console.log('[ai-proxy] Max tokens:', max_tokens);
+
+  // Free users can only use DeepSeek R1 model
+  if (!isPaid) {
+    if (model !== FREE_MODEL) {
+      console.log(`[ai-proxy] Free user attempted to use ${model}, forcing to ${FREE_MODEL}`);
+      model = FREE_MODEL;
+    }
+  } else {
+    // Pro users can only use pro models
+    if (!PRO_MODELS.includes(model)) {
+      console.log(`[ai-proxy] Unknown model ${model}, defaulting to gpt-5.2-codex`);
+      model = 'gpt-5.2-codex';
+    }
+  }
 
   // Check quota
   if (isPaid) {
@@ -174,7 +252,11 @@ async function processRequest(
 
   // Get OpenRouter API key
   const openrouterKey = Deno.env.get('OPENROUTER_API_KEY');
+  console.log('[ai-proxy] OpenRouter API key configured:', !!openrouterKey);
+  console.log('[ai-proxy] OpenRouter API key length:', openrouterKey?.length || 0);
+  
   if (!openrouterKey) {
+    console.log('[ai-proxy] ERROR: OpenRouter API key not configured');
     return new Response(
       JSON.stringify({ error: 'OpenRouter API key not configured' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -183,40 +265,86 @@ async function processRequest(
 
   // Map model names to OpenRouter format
   const modelMap: Record<string, string> = {
-    'claude-sonnet-4-20250514': 'anthropic/claude-sonnet-4',
-    'claude-3-5-haiku-20241022': 'anthropic/claude-3.5-haiku',
-    'gemini-2.5-flash': 'google/gemini-2.5-flash-preview',
+    // Pro models
+    'gpt-5.2-codex': 'openai/gpt-5.2-codex',
+    'claude-sonnet-4.5': 'anthropic/claude-sonnet-4.5',
+    'gemini-3-flash': 'google/gemini-3-flash-preview',
+    'grok-4.1-fast': 'x-ai/grok-4.1-fast',
+    // Free model
+    'grok-code-fast': FREE_MODEL_OPENROUTER,
   };
 
   const openrouterModel = modelMap[model] || model;
+  console.log(`[ai-proxy] Using model: ${model} -> ${openrouterModel}`);
 
-  // Call OpenRouter API
-  const openrouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${openrouterKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://crackinginterview.org',
-      'X-Title': 'CrackingInterview',
-    },
-    body: JSON.stringify({
-      model: openrouterModel,
-      messages,
-      max_tokens,
-      stream,
-    }),
-  });
+  // Call OpenRouter API with timeout
+  console.log('[ai-proxy] ========== CALLING OPENROUTER ==========');
+  console.log('[ai-proxy] Timeout:', API_TIMEOUT_MS, 'ms');
+  const startTime = Date.now();
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    console.log('[ai-proxy] TIMEOUT TRIGGERED after', API_TIMEOUT_MS, 'ms');
+    controller.abort();
+  }, API_TIMEOUT_MS);
+
+  let openrouterResponse: Response;
+  try {
+    console.log('[ai-proxy] Sending request to OpenRouter...');
+    openrouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openrouterKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://crackinginterview.org',
+        'X-Title': 'CrackingInterview',
+      },
+      body: JSON.stringify({
+        model: openrouterModel,
+        messages,
+        max_tokens,
+        stream,
+        provider: {
+          sort: 'throughput',  // Prioritize fastest provider
+        },
+      }),
+      signal: controller.signal,
+    });
+    console.log('[ai-proxy] OpenRouter response received in', Date.now() - startTime, 'ms');
+    console.log('[ai-proxy] OpenRouter status:', openrouterResponse.status);
+  } catch (fetchError) {
+    clearTimeout(timeoutId);
+    const elapsed = Date.now() - startTime;
+    console.error('[ai-proxy] Fetch error after', elapsed, 'ms:', fetchError);
+    console.error('[ai-proxy] Error name:', (fetchError as Error).name);
+    console.error('[ai-proxy] Error message:', (fetchError as Error).message);
+    
+    if ((fetchError as Error).name === 'AbortError') {
+      console.error('[ai-proxy] Request timed out after 30 seconds');
+      return new Response(
+        JSON.stringify({ error: 'AI request timed out after 30 seconds. Please try again.' }),
+        { status: 504, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    throw fetchError;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!openrouterResponse.ok) {
     const errorText = await openrouterResponse.text();
-    console.error('OpenRouter error:', errorText);
+    console.error('[ai-proxy] OpenRouter error status:', openrouterResponse.status);
+    console.error('[ai-proxy] OpenRouter error body:', errorText);
     return new Response(
       JSON.stringify({ error: `AI provider error: ${errorText}` }),
       { status: openrouterResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 
+  console.log('[ai-proxy] OpenRouter call successful!');
+
   // Log usage
+  console.log('[ai-proxy] Logging usage...');
   const { error: logError } = await supabase
     .from('api_usage')
     .insert({
@@ -227,23 +355,29 @@ async function processRequest(
     });
 
   if (logError) {
-    console.error('Failed to log usage:', logError);
+    console.error('[ai-proxy] Failed to log usage:', logError);
+  } else {
+    console.log('[ai-proxy] Usage logged successfully');
   }
 
   // Update lifetime_ai_calls for free users
   if (!isPaid) {
+    console.log('[ai-proxy] Updating lifetime calls for free user...');
     const { error: updateError } = await supabase
       .from('users')
       .update({ lifetime_ai_calls: lifetimeCalls + 1 })
       .eq('id', userId);
 
     if (updateError) {
-      console.error('Failed to update lifetime calls:', updateError);
+      console.error('[ai-proxy] Failed to update lifetime calls:', updateError);
+    } else {
+      console.log('[ai-proxy] Lifetime calls updated to:', lifetimeCalls + 1);
     }
   }
 
   // Handle streaming response
   if (stream) {
+    console.log('[ai-proxy] Returning streaming response');
     return new Response(openrouterResponse.body, {
       headers: {
         ...corsHeaders,
@@ -255,7 +389,10 @@ async function processRequest(
   }
 
   // Non-streaming response
+  console.log('[ai-proxy] Parsing non-streaming response...');
   const responseData = await openrouterResponse.json();
+  console.log('[ai-proxy] Response has choices:', !!responseData.choices);
+  console.log('[ai-proxy] Choices count:', responseData.choices?.length || 0);
 
   // Calculate usage info for response
   const now = new Date();
@@ -286,7 +423,11 @@ async function processRequest(
 
   // Extract the response text
   const responseText = responseData.choices?.[0]?.message?.content || '';
+  console.log('[ai-proxy] Response text length:', responseText.length);
 
+  console.log('[ai-proxy] ========== REQUEST COMPLETE ==========');
+  console.log('[ai-proxy] Returning successful response');
+  
   return new Response(
     JSON.stringify({
       response: responseText,
