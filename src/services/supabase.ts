@@ -85,13 +85,26 @@ export async function getUserSubscription(userId: string): Promise<UserSubscript
 }
 
 /**
- * Get usage statistics for the current billing period (monthly)
+ * Get usage statistics for the current billing period
+ * Counts requests from subscription_start_date to subscription_end_date
  */
-export async function getUsageStats(userId: string): Promise<UsageStats> {
-  // Calculate current month boundaries
+export async function getUsageStats(userId: string, subscription?: UserSubscription | null): Promise<UsageStats> {
   const now = new Date();
-  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  
+  // Use subscription dates if available, otherwise fall back to all-time
+  let periodStart: Date;
+  let periodEnd: Date;
+  
+  if (subscription?.subscription_start_date) {
+    periodStart = new Date(subscription.subscription_start_date);
+    periodEnd = subscription.subscription_end_date 
+      ? new Date(subscription.subscription_end_date) 
+      : new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // +30 days if no end date
+  } else {
+    // No subscription - count all time (for display purposes)
+    periodStart = new Date('2020-01-01');
+    periodEnd = new Date('2099-12-31');
+  }
 
   const defaultStats: UsageStats = {
     requests_used: 0,
@@ -101,6 +114,9 @@ export async function getUsageStats(userId: string): Promise<UsageStats> {
   };
 
   const fetchStats = async (): Promise<UsageStats> => {
+    // Note: Session should already be set by auth flow, no need to call setSession here
+    // (calling setSession triggers onAuthStateChange which creates a loop!)
+    
     const { count, error } = await supabase
       .from('api_usage')
       .select('*', { count: 'exact', head: true })
@@ -109,20 +125,22 @@ export async function getUsageStats(userId: string): Promise<UsageStats> {
       .lt('created_at', periodEnd.toISOString());
 
     if (error) {
-      console.error('Error fetching usage stats:', error);
+      console.error('[Usage] Query error:', error.message);
       return defaultStats;
     }
 
+    console.log(`[Usage] Count: ${count} (period: ${periodStart.toISOString().split('T')[0]} to ${periodEnd.toISOString().split('T')[0]})`);
+
     return {
       requests_used: count || 0,
-      requests_limit: 150, // Monthly limit for paid users
+      requests_limit: 150,
       period_start: periodStart,
       period_end: periodEnd,
     };
   };
 
-  // 3 second timeout to avoid VPN hangs
-  return withTimeout(fetchStats(), 3000, defaultStats);
+  // 5 second timeout to avoid VPN hangs
+  return withTimeout(fetchStats(), 5000, defaultStats);
 }
 
 /**

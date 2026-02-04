@@ -27,8 +27,8 @@ const MONTHLY_REQUEST_LIMIT = 150;
 const FREE_LIFETIME_LIMIT = 3;
 
 // Free tier model - using Grok Code Fast for better latency
-const FREE_MODEL = 'grok-code-fast';
-const FREE_MODEL_OPENROUTER = 'x-ai/grok-code-fast-1';
+const FREE_MODEL = 'gemini-2.5-flash';
+const FREE_MODEL_OPENROUTER = 'google/gemini-2.5-flash';
 
 // Pro models available for paid subscribers
 const PRO_MODELS = ['gpt-5.2-codex', 'claude-sonnet-4.5', 'gemini-3-flash', 'grok-4.1-fast'];
@@ -36,8 +36,12 @@ const PRO_MODELS = ['gpt-5.2-codex', 'claude-sonnet-4.5', 'gemini-3-flash', 'gro
 // Timeout for OpenRouter API calls (30 seconds)
 const API_TIMEOUT_MS = 30000;
 
+// Allowed domains for free tier users
+const FREE_TIER_ALLOWED_DOMAINS = ['leetcode.com', 'codewars.com', 'codeforces.com', 'neetcode.io'];
+
 interface AIRequest {
   model: string;
+  source_url?: string;  // URL of the source tab for domain validation
   messages: Array<{
     role: 'user' | 'assistant' | 'system';
     content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
@@ -50,6 +54,8 @@ interface UserSubscription {
   id: string;
   subscription_status: 'active' | 'inactive' | 'cancelled' | 'cancelling' | null;
   lifetime_ai_calls: number;
+  subscription_start_date: string | null;
+  subscription_end_date: string | null;
 }
 
 Deno.serve(async (req) => {
@@ -106,7 +112,7 @@ Deno.serve(async (req) => {
     // Get user subscription status
     const { data: subscription, error: subError } = await supabase
       .from('users')
-      .select('id, subscription_status, lifetime_ai_calls')
+      .select('id, subscription_status, lifetime_ai_calls, subscription_start_date, subscription_end_date')
       .eq('id', user.id)
       .single();
 
@@ -180,14 +186,30 @@ async function processRequest(
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
-  let { model, messages, stream = false, max_tokens = 4096 } = body;
+  let { model, messages, stream = false, max_tokens = 4096, source_url } = body;
   
   console.log('[ai-proxy] Requested model:', model);
   console.log('[ai-proxy] Messages count:', messages?.length);
   console.log('[ai-proxy] Stream:', stream);
   console.log('[ai-proxy] Max tokens:', max_tokens);
+  console.log('[ai-proxy] Source URL:', source_url || 'not provided');
 
-  // Free users can only use DeepSeek R1 model
+  // Free users - validate domain restriction
+  if (!isPaid && source_url) {
+    const isAllowedDomain = FREE_TIER_ALLOWED_DOMAINS.some(domain => source_url.includes(domain));
+    if (!isAllowedDomain) {
+      console.log(`[ai-proxy] Free user attempted to use blocked domain: ${source_url}`);
+      return new Response(
+        JSON.stringify({ 
+          error: `Domain restriction: Free tier only works on coding practice sites (${FREE_TIER_ALLOWED_DOMAINS.join(', ')}). Upgrade to Pro for unlimited access.`
+        }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    console.log('[ai-proxy] Domain validation passed for free user');
+  }
+
+  // Free users can only use free model
   if (!isPaid) {
     if (model !== FREE_MODEL) {
       console.log(`[ai-proxy] Free user attempted to use ${model}, forcing to ${FREE_MODEL}`);
@@ -203,29 +225,36 @@ async function processRequest(
 
   // Check quota
   if (isPaid) {
-    // Paid user - check monthly quota
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Paid user - check quota for current billing period (subscription_start_date to subscription_end_date)
+    const periodStart = subscription.subscription_start_date 
+      ? new Date(subscription.subscription_start_date)
+      : new Date('2020-01-01'); // Fallback to all-time if no start date
+    const periodEnd = subscription.subscription_end_date
+      ? new Date(subscription.subscription_end_date)
+      : new Date('2099-12-31'); // Fallback to far future if no end date
+    
+    console.log(`[ai-proxy] Checking quota from: ${periodStart.toISOString()} to ${periodEnd.toISOString()}`);
     
     const { count, error: countError } = await supabase
       .from('api_usage')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
-      .gte('created_at', monthStart.toISOString());
+      .gte('created_at', periodStart.toISOString())
+      .lt('created_at', periodEnd.toISOString());
 
     if (countError) {
       console.error('Failed to check usage:', countError);
     }
 
-    const usedThisMonth = count || 0;
+    const usedThisPeriod = count || 0;
+    console.log(`[ai-proxy] Used this billing period: ${usedThisPeriod}/${MONTHLY_REQUEST_LIMIT}`);
     
-    if (usedThisMonth >= MONTHLY_REQUEST_LIMIT) {
-      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    if (usedThisPeriod >= MONTHLY_REQUEST_LIMIT) {
       return new Response(
         JSON.stringify({ 
-          error: `Monthly quota exceeded (${MONTHLY_REQUEST_LIMIT} requests). Resets on ${nextMonth.toLocaleDateString()}.`,
+          error: `Billing period quota exceeded (${MONTHLY_REQUEST_LIMIT} requests). Resets on ${periodEnd.toLocaleDateString()}.`,
           usage: {
-            requests_used: usedThisMonth,
+            requests_used: usedThisPeriod,
             requests_limit: MONTHLY_REQUEST_LIMIT,
             is_paid: true,
           }
@@ -271,7 +300,7 @@ async function processRequest(
     'gemini-3-flash': 'google/gemini-3-flash-preview',
     'grok-4.1-fast': 'x-ai/grok-4.1-fast',
     // Free model
-    'grok-code-fast': FREE_MODEL_OPENROUTER,
+    'gemini-2.5-flash': FREE_MODEL_OPENROUTER,
   };
 
   const openrouterModel = modelMap[model] || model;
@@ -394,25 +423,31 @@ async function processRequest(
   console.log('[ai-proxy] Response has choices:', !!responseData.choices);
   console.log('[ai-proxy] Choices count:', responseData.choices?.length || 0);
 
-  // Calculate usage info for response
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-
+  // Calculate usage info for response - use billing period dates (same as quota check)
   let usageInfo;
   if (isPaid) {
+    // Use subscription dates for billing period (consistent with quota check above)
+    const periodStart = subscription.subscription_start_date 
+      ? new Date(subscription.subscription_start_date)
+      : new Date('2020-01-01');
+    const periodEnd = subscription.subscription_end_date
+      ? new Date(subscription.subscription_end_date)
+      : new Date('2099-12-31');
+
     const { count } = await supabase
       .from('api_usage')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
-      .gte('created_at', monthStart.toISOString());
+      .gte('created_at', periodStart.toISOString())
+      .lt('created_at', periodEnd.toISOString());
 
     usageInfo = {
       requests_used: (count || 0),
       requests_limit: MONTHLY_REQUEST_LIMIT,
-      period_end: monthEnd.toISOString(),
+      period_end: periodEnd.toISOString(),
       is_paid: true,
     };
+    console.log(`[ai-proxy] Usage for response: ${usageInfo.requests_used}/${MONTHLY_REQUEST_LIMIT}`);
   } else {
     usageInfo = {
       requests_used: lifetimeCalls + 1,

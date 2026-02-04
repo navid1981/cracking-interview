@@ -36,10 +36,10 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
       <div className="auth-container">
         <div className="auth-header">
           <div className="auth-logo">
-            <span className="logo-icon">🎯</span>
+            <img src="/icon.png" alt="CrackingInterview" className="logo-icon-img" />
             <h1>CrackingInterview</h1>
           </div>
-          <p className="auth-tagline">Your AI-powered coding interview assistant</p>
+          <p className="auth-tagline">Your AI-powered technical interview assistant</p>
         </div>
 
         {view === 'signin' && (

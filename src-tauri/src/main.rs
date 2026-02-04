@@ -39,28 +39,28 @@ lazy_static::lazy_static! {
 //
 // Note: we use OS-specific combinations to match user expectations.
 #[cfg(target_os = "macos")]
-const DEFAULT_SOLVE_TEXT_HOTKEY: &str = "Cmd+E";
+const DEFAULT_SOLVE_TEXT_HOTKEY: &str = "Cmd+1";
 #[cfg(target_os = "macos")]
-const DEFAULT_SOLVE_SCREENSHOT_HOTKEY: &str = "Cmd+S";
+const DEFAULT_SOLVE_SCREENSHOT_HOTKEY: &str = "Cmd+2";
 
 #[cfg(target_os = "windows")]
-const DEFAULT_SOLVE_TEXT_HOTKEY: &str = "Alt+E";
+const DEFAULT_SOLVE_TEXT_HOTKEY: &str = "Alt+1";
 #[cfg(target_os = "windows")]
-const DEFAULT_SOLVE_SCREENSHOT_HOTKEY: &str = "Alt+S";
+const DEFAULT_SOLVE_SCREENSHOT_HOTKEY: &str = "Alt+2";
 
 // Reasonable fallback for other OSes (Linux)
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-const DEFAULT_SOLVE_TEXT_HOTKEY: &str = "Ctrl+E";
+const DEFAULT_SOLVE_TEXT_HOTKEY: &str = "Ctrl+1";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-const DEFAULT_SOLVE_SCREENSHOT_HOTKEY: &str = "Ctrl+S";
+const DEFAULT_SOLVE_SCREENSHOT_HOTKEY: &str = "Ctrl+2";
 
 // Audio (system) hotkey default (configurable).
 #[cfg(target_os = "macos")]
-const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Cmd+A";
+const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Cmd+3";
 #[cfg(target_os = "windows")]
-const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Alt+A";
+const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Alt+3";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Ctrl+A";
+const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Ctrl+3";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct HotkeysConfig {
@@ -203,15 +203,32 @@ fn load_hotkeys_from_disk(app: &tauri::AppHandle) -> HotkeysConfig {
                 if let Some(v) = cfg_file.toggle_visibility { if !v.trim().is_empty() { cfg.toggle_visibility = v; } }
                 if let Some(v) = cfg_file.quit_app { if !v.trim().is_empty() { cfg.quit_app = v; } }
 
-                // Migrate legacy default audio hotkey to new default (Cmd+A / Alt+A) so existing users
+                // Migrate legacy default hotkeys to new defaults (Cmd+1, Cmd+2, Cmd+3) so existing users
                 // pick up the change automatically unless they had customized it.
-                let legacy_audio = [
-                    "Cmd+Shift+A",
-                    "Alt+Shift+A",
-                    "Ctrl+Shift+A",
-                ];
+                let mut needs_save = false;
+                
+                // Legacy text hotkeys
+                let legacy_text = ["Cmd+E", "Alt+E", "Ctrl+E"];
+                if legacy_text.contains(&cfg.text.as_str()) {
+                    cfg.text = DEFAULT_SOLVE_TEXT_HOTKEY.to_string();
+                    needs_save = true;
+                }
+                
+                // Legacy screenshot hotkeys
+                let legacy_screenshot = ["Cmd+S", "Alt+S", "Ctrl+S"];
+                if legacy_screenshot.contains(&cfg.screenshot.as_str()) {
+                    cfg.screenshot = DEFAULT_SOLVE_SCREENSHOT_HOTKEY.to_string();
+                    needs_save = true;
+                }
+                
+                // Legacy audio hotkeys
+                let legacy_audio = ["Cmd+Shift+A", "Alt+Shift+A", "Ctrl+Shift+A", "Cmd+A", "Alt+A", "Ctrl+A"];
                 if legacy_audio.contains(&cfg.audio_toggle.as_str()) {
                     cfg.audio_toggle = DEFAULT_AUDIO_TOGGLE_HOTKEY.to_string();
+                    needs_save = true;
+                }
+                
+                if needs_save {
                     // Best-effort persist so it sticks across restarts.
                     save_hotkeys_to_disk(app, &cfg).ok();
                 }
@@ -571,8 +588,27 @@ async fn get_display_thumbnail(display_id: String) -> Result<String, String> {
 // AI COMMANDS
 // ============================================================================
 
+// Allowed domains for free tier and BYO API key users
+const ALLOWED_DOMAINS: &[&str] = &["leetcode.com", "codewars.com", "codeforces.com", "neetcode.io"];
+
+fn validate_source_url(source_url: &Option<String>) -> Result<(), String> {
+    if let Some(url) = source_url {
+        let is_allowed = ALLOWED_DOMAINS.iter().any(|domain| url.contains(domain));
+        if !is_allowed {
+            return Err(format!(
+                "Domain restriction: This feature only works on coding practice sites ({}). Upgrade to Pro for unlimited access.",
+                ALLOWED_DOMAINS.join(", ")
+            ));
+        }
+    }
+    // If no source_url provided, allow (backwards compatibility)
+    Ok(())
+}
+
 #[tauri::command]
-async fn query_ai(prompt: String, config: ai::AIConfig) -> Result<String, String> {
+async fn query_ai(prompt: String, config: ai::AIConfig, source_url: Option<String>) -> Result<String, String> {
+    // Validate domain for BYO API key users
+    validate_source_url(&source_url)?;
     ai::query_with_text(&prompt, &config).await
 }
 
@@ -581,7 +617,10 @@ async fn query_ai_with_image(
     prompt: String,
     image_path: String,
     config: ai::AIConfig,
+    source_url: Option<String>,
 ) -> Result<String, String> {
+    // Validate domain for BYO API key users
+    validate_source_url(&source_url)?;
     let image_data = std::fs::read(&image_path)
         .map_err(|e| format!("Failed to read image: {}", e))?;
     ai::query_with_image(&prompt, &image_data, &config).await
@@ -803,6 +842,38 @@ async fn create_billing_portal_session(
     Ok(portal_url)
 }
 
+/// Open a URL in the system's default browser
+#[tauri::command]
+async fn open_url(url: String) -> Result<(), String> {
+    println!("[Open URL] Opening: {}", url);
+    
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+    
+    Ok(())
+}
+
 /// Sign up a new user via Supabase Auth (bypasses SSL inspection on corporate VPN)
 #[tauri::command]
 async fn supabase_sign_up(
@@ -918,12 +989,14 @@ async fn query_ai_via_proxy(
     prompt: String,
     model: String,
     access_token: String,
+    source_url: Option<String>,
 ) -> Result<AIProxyResponse, String> {
     const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
     
     println!("[Rust AI Proxy] Starting request to ai-proxy...");
     println!("[Rust AI Proxy] Model: {}", model);
     println!("[Rust AI Proxy] Prompt length: {} chars", prompt.len());
+    println!("[Rust AI Proxy] Source URL: {:?}", source_url);
     
     
     // Use static client (reuses TLS connections)
@@ -940,7 +1013,8 @@ async fn query_ai_via_proxy(
         "model": model,
         "messages": messages,
         "stream": false,
-        "max_tokens": 4096
+        "max_tokens": 4096,
+        "source_url": source_url
     });
 
     println!("[Rust AI Proxy] Sending POST to {}/functions/v1/ai-proxy", SUPABASE_URL);
@@ -1026,6 +1100,7 @@ async fn query_ai_via_proxy_with_image(
     image_path: String,
     model: String,
     access_token: String,
+    source_url: Option<String>,
 ) -> Result<AIProxyResponse, String> {
     const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
 
@@ -1033,6 +1108,7 @@ async fn query_ai_via_proxy_with_image(
     println!("[Rust AI Proxy Image] Model: {}", model);
     println!("[Rust AI Proxy Image] Prompt length: {} chars", prompt.len());
     println!("[Rust AI Proxy Image] Image path: {}", image_path);
+    println!("[Rust AI Proxy Image] Source URL: {:?}", source_url);
 
 
     // Read and encode image
@@ -1065,7 +1141,8 @@ async fn query_ai_via_proxy_with_image(
         "model": model,
         "messages": messages,
         "stream": false,
-        "max_tokens": 4096
+        "max_tokens": 4096,
+        "source_url": source_url
     });
 
     println!("[Rust AI Proxy Image] Sending POST to {}/functions/v1/ai-proxy", SUPABASE_URL);
@@ -1236,6 +1313,7 @@ fn main() {
             query_ai_via_proxy_with_image,
             create_checkout_session,
             create_billing_portal_session,
+            open_url,
             supabase_sign_up,
             supabase_sign_in,
             open_external_url,

@@ -55,6 +55,7 @@ function isAudio(source: InputSource): source is AudioSource {
 
 interface AIConfig {
   selected_model: string;
+  gemini_api_key?: string;  // BYO API key for free users who exhausted tries
 }
 
 // Available AI models
@@ -65,7 +66,7 @@ const PRO_MODELS = [
   { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
 ];
 
-const FREE_MODEL = { id: 'grok-code-fast', name: 'Grok Code Fast', provider: 'xAI' };
+const FREE_MODEL = { id: 'gemini-2.5-flash', name: 'Gemini 2.5 flash', provider: 'Google' };
 
 // Allowed domains for free users
 const FREE_TIER_ALLOWED_DOMAINS = [
@@ -114,17 +115,23 @@ function App() {
     
     return {
       selected_model: localStorage.getItem('ai_model') || 'gpt-5.2-codex',
+      gemini_api_key: localStorage.getItem('gemini_api_key') || undefined,
     };
   });
 
-  // Persist AI model selection so it survives app restarts.
+  // Persist AI config so it survives app restarts.
   useEffect(() => {
     try {
       localStorage.setItem('ai_model', aiConfig.selected_model);
+      if (aiConfig.gemini_api_key) {
+        localStorage.setItem('gemini_api_key', aiConfig.gemini_api_key);
+      } else {
+        localStorage.removeItem('gemini_api_key');
+      }
     } catch (e) {
       console.warn('Failed to persist AI config:', e);
     }
-  }, [aiConfig.selected_model]);
+  }, [aiConfig.selected_model, aiConfig.gemini_api_key]);
   
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'account' | 'models' | 'prompts' | 'input' | 'hotkeys'>('models');
@@ -188,18 +195,29 @@ function App() {
     clearSessionOnStart();
     setAuthLoading(false);
 
-    // Listen for auth state changes (in case Supabase JS client fires events)
+    // Listen for auth state changes
+    // Note: We primarily handle auth in handleAuthSuccess (called from SignInForm)
+    // This listener is a backup for token refresh events
+    let lastProcessedUserId: string | null = null;
+    
     const { data: { subscription: authSubscription } } = onAuthStateChange(async (event, session) => {
+      // Only log and process meaningful events, skip duplicates
+      if (event === 'SIGNED_IN' && session?.user?.id === lastProcessedUserId) {
+        return; // Skip duplicate SIGNED_IN for same user
+      }
+      
       console.log('Auth state changed:', event);
       setAuthSession(session);
       setAuthUser(session?.user || null);
       
       if (session?.user) {
+        lastProcessedUserId = session.user.id;
         const sub = await getUserSubscription(session.user.id);
         setSubscription(sub);
-        const stats = await getUsageStats(session.user.id);
+        const stats = await getUsageStats(session.user.id, sub);
         setUsageStats(stats);
       } else {
+        lastProcessedUserId = null;
         setSubscription(null);
         setUsageStats(null);
       }
@@ -210,19 +228,10 @@ function App() {
     };
   }, []);
 
-  // Refresh usage stats periodically when user is logged in
-  useEffect(() => {
-    if (!authUser) return;
-    
-    const refreshStats = async () => {
-      const stats = await getUsageStats(authUser.id);
-      setUsageStats(stats);
-    };
-
-    // Refresh every 30 seconds while app is open
-    const interval = setInterval(refreshStats, 30000);
-    return () => clearInterval(interval);
-  }, [authUser]);
+  // Usage stats are fetched:
+  // 1. On sign in (in handleAuthSuccess and onAuthStateChange)
+  // 2. After each AI request (from ai-proxy response)
+  // No need for periodic polling - saves Supabase calls
 
   useEffect(() => {
     checkCdpStatus();
@@ -641,6 +650,10 @@ function App() {
   const handleAuthSuccess = async () => {
     console.log('[App] handleAuthSuccess called');
     
+    // Clear any previous status messages and AI response from previous session
+    setMessage('');
+    setAiResponse('');
+    
     // Since we bypass Supabase JS client, onAuthStateChange doesn't fire
     // We need to manually get the session from localStorage and update state
     const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
@@ -664,7 +677,7 @@ function App() {
         if (session.user?.id) {
           const sub = await getUserSubscription(session.user.id);
           setSubscription(sub);
-          const stats = await getUsageStats(session.user.id);
+          const stats = await getUsageStats(session.user.id, sub);
           setUsageStats(stats);
         }
       } catch (e) {
@@ -727,7 +740,8 @@ function App() {
   };
 
   // Helper to check if user can use AI proxy (has quota remaining)
-  const canUseAIProxy = (): { allowed: boolean; reason?: string } => {
+  // Returns { allowed, reason, useBYOKey } - useBYOKey indicates free user should use their own Gemini key
+  const canUseAIProxy = (): { allowed: boolean; reason?: string; useBYOKey?: boolean } => {
     if (!subscription) {
       return { allowed: false, reason: 'Not signed in' };
     }
@@ -747,9 +761,13 @@ function App() {
       // Free user - check lifetime quota (3 calls)
       const lifetimeUsed = subscription.lifetime_ai_calls || 0;
       if (lifetimeUsed >= 3) {
+        // Check if user has their own Gemini API key
+        if (aiConfig.gemini_api_key) {
+          return { allowed: true, useBYOKey: true };
+        }
         return { 
           allowed: false, 
-          reason: 'Free trial expired (3 lifetime calls used). Subscribe to continue.'
+          reason: 'Free trial expired (3 lifetime calls used). Add your own Gemini API key or subscribe to continue.'
         };
       }
       return { allowed: true };
@@ -942,29 +960,34 @@ function App() {
       return;
     }
 
-    // Get access token for proxy calls
-    const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
-    const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
-    const storedSession = localStorage.getItem(storageKey);
+    // Check if using BYO Gemini API key (free user with exhausted quota but has own key)
+    const useBYOKey = quotaCheck.useBYOKey && aiConfig.gemini_api_key;
+
+    // Get access token for proxy calls (not needed for BYO key)
     let accessToken = '';
-    
-    if (storedSession) {
-      try {
-        const session = JSON.parse(storedSession);
-        accessToken = session.access_token || '';
-      } catch {
-        setMessage('❌ Session error. Please sign in again.');
+    if (!useBYOKey) {
+      const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
+      const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+      const storedSession = localStorage.getItem(storageKey);
+      
+      if (storedSession) {
+        try {
+          const session = JSON.parse(storedSession);
+          accessToken = session.access_token || '';
+        } catch {
+          setMessage('❌ Session error. Please sign in again.');
+          return;
+        }
+      }
+      
+      if (!accessToken) {
+        setMessage('❌ Please sign in to use AI features.');
         return;
       }
     }
-    
-    if (!accessToken) {
-      setMessage('❌ Please sign in to use AI features.');
-      return;
-    }
 
     // Determine which model to use
-    const modelToUse = isPro ? aiConfig.selected_model : FREE_MODEL.id;
+    const modelToUse = useBYOKey ? 'gemini-2.5-flash' : (isPro ? aiConfig.selected_model : FREE_MODEL.id);
 
     setIsLoading(true);
     setAiResponse('');
@@ -973,7 +996,7 @@ function App() {
       let responseText: string;
       
       if (isDisplay(sourceToUse)) {
-        // Display/Screen capture - always uses screenshot
+        // Display/Screen capture - always uses screenshot (Pro only)
         setMessage('📸 Capturing display...');
         const screenshotPath = await invoke<string>('capture_display_screenshot', { 
           displayId: sourceToUse.id 
@@ -982,6 +1005,7 @@ function App() {
         setMessage('🤖 Analyzing screenshot with AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage);
         
+        // Display capture is Pro-only, never uses BYO key
         const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
           prompt,
           imagePath: screenshotPath,
@@ -1019,27 +1043,46 @@ function App() {
         setMessage('🤖 Analyzing screenshot with AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage);
         
-        const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
-          prompt,
-          imagePath: screenshotPath,
-          model: modelToUse,
-          accessToken,
-        });
-        
-        if (proxyResponse.error) {
-          throw new Error(proxyResponse.error);
-        }
-        responseText = proxyResponse.response;
-        
-        if (proxyResponse.usage) {
-          setUsageStats(prev => prev ? {
-            ...prev,
-            requests_used: proxyResponse.usage!.requests_used,
-          } : prev);
-          // Refresh subscription for free users (lifetime_ai_calls updated)
-          if (!proxyResponse.usage.is_paid && authUser?.id) {
-            const updatedSub = await getUserSubscription(authUser.id);
-            if (updatedSub) setSubscription(updatedSub);
+        if (useBYOKey) {
+          // Use direct Gemini API with user's own key
+          // Pass source_url for domain validation in Rust
+          const tabUrl = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
+          responseText = await invoke<string>('query_ai_with_image', {
+            prompt,
+            imagePath: screenshotPath,
+            config: { 
+              selected_model: modelToUse, 
+              gemini_api_key: aiConfig.gemini_api_key || '', 
+              claude_api_key: '' 
+            },
+            sourceUrl: tabUrl,
+          });
+        } else {
+          // Pass source_url for server-side domain validation
+          const tabUrl = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
+          const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
+            prompt,
+            imagePath: screenshotPath,
+            model: modelToUse,
+            accessToken,
+            sourceUrl: tabUrl,
+          });
+          
+          if (proxyResponse.error) {
+            throw new Error(proxyResponse.error);
+          }
+          responseText = proxyResponse.response;
+          
+          if (proxyResponse.usage) {
+            setUsageStats(prev => prev ? {
+              ...prev,
+              requests_used: proxyResponse.usage!.requests_used,
+            } : prev);
+            // Refresh subscription for free users (lifetime_ai_calls updated)
+            if (!proxyResponse.usage.is_paid && authUser?.id) {
+              const updatedSub = await getUserSubscription(authUser.id);
+              if (updatedSub) setSubscription(updatedSub);
+            }
           }
         }
       } else {
@@ -1053,26 +1096,44 @@ function App() {
         setMessage('🤖 Asking AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage, text);
         
-        const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy', {
-          prompt,
-          model: modelToUse,
-          accessToken,
-        });
-        
-        if (proxyResponse.error) {
-          throw new Error(proxyResponse.error);
-        }
-        responseText = proxyResponse.response;
-        
-        if (proxyResponse.usage) {
-          setUsageStats(prev => prev ? {
-            ...prev,
-            requests_used: proxyResponse.usage!.requests_used,
-          } : prev);
-          // Refresh subscription for free users (lifetime_ai_calls updated)
-          if (!proxyResponse.usage.is_paid && authUser?.id) {
-            const updatedSub = await getUserSubscription(authUser.id);
-            if (updatedSub) setSubscription(updatedSub);
+        if (useBYOKey) {
+          // Use direct Gemini API with user's own key
+          // Pass source_url for domain validation in Rust
+          const tabUrl = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
+          responseText = await invoke<string>('query_ai', {
+            prompt,
+            config: { 
+              selected_model: modelToUse, 
+              gemini_api_key: aiConfig.gemini_api_key || '', 
+              claude_api_key: '' 
+            },
+            sourceUrl: tabUrl,
+          });
+        } else {
+          // Pass source_url for server-side domain validation
+          const tabUrlForProxy = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
+          const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy', {
+            prompt,
+            model: modelToUse,
+            accessToken,
+            sourceUrl: tabUrlForProxy,
+          });
+          
+          if (proxyResponse.error) {
+            throw new Error(proxyResponse.error);
+          }
+          responseText = proxyResponse.response;
+          
+          if (proxyResponse.usage) {
+            setUsageStats(prev => prev ? {
+              ...prev,
+              requests_used: proxyResponse.usage!.requests_used,
+            } : prev);
+            // Refresh subscription for free users (lifetime_ai_calls updated)
+            if (!proxyResponse.usage.is_paid && authUser?.id) {
+              const updatedSub = await getUserSubscription(authUser.id);
+              if (updatedSub) setSubscription(updatedSub);
+            }
           }
         }
       }
@@ -1122,9 +1183,11 @@ function App() {
         <div className="header-right">
           {/* Quota Display */}
           {subscription && (
-            <span className="quota-badge" title={isPaidUser ? 'Monthly quota' : 'Lifetime free calls'}>
+            <span className="quota-badge" title={isPaidUser ? 'Monthly quota' : ((subscription.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key ? 'Using your Gemini API key' : 'Lifetime free calls')}>
               {isPaidUser ? (
                 <>📊 {usageStats ? `${usageStats.requests_used}/${usageStats.requests_limit}` : '...'}</>
+              ) : (subscription.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key ? (
+                <>🔑 BYO Key</>
               ) : (
                 <>🎁 {subscription.lifetime_ai_calls || 0}/3 free</>
               )}
@@ -1378,17 +1441,63 @@ function App() {
                       </select>
                     ) : (
                       <div className="input-field" style={{ backgroundColor: '#f5f5f5', cursor: 'not-allowed' }}>
-                        {FREE_MODEL.name} ({FREE_MODEL.provider}) - Free Tier
+                        {(subscription?.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key 
+                          ? 'Gemini 2.5 Flash (Google) - Your API Key'
+                          : `${FREE_MODEL.name} (${FREE_MODEL.provider}) - Free Tier`}
                       </div>
                     )}
                   </div>
+
+                  {/* BYO API Key section - shown when free user exhausted 3 tries */}
+                  {!isPaidUser && (subscription?.lifetime_ai_calls || 0) >= 3 && (
+                    <div className="form-group" style={{ marginTop: '16px', padding: '16px', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '1px solid #0ea5e9' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#0369a1', fontWeight: 600 }}>
+                        🔑 Bring Your Own API Key
+                        {aiConfig.gemini_api_key && <span style={{ color: '#16a34a', fontSize: '12px' }}>✓ Active</span>}
+                      </label>
+                      <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>
+                        Your 3 free tries are used. Add your own Gemini API key to continue using AI (with same domain restrictions).
+                      </p>
+                      <input
+                        type="password"
+                        value={aiConfig.gemini_api_key || ''}
+                        onChange={(e) => setAiConfig({...aiConfig, gemini_api_key: e.target.value || undefined})}
+                        placeholder="Enter your Gemini API key"
+                        className="input-field"
+                        style={{ marginBottom: '8px' }}
+                      />
+                      <button 
+                        onClick={() => invoke('open_url', { url: 'https://aistudio.google.com/app/apikey' })}
+                        style={{ 
+                          background: 'none', 
+                          border: 'none', 
+                          padding: 0, 
+                          fontSize: '12px', 
+                          color: '#0ea5e9', 
+                          cursor: 'pointer',
+                          textDecoration: 'underline'
+                        }}
+                      >
+                        🔗 Get a free API key from Google AI Studio
+                      </button>
+                      {aiConfig.gemini_api_key && (
+                        <p style={{ fontSize: '11px', color: '#16a34a', marginTop: '8px' }}>
+                          ✓ Using Gemini 2.5 Flash with your own key. Domain restrictions still apply.
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   {!isPaidUser && (
                     <div className="info-note" style={{ marginTop: '16px' }}>
                       <h4 style={{ marginBottom: '8px' }}>🔒 Free Tier Limitations</h4>
                       <ul style={{ fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
-                        <li>Grok Code Fast model only</li>
-                        <li>3 lifetime AI requests</li>
+                        <li>{(subscription?.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key 
+                          ? 'Gemini 2.5 Flash (with your API key)' 
+                          : 'Grok Code Fast model only'}</li>
+                        <li>{(subscription?.lifetime_ai_calls || 0) >= 3 
+                          ? (aiConfig.gemini_api_key ? 'Unlimited with your API key' : '3 lifetime AI requests (used)')
+                          : `${3 - (subscription?.lifetime_ai_calls || 0)} of 3 free requests remaining`}</li>
                         <li>Chrome tabs only (no screen capture)</li>
                         <li>Only works on: {FREE_TIER_ALLOWED_DOMAINS.join(', ')}</li>
                       </ul>
@@ -1497,7 +1606,16 @@ function App() {
                             className="input-field"
                             value={hotkeysDraft.text}
                             onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, text: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + E' : runtimePlatform === 'windows' ? 'Alt + E' : 'Ctrl + E'}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + 1' : runtimePlatform === 'windows' ? 'Alt + 1' : 'Ctrl + 1'}
+                          />
+                        </div>
+                        <div className="hotkey-field">
+                          <div className="hotkey-label">Audio Start/Stop → Solve</div>
+                          <input
+                            className="input-field"
+                            value={hotkeysDraft.audio_toggle}
+                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, audio_toggle: e.target.value })}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + 3' : runtimePlatform === 'windows' ? 'Alt + 3' : 'Ctrl + 3'}
                           />
                         </div>
                         <div className="hotkey-field">
@@ -1536,9 +1654,10 @@ function App() {
                             className="input-field"
                             value={hotkeysDraft.screenshot}
                             onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, screenshot: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + S' : runtimePlatform === 'windows' ? 'Alt + S' : 'Ctrl + S'}
+                            placeholder={runtimePlatform === 'macos' ? 'Command + 2' : runtimePlatform === 'windows' ? 'Alt + 2' : 'Ctrl + 2'}
                           />
                         </div>
+                        <div className="hotkey-field hotkey-field-spacer" />
                         <div className="hotkey-field">
                           <div className="hotkey-label">Scroll down (Explanation)</div>
                           <input
@@ -1567,21 +1686,6 @@ function App() {
                           />
                         </div>
                       </div>
-                    </div>
-
-                    <div className="hotkeys-two-col hotkeys-two-col-single">
-                      <div className="hotkeys-col">
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Audio toggle (System)</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.audio_toggle}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, audio_toggle: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + A' : runtimePlatform === 'windows' ? 'Alt + A' : 'Ctrl + A'}
-                          />
-                        </div>
-                      </div>
-                      <div className="hotkeys-col hotkeys-col-spacer" />
                     </div>
 
                     <div className="hotkeys-two-col hotkeys-two-col-single">

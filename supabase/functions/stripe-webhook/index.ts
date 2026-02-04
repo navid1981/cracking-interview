@@ -230,21 +230,42 @@ Deno.serve(async (req) => {
       }
 
       // ============ PAYMENT SUCCEEDED ============
-      // Monthly renewal payment successful
+      // Monthly renewal payment successful - IMPORTANT: Update period dates for quota reset!
       case "invoice.payment_succeeded": {
         const invoice = event.data.object as any;
         const customerId = invoice.customer;
 
         console.log(`[Webhook] Payment succeeded - customer: ${customerId}`);
+        console.log(`[Webhook] Billing reason: ${invoice.billing_reason}`);
 
-        // Only update status, keep tier unchanged
+        // Build update payload
+        const updatePayload: Record<string, any> = {
+          subscription_status: "active",
+        };
+
+        // For subscription renewals/cycles, update the period dates from invoice lines
+        // This resets the quota for the new billing period
+        if (invoice.lines?.data?.[0]?.period) {
+          const period = invoice.lines.data[0].period;
+          if (period.start) {
+            updatePayload.subscription_start_date = new Date(period.start * 1000).toISOString();
+            console.log(`[Webhook] New period start: ${updatePayload.subscription_start_date}`);
+          }
+          if (period.end) {
+            updatePayload.subscription_end_date = new Date(period.end * 1000).toISOString();
+            console.log(`[Webhook] New period end: ${updatePayload.subscription_end_date}`);
+          }
+        }
+
+        console.log("[Webhook] Payment update payload:", JSON.stringify(updatePayload));
+
         const { error } = await supabase
           .from("users")
-          .update({ subscription_status: "active" })
+          .update(updatePayload)
           .eq("stripe_customer_id", customerId);
 
         if (error) console.error("[Webhook] Payment success update error:", error.message);
-        else console.log("[Webhook] Status set to active");
+        else console.log("[Webhook] Status and period dates updated");
         break;
       }
 

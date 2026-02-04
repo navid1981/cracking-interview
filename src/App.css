@@ -421,6 +421,10 @@ body {
   min-width: 0;
 }
 
+.hotkey-field-spacer {
+  height: 52px; /* Match approximate height of a hotkey field */
+}
+
 .hotkey-label {
   font-size: 12px;
   color: #666;
