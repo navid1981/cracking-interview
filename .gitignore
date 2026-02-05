@@ -14,3 +14,5 @@ dist
 
 # Credentials file
 CrackingInterview-CREDENTIALS.txt
+/src-tauri/Cargo.lock
+/package-lock.json
