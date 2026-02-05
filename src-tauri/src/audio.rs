@@ -78,7 +78,7 @@ pub fn stop_system_audio_recording() -> Result<String, String> {
 }
 
 pub fn is_recording() -> bool {
-    let mut guard = match REC_STATE.lock() {
+    let guard = match REC_STATE.lock() {
         Ok(g) => g,
         Err(_) => return false,
     };
@@ -327,9 +327,12 @@ mod windows {
     use std::sync::mpsc;
     use std::thread;
 
-    use windows::core::Interface;
     use windows::Win32::Media::Audio::*;
     use windows::Win32::System::Com::*;
+
+    // Wave format constants (not exported by windows crate 0.58)
+    const WAVE_FORMAT_IEEE_FLOAT: u16 = 0x0003;
+    const WAVE_FORMAT_EXTENSIBLE: u16 = 0xFFFE;
 
     fn sample_format_to_hound_spec(wfx: &WAVEFORMATEX) -> Result<hound::WavSpec, String> {
         let channels = wfx.nChannels as u16;
@@ -346,7 +349,7 @@ mod windows {
 
     pub fn start_windows_recording() -> Result<WindowsRecordingState, String> {
         unsafe {
-            CoInitializeEx(None, COINIT_MULTITHREADED).map_err(|e| format!("CoInitializeEx failed: {e}"))?;
+            CoInitializeEx(None, COINIT_MULTITHREADED).ok();
         }
 
         let mut output_path = std::env::temp_dir();
@@ -431,9 +434,8 @@ mod windows {
                     break;
                 }
 
-                let mut packet_length: u32 = 0;
-                capture_client
-                    .GetNextPacketSize(&mut packet_length)
+                let mut packet_length = capture_client
+                    .GetNextPacketSize()
                     .map_err(|e| format!("GetNextPacketSize failed: {e}"))?;
 
                 while packet_length != 0 {
@@ -445,7 +447,8 @@ mod windows {
                         .GetBuffer(&mut data_ptr, &mut num_frames, &mut flags, None, None)
                         .map_err(|e| format!("GetBuffer failed: {e}"))?;
 
-                    if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 != 0 {
+                    // AUDCLNT_BUFFERFLAGS_SILENT.0 is i32, cast to u32 for comparison
+                    if flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0 {
                         // Write silence frames.
                         let channels = wfx.nChannels as usize;
                         let samples = num_frames as usize * channels;
@@ -462,7 +465,7 @@ mod windows {
                             // Interpret as f32 interleaved.
                             let floats: &[f32] = std::slice::from_raw_parts(
                                 slice.as_ptr() as *const f32,
-                                (byte_count / std::mem::size_of::<f32>()),
+                                byte_count / std::mem::size_of::<f32>(),
                             );
                             for &s in floats.iter().take(num_frames as usize * channels) {
                                 let clamped = s.max(-1.0).min(1.0);
@@ -473,7 +476,7 @@ mod windows {
                             // Assume i16 PCM interleaved.
                             let ints: &[i16] = std::slice::from_raw_parts(
                                 slice.as_ptr() as *const i16,
-                                (byte_count / std::mem::size_of::<i16>()),
+                                byte_count / std::mem::size_of::<i16>(),
                             );
                             for &s in ints.iter().take(num_frames as usize * channels) {
                                 writer.write_sample::<i16>(s).map_err(|e| format!("WAV write failed: {e}"))?;
@@ -485,8 +488,8 @@ mod windows {
                         .ReleaseBuffer(num_frames)
                         .map_err(|e| format!("ReleaseBuffer failed: {e}"))?;
 
-                    capture_client
-                        .GetNextPacketSize(&mut packet_length)
+                    packet_length = capture_client
+                        .GetNextPacketSize()
                         .map_err(|e| format!("GetNextPacketSize failed: {e}"))?;
                 }
 
