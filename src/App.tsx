@@ -650,6 +650,9 @@ function App() {
   const handleAuthSuccess = async () => {
     console.log('[App] handleAuthSuccess called');
     
+    // Close settings modal if open (e.g., user signed out from Account tab)
+    setShowSettings(false);
+    
     // Clear any previous status messages and AI response from previous session
     setMessage('');
     setAiResponse('');
@@ -787,15 +790,16 @@ function App() {
         if (selectedTab && !isDisplay(selectedTab)) {
           if (displaysOnly.length > 0) {
             setSelectedTab(displaysOnly[0]);
-            setMessage('Chrome CDP closed, switched to display');
           } else {
             setSelectedTab(null);
-            setMessage('Chrome CDP closed');
           }
         }
         
         return displaysOnly;
       });
+      
+      // Clear any "CDP opened" message when CDP closes
+      setMessage(prev => prev.includes('Chrome CDP opened') ? '' : prev);
     }
   }, [cdpReady]);
 
