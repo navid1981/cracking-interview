@@ -78,7 +78,7 @@ pub fn stop_system_audio_recording() -> Result<String, String> {
 }
 
 pub fn is_recording() -> bool {
-    let guard = match REC_STATE.lock() {
+    let mut guard = match REC_STATE.lock() {
         Ok(g) => g,
         Err(_) => return false,
     };

@@ -8,7 +8,10 @@ run -> npm run build(to create /dist)
 
 
 cd /Users/nsalehvaziri/cracking-interview
+npm install
 npm run build
 cd src-tauri
 cargo build --release
+cargo update
+cargo tree
 ./target/release/cracking-interview
