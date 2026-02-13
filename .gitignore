@@ -9,10 +9,13 @@ dist
 .vs
 
 # Environment variables with secrets
-.env
 .env.local
 
 # Credentials file
 CrackingInterview-CREDENTIALS.txt
-/src-tauri/Cargo.lock
-/package-lock.json
+./src-tauri/Cargo.lock
+./package-lock.json
+
+# Helper scripts
+restart-app.sh
+toggle-visibility.sh

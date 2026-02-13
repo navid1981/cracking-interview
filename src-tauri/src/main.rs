@@ -1440,6 +1440,195 @@ fn get_google_token_status() -> Result<bool, String> {
 
 
 // ============================================================================
+// STEALTH MODE – Platform-specific helpers
+// ============================================================================
+
+/// macOS: hide from Dock by setting NSApp activation policy to .accessory (1).
+/// This also removes the app from Cmd+Tab.
+/// Uses raw ObjC runtime so no extra crate dependency is needed.
+#[cfg(target_os = "macos")]
+fn apply_macos_dock_hiding() {
+    use std::ffi::c_void;
+
+    // Thin wrappers around ObjC runtime functions (shipped with macOS).
+    extern "C" {
+        fn objc_getClass(name: *const std::ffi::c_char) -> *mut c_void;
+        fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
+        // We transmute objc_msgSend to the right signature below.
+        fn objc_msgSend();
+    }
+
+    type SendNoArg = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+    type SendI64 = unsafe extern "C" fn(*mut c_void, *mut c_void, i64) -> *mut c_void;
+
+    unsafe {
+        let cls = objc_getClass(b"NSApplication\0".as_ptr() as *const _);
+        if cls.is_null() {
+            println!("⚠️ [stealth-macOS] Could not locate NSApplication class");
+            return;
+        }
+
+        let shared_sel = sel_registerName(b"sharedApplication\0".as_ptr() as *const _);
+        let policy_sel = sel_registerName(b"setActivationPolicy:\0".as_ptr() as *const _);
+
+        let send: SendNoArg = std::mem::transmute(objc_msgSend as *const ());
+        let send_i64: SendI64 = std::mem::transmute(objc_msgSend as *const ());
+
+        let app = send(cls, shared_sel);
+        if app.is_null() {
+            println!("⚠️ [stealth-macOS] NSApp.sharedApplication returned nil");
+            return;
+        }
+
+        // NSApplicationActivationPolicyAccessory = 1
+        send_i64(app, policy_sel, 1);
+        println!("🕵️ [stealth-macOS] Dock icon hidden (activationPolicy = .accessory)");
+    }
+}
+
+/// macOS: Exclude window from screen capture (Zoom, Teams, screenshots, etc.)
+/// by setting NSWindow.sharingType = NSWindowSharingNone (0).
+/// This is the ONLY reliable way to hide window content on macOS.
+#[cfg(target_os = "macos")]
+fn apply_macos_screen_capture_protection(win: &tauri::WebviewWindow) {
+    use std::ffi::c_void;
+
+    extern "C" {
+        fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
+        fn objc_msgSend();
+    }
+
+    type SendNoArg = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+    type SendU64 = unsafe extern "C" fn(*mut c_void, *mut c_void, u64);
+
+    unsafe {
+        // Get the raw NSWindow pointer from Tauri
+        let ns_window_ptr = match win.ns_window() {
+            Ok(ptr) => ptr as *mut c_void,
+            Err(e) => {
+                println!("⚠️ [stealth-macOS] Could not get NSWindow: {}", e);
+                return;
+            }
+        };
+
+        if ns_window_ptr.is_null() {
+            println!("⚠️ [stealth-macOS] NSWindow pointer is null");
+            return;
+        }
+
+        // Get selectors
+        let set_sharing_sel = sel_registerName(b"setSharingType:\0".as_ptr() as *const _);
+        let get_sharing_sel = sel_registerName(b"sharingType\0".as_ptr() as *const _);
+        
+        let send_u64: SendU64 = std::mem::transmute(objc_msgSend as *const ());
+        let send_get: SendNoArg = std::mem::transmute(objc_msgSend as *const ());
+
+        // NSWindowSharingNone = 0 → window is NOT shared (excludes from screen capture)
+        send_u64(ns_window_ptr, set_sharing_sel, 0);
+        
+        // Verify the setting took effect
+        let sharing_type = send_get(ns_window_ptr, get_sharing_sel) as u64;
+        
+        if sharing_type == 0 {
+            println!("🕵️ [stealth-macOS] ✅ Window excluded from screen capture (sharingType = 0)");
+        } else {
+            println!("⚠️ [stealth-macOS] sharingType = {} (expected 0), retrying...", sharing_type);
+            
+            // Try again
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            send_u64(ns_window_ptr, set_sharing_sel, 0);
+            
+            let sharing_type_retry = send_get(ns_window_ptr, get_sharing_sel) as u64;
+            if sharing_type_retry == 0 {
+                println!("🕵️ [stealth-macOS] ✅ Window excluded from screen capture on retry (sharingType = 0)");
+            } else {
+                println!("⚠️ [stealth-macOS] Failed to set sharingType = 0 (current value: {})", sharing_type_retry);
+            }
+        }
+    }
+}
+
+/// macOS: Restore window to normal visibility (allow screen capture)
+/// by setting NSWindow.sharingType = NSWindowSharingReadWrite (1).
+#[cfg(target_os = "macos")]
+fn restore_macos_screen_capture_visibility(win: &tauri::WebviewWindow) {
+    use std::ffi::c_void;
+
+    extern "C" {
+        fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
+        fn objc_msgSend();
+    }
+
+    type SendNoArg = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+    type SendU64 = unsafe extern "C" fn(*mut c_void, *mut c_void, u64);
+
+    unsafe {
+        let ns_window_ptr = match win.ns_window() {
+            Ok(ptr) => ptr as *mut c_void,
+            Err(e) => {
+                println!("⚠️ [normal-macOS] Could not get NSWindow: {}", e);
+                return;
+            }
+        };
+
+        if ns_window_ptr.is_null() {
+            println!("⚠️ [normal-macOS] NSWindow pointer is null");
+            return;
+        }
+
+        let set_sharing_sel = sel_registerName(b"setSharingType:\0".as_ptr() as *const _);
+        let get_sharing_sel = sel_registerName(b"sharingType\0".as_ptr() as *const _);
+        
+        let send_u64: SendU64 = std::mem::transmute(objc_msgSend as *const ());
+        let send_get: SendNoArg = std::mem::transmute(objc_msgSend as *const ());
+
+        // NSWindowSharingReadWrite = 1 → window CAN be captured (normal behavior)
+        send_u64(ns_window_ptr, set_sharing_sel, 1);
+        
+        let sharing_type = send_get(ns_window_ptr, get_sharing_sel) as u64;
+        println!("👁️ [normal-macOS] ✅ Window visible in screen capture (sharingType = {})", sharing_type);
+    }
+}
+
+/// Windows: apply WDA_EXCLUDEFROMCAPTURE and WS_EX_TOOLWINDOW via raw Win32 API.
+/// This is a belt-and-suspenders fallback in case Tauri's set_content_protected /
+/// set_skip_taskbar methods don't fully apply on certain Windows builds.
+#[cfg(target_os = "windows")]
+fn apply_windows_stealth(win: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    // Tauri 2 exposes the HWND through the raw-window-handle.
+    // We use the `hwnd()` helper which returns an isize.
+    let hwnd_raw = match win.hwnd() {
+        Ok(h) => h,
+        Err(e) => {
+            println!("⚠️ [stealth-windows] Could not get HWND: {}", e);
+            return;
+        }
+    };
+
+    unsafe {
+        let hwnd = HWND(hwnd_raw.0 as *mut _);
+
+        // ---- Exclude from screen capture ----
+        // WDA_EXCLUDEFROMCAPTURE = 0x11 (Windows 10 2004+)
+        let result = SetWindowDisplayAffinity(hwnd, WINDOW_DISPLAY_AFFINITY(0x11));
+        if let Err(e) = result {
+            println!("⚠️ [stealth-windows] SetWindowDisplayAffinity failed: {:?}", e);
+        } else {
+            println!("🕵️ [stealth-windows] Window excluded from screen capture");
+        }
+
+        // ---- Hide from taskbar + Alt+Tab ----
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let new_style = (ex_style | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
+        println!("🕵️ [stealth-windows] Window hidden from taskbar & Alt+Tab");
+    }
+}
+
+// ============================================================================
 // MAIN
 // ============================================================================
 
@@ -1502,6 +1691,63 @@ fn main() {
             
             // Pre-compile audio recorder helper in background (eliminates first-recording delay)
             audio::prewarm_audio_recorder();
+
+            // ---- Stealth Mode ----
+            // Read APP_VISIBILITY from .env: "stealth" hides from screen capture + Dock/Taskbar
+            let stealth_mode = std::env::var("APP_VISIBILITY")
+                .map(|v| v.to_lowercase() == "stealth")
+                .unwrap_or(false);
+
+            if stealth_mode {
+                println!("🕵️ Stealth mode ENABLED — hiding from screen capture and Dock/Taskbar");
+                
+                // macOS: Hide Dock icon immediately (app-level setting)
+                #[cfg(target_os = "macos")]
+                {
+                    apply_macos_dock_hiding();
+                }
+                
+                // Apply window stealth settings immediately (no delay needed with tokio spawn)
+                if let Some(win) = app.get_webview_window("main") {
+                    #[cfg(target_os = "macos")]
+                    {
+                        apply_macos_screen_capture_protection(&win);
+                    }
+
+                    #[cfg(target_os = "windows")]
+                    {
+                        apply_windows_stealth(&win);
+                    }
+
+                    // Cross-platform Tauri methods (backup/fallback)
+                    if let Err(e) = win.set_content_protected(true) {
+                        println!("⚠️ set_content_protected failed: {}", e);
+                    }
+                    if let Err(e) = win.set_skip_taskbar(true) {
+                        println!("⚠️ set_skip_taskbar failed: {}", e);
+                    }
+                } else {
+                    println!("⚠️ Could not find main window for stealth mode");
+                }
+            } else {
+                println!("👁️ Normal visibility mode (APP_VISIBILITY != stealth)");
+                
+                // Restore normal window visibility for screen capture
+                if let Some(win) = app.get_webview_window("main") {
+                    #[cfg(target_os = "macos")]
+                    {
+                        restore_macos_screen_capture_visibility(&win);
+                    }
+
+                    // Ensure window is NOT skipped in taskbar
+                    if let Err(e) = win.set_content_protected(false) {
+                        println!("⚠️ set_content_protected(false) failed: {}", e);
+                    }
+                    if let Err(e) = win.set_skip_taskbar(false) {
+                        println!("⚠️ set_skip_taskbar(false) failed: {}", e);
+                    }
+                }
+            }
 
             // Load configured hotkeys, store in state, and register them.
             let cfg = load_hotkeys_from_disk(app.handle());
