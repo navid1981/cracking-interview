@@ -706,7 +706,9 @@ mod macos {
         // Convert WAV to MP3 (smaller file, faster upload)
         convert_wav_to_mp3(&wav_path, &state.output_path)?;
         
-        // Return MP3 path (WAV kept for debugging)
+        // Delete WAV file after successful conversion
+        let _ = std::fs::remove_file(&wav_path);
+        
         Ok(state.output_path.to_str().ok_or("Invalid output path")?.to_string())
     }
 }
@@ -967,6 +969,9 @@ mod windows {
 
         // Convert WAV to MP3 using mp3lame (no FFmpeg needed)
         convert_wav_to_mp3(&wav_path, &output_path)?;
+        
+        // Delete WAV file after successful conversion
+        let _ = std::fs::remove_file(&wav_path);
 
         Ok(())
     }

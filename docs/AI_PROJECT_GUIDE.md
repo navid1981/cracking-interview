@@ -10,7 +10,7 @@ CrackingInterview is a **Tauri (Rust) + React** desktop app that helps a softwar
 - **Extracting content** from the selected source either as:
   - **Text** (execute JS in the tab to read `document.body.innerText`), or
   - **Screenshot** (CDP tab screenshot or OS display capture)
-  - **Audio** (system audio recording with speech-to-text)
+  - **Audio** (system audio recording sent directly to AI models that support audio input)
 - Sending that content into an **LLM** (via OpenRouter proxy or user's own API key)
 - Showing the **AI response** inside the app UI
 
@@ -44,8 +44,10 @@ The primary source code is:
   - `main.rs`: Tauri commands (IPC) + global hotkey registration
   - `chrome/*`: Chrome CDP integration (tabs, activate, execute JS, screenshots)
   - `ai/*`: Gemini + Claude HTTP clients + provider routing
-  - `audio.rs`: System audio recording (macOS ScreenCaptureKit)
+  - `audio.rs`: System audio recording (macOS: ScreenCaptureKit via Swift helper, Windows: WASAPI loopback), MP3 encoding
   - `screenshot.rs`: OS display capture (screenshots crate), thumbnails
+- **Resources**: `src-tauri/resources/`
+  - `audio_recorder.swift`: Swift helper for macOS audio recording (compiled at runtime)
 - **Supabase Edge Functions**: `supabase/functions/`
   - `ai-proxy/index.ts`: OpenRouter proxy with quota enforcement
   - `create-checkout/index.ts`: Stripe checkout session creation (production)
@@ -124,8 +126,12 @@ Component responsibilities:
   - calls Anthropic Messages API
   - uses detected image MIME type for screenshots
 - `src-tauri/src/audio.rs`
-  - System audio recording (macOS ScreenCaptureKit)
-  - Spawns Swift helper process for audio capture
+  - System audio recording for both macOS and Windows
+  - macOS: Spawns Swift helper process (`audio_recorder.swift`) using ScreenCaptureKit
+  - Windows: WASAPI loopback capture in separate thread
+  - WAV to MP3 conversion using `mp3lame-encoder` crate (statically linked)
+  - Warm mode support for instant recording start (macOS only)
+  - 3-minute automatic timeout on both platforms
 - `src-tauri/src/screenshot.rs`
   - OS display enumeration + capture (screenshots crate)
   - encodes capture as JPEG bytes and (optionally) downsizes for limits
@@ -167,7 +173,11 @@ Frontend setting: `useScreenshot` (stored in `localStorage`)
   - Display: `capture_display_screenshot` (OS capture → encoded as JPEG bytes, written to a temp file)
 - **Audio mode** (system audio):
   - `start_audio_recording` / `stop_audio_recording`
-  - Returns transcribed text (speech-to-text)
+  - Records system audio (interviewer voice from Zoom/Teams/etc.)
+  - Returns MP3 file path (sent directly to Gemini which supports audio input)
+  - 3-minute automatic timeout
+  - macOS: Uses ScreenCaptureKit via compiled Swift helper with "warm mode" for instant start
+  - Windows: Uses WASAPI loopback capture
 
 ### 4) AI providers and payload formats
 
@@ -229,11 +239,19 @@ Backend:
 
 Frontend:
 
-- `start_audio_recording()` - begins system audio capture
-- (user waits, timer shows duration)
-- `stop_audio_recording()` - returns transcribed text
-- `buildPrompt(template, language, transcribedText)`
-- `query_ai_via_proxy(prompt, model, accessToken)`
+- Select "Audio (System)" from Input Source dropdown → triggers `warm_audio_capture()` (macOS only, pre-initializes ScreenCaptureKit)
+- Click record or press hotkey → `start_audio_recording()` - begins system audio capture
+- (user waits, timer shows duration, max 3 minutes)
+- Click stop or press hotkey → `stop_audio_recording()` - returns MP3 file path
+- `buildPrompt(template, language, audioInstructions)` - uses audio-specific prompt
+- `query_ai_via_proxy_with_audio(prompt, audioPath, 'gemini-3-flash', accessToken)`
+
+Backend:
+
+- Audio is recorded as WAV then converted to MP3 using mp3lame-encoder (bundled, no FFmpeg needed)
+- MP3 is base64-encoded and sent to OpenRouter with `input_audio` content type
+- Model is forced to `gemini-3-flash` (Google's Gemini model that supports audio input)
+- OpenRouter routes to `google/gemini-3-flash-preview`
 
 ## Tauri commands (API surface)
 
@@ -267,8 +285,12 @@ AI (Proxy calls - via Supabase Edge Function):
 
 Audio:
 
-- `start_audio_recording() -> String`
-- `stop_audio_recording() -> String` (returns transcribed text)
+- `start_audio_recording() -> ()` - begins system audio recording
+- `stop_audio_recording() -> String` - stops recording and returns MP3 file path
+- `warm_audio_capture() -> ()` - (macOS only) pre-initializes ScreenCaptureKit for instant recording start
+- `cooldown_audio_capture() -> ()` - (macOS only) releases warm audio capture resources
+- `is_audio_recording() -> bool` - checks if currently recording
+- `query_ai_via_proxy_with_audio(prompt, audioPath, model, accessToken) -> AIProxyResponse` - sends audio to AI
 
 Auth (Supabase - proxied through Rust to bypass corporate VPN SSL issues):
 
@@ -367,10 +389,14 @@ The app includes a full authentication and subscription system using Supabase an
 - Gemini 2.5 Flash (via OpenRouter proxy or BYO Gemini API key)
 
 **Pro Tier:**
-- GPT-5.2 (OpenAI)
+- GPT-5.2 Codex (OpenAI)
+- Claude Sonnet 4.5 (Anthropic)
+- Gemini 3 Flash (Google)
 - Grok 4.1 Fast (xAI)
 
-Note: Claude Sonnet 4.5 and Gemini 3 Flash are available in the backend but hidden from frontend model selector.
+**Audio Input:**
+- Always uses Gemini 3 Flash (only model supporting audio input)
+- Model selection is overridden when audio source is used
 
 ### AI Routing Logic
 
@@ -387,6 +413,124 @@ The app supports two AI request paths:
    - Uses `query_ai`, `query_ai_with_image` commands
    - Calls Gemini API directly
    - Domain restrictions still enforced client-side
+
+### Audio Recording Implementation
+
+The app supports recording system audio (sound from Zoom/Teams/browser) and sending it directly to AI models that support audio input.
+
+#### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Audio Recording Flow                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  User selects Audio source  →  warm_audio_capture() [macOS only]        │
+│                                 (pre-initializes ScreenCaptureKit)      │
+│                                                                         │
+│  User clicks Record  →  start_audio_recording()                         │
+│                         ├── macOS: Swift helper via ScreenCaptureKit    │
+│                         └── Windows: WASAPI loopback capture            │
+│                                                                         │
+│  User clicks Stop  →  stop_audio_recording()                            │
+│                       ├── Stop capture                                  │
+│                       ├── WAV → MP3 conversion (mp3lame-encoder)        │
+│                       ├── Delete WAV file                               │
+│                       └── Return MP3 path                               │
+│                                                                         │
+│  Frontend  →  query_ai_via_proxy_with_audio()                           │
+│               ├── Read MP3, base64 encode                               │
+│               ├── Send with input_audio content type                    │
+│               └── Model: gemini-3-flash (forced)                        │
+│                                                                         │
+│  Edge Function  →  OpenRouter API                                       │
+│                    Model: google/gemini-3-flash-preview                 │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### macOS Implementation
+
+**Swift Helper** (`src-tauri/resources/audio_recorder.swift`):
+- Compiled on first use (or app startup via pre-warming)
+- Uses `ScreenCaptureKit` (macOS 13+) for system audio capture
+- Supports two modes:
+  - **Warm mode** (`--warm`): Pre-initializes ScreenCaptureKit, waits for "start"/"stop" commands via stdin
+  - **Legacy mode**: Starts recording immediately
+- Output: 44.1kHz mono WAV with volume boost and soft clipping
+- 3-minute automatic timeout
+
+**Warm Mode (Instant Start)**:
+1. When user selects Audio source → `warm_audio_capture()` called
+2. Swift helper spawned with `--warm` flag
+3. ScreenCaptureKit initialized (~0.5s)
+4. Helper waits for "start" command
+5. When user clicks Record → "start" sent via stdin → Recording begins instantly
+6. When user switches away from Audio → `cooldown_audio_capture()` terminates helper
+
+**Pre-warming on App Startup**:
+- `prewarm_audio_recorder()` called in Tauri setup
+- Compiles Swift helper in background
+- Eliminates ~1.5s compilation delay on first recording
+
+#### Windows Implementation
+
+**WASAPI Loopback** (`src-tauri/src/audio.rs` → `mod windows`):
+- Uses Windows Audio Session API (WASAPI) in loopback mode
+- Captures system audio output (what you hear from speakers/headphones)
+- Resamples to 16kHz mono
+- Volume boost (5x) with soft clipping
+- 3-minute automatic timeout
+
+#### MP3 Encoding
+
+**Library**: `mp3lame-encoder` crate (statically linked, no external dependencies)
+
+**Process**:
+1. Record to WAV (temporary file)
+2. Read WAV using `hound` crate
+3. Encode to MP3 at 128kbps
+4. Delete WAV file
+5. Return MP3 path
+
+**Why MP3 over WAV**:
+- ~10x smaller file size
+- Faster upload to OpenRouter
+- Gemini supports both formats
+
+#### OpenRouter Audio Format
+
+Per [OpenRouter documentation](https://openrouter.ai/docs/guides/overview/multimodal/audio):
+
+```json
+{
+  "model": "google/gemini-3-flash-preview",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "Listen to this audio..." },
+        { 
+          "type": "input_audio", 
+          "input_audio": { 
+            "data": "<base64_mp3>",
+            "format": "mp3"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Important**: Audio must use `input_audio` content type (not `audio_url`).
+
+#### Model Selection
+
+Audio input **always** uses `gemini-3-flash` regardless of user's model selection:
+- This is because only certain models support audio input
+- `gemini-3-flash` → OpenRouter model ID: `google/gemini-3-flash-preview`
+- Other Pro models (GPT-5.2, Claude 4.5, Grok 4.1) don't support audio input
 
 ### Billing Period vs Calendar Month
 
@@ -503,6 +647,6 @@ Notes:
   - `useAuth()` hook (for Supabase auth state)
   - `useSubscription()` hook
 - **CDP commands use a constant `"id": 1`** for WebSocket requests. If you ever add concurrency, switch to incrementing IDs and matching responses.
-- **Vosk speech-to-text is stubbed**: The audio transcription feature (`transcribe_audio`) is currently returning an error message. The native Vosk library needs to be properly bundled for production.
+- **Audio sends directly to AI**: Local speech-to-text (Vosk) was removed. Audio is now sent directly to Gemini which handles transcription and understanding natively. This is simpler and more accurate.
 - **Test vs Production Edge Functions**: There are duplicate functions (`-test` suffix) for Stripe integration. Consider using environment variables to switch between test/prod instead of separate functions.
 - **Corporate VPN workarounds**: Auth and some API calls go through Rust backend to bypass SSL inspection issues. This adds complexity but is necessary for some enterprise environments.
