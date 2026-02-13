@@ -15,8 +15,11 @@ import {
   signOut as supabaseSignOut,
   UserSubscription,
   UsageStats,
+  EDGE_FUNCTION_URL,
+  SUPABASE_API_KEY,
 } from './services/supabase';
 import type { User, Session } from '@supabase/supabase-js';
+import packageJson from '../package.json';
 import './App.css';
 
 interface ChromeTab {
@@ -76,6 +79,12 @@ const FREE_TIER_ALLOWED_DOMAINS = [
   'neetcode.io',
 ];
 
+interface Announcement {
+  id: string;
+  title: string;
+  message: string; // HTML content
+}
+
 function App() {
   // ========== AUTH STATE ==========
   const [authUser, setAuthUser] = useState<User | null>(null);
@@ -84,6 +93,8 @@ function App() {
   const [subscription, setSubscription] = useState<UserSubscription | null>(null);
   const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
   const [isSubscribing, setIsSubscribing] = useState(false);
+  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const [showAnnouncement, setShowAnnouncement] = useState(true);
 
   // ========== APP STATE ==========
   const [cdpStatus, setCdpStatus] = useState('🔴 Chrome Not Running');
@@ -216,6 +227,9 @@ function App() {
         setSubscription(sub);
         const stats = await getUsageStats(session.user.id, sub);
         setUsageStats(stats);
+        
+        // Fetch announcement
+        await fetchAnnouncement(session.user.email, sub);
       } else {
         lastProcessedUserId = null;
         setSubscription(null);
@@ -232,6 +246,14 @@ function App() {
   // 1. On sign in (in handleAuthSuccess and onAuthStateChange)
   // 2. After each AI request (from ai-proxy response)
   // No need for periodic polling - saves Supabase calls
+
+  // Fetch announcement when subscription is loaded (handles both auth paths)
+  useEffect(() => {
+    if (authUser?.email && subscription) {
+      console.log('[App] Subscription loaded, fetching announcement...');
+      fetchAnnouncement(authUser.email, subscription);
+    }
+  }, [authUser, subscription]);
 
   useEffect(() => {
     checkCdpStatus();
@@ -652,6 +674,64 @@ function App() {
 
 
   // ========== SUPABASE AUTH HANDLERS ==========
+  const fetchAnnouncement = async (email: string | undefined, sub: UserSubscription | null) => {
+    if (!email) return;
+    
+    try {
+      const userType = (sub?.subscription_status === 'active' || sub?.subscription_status === 'cancelling') ? 'pro' : 'free';
+      const appVersion = packageJson.version;
+      
+      console.log(`[Announcement] Fetching for ${email} (${userType}, v${appVersion})`);
+      
+      // Get access token from localStorage
+      const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
+      const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+      const storedSession = localStorage.getItem(storageKey);
+      
+      let accessToken = '';
+      if (storedSession) {
+        try {
+          const session = JSON.parse(storedSession);
+          accessToken = session.access_token || '';
+        } catch (e) {
+          console.error('[Announcement] Failed to parse session:', e);
+        }
+      }
+      
+      const response = await fetch(`${EDGE_FUNCTION_URL}/notification`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey': SUPABASE_API_KEY,
+        },
+        body: JSON.stringify({
+          email,
+          user_type: userType,
+          app_version: appVersion,
+        }),
+      });
+      
+      if (!response.ok) {
+        console.error('[Announcement] Fetch failed:', response.status);
+        return;
+      }
+      
+      const data = await response.json();
+      console.log('[Announcement] Received:', data);
+      
+      if (data.announcement) {
+        setAnnouncement(data.announcement);
+        setShowAnnouncement(true);
+      } else {
+        setAnnouncement(null);
+        setShowAnnouncement(false);
+      }
+    } catch (error) {
+      console.error('[Announcement] Error fetching:', error);
+    }
+  };
+
   const handleAuthSuccess = async () => {
     console.log('[App] handleAuthSuccess called');
     
@@ -687,6 +767,9 @@ function App() {
           setSubscription(sub);
           const stats = await getUsageStats(session.user.id, sub);
           setUsageStats(stats);
+          
+          // Fetch announcement
+          await fetchAnnouncement(session.user.email, sub);
         }
       } catch (e) {
         console.error('[App] Failed to parse stored session:', e);
@@ -703,6 +786,8 @@ function App() {
       setAuthSession(null);
       setSubscription(null);
       setUsageStats(null);
+      setAnnouncement(null);
+      setShowAnnouncement(false);
       setMessage('✅ Signed out successfully');
     } catch (error) {
       setMessage(`❌ Sign out failed: ${error}`);
@@ -906,6 +991,11 @@ function App() {
   };
 
   const solveWithAI = async (mode: 'auto' | 'text' | 'screenshot' = 'auto') => {
+    // Hide announcement on first AI query
+    if (showAnnouncement) {
+      setShowAnnouncement(false);
+    }
+    
     const sourceToUse = selectedTab ?? (allSources.length > 0 ? allSources[0] : null);
     if (!selectedTab && sourceToUse) {
       // Keep UI selection in sync so the user can see what was used.
@@ -1279,6 +1369,54 @@ function App() {
               <button onClick={openChromeCdp} className="action-btn primary" style={{marginTop: '8px'}}>
                 🚀 Open Chrome CDP
               </button>
+            </div>
+          )}
+
+          {announcement && showAnnouncement && (
+            <div className="info-banner announcement">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ flex: 1 }}>
+                  <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600' }}>
+                    {announcement.title}
+                  </h3>
+                  <div 
+                    style={{ fontSize: '14px', lineHeight: '1.5' }}
+                    dangerouslySetInnerHTML={{ __html: announcement.message }}
+                    onClick={async (e) => {
+                      // Intercept clicks on links to open in system browser
+                      const target = e.target as HTMLElement;
+                      if (target.tagName === 'A') {
+                        e.preventDefault();
+                        const href = target.getAttribute('href');
+                        if (href) {
+                          try {
+                            await invoke('open_external_url', { url: href });
+                          } catch (err) {
+                            console.error('[Announcement] Failed to open link:', err);
+                            // Fallback to window.open
+                            window.open(href, '_blank');
+                          }
+                        }
+                      }
+                    }}
+                  />
+                </div>
+                <button 
+                  onClick={() => setShowAnnouncement(false)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    fontSize: '20px',
+                    cursor: 'pointer',
+                    padding: '0 0 0 12px',
+                    opacity: 0.6,
+                    lineHeight: '1',
+                  }}
+                  title="Dismiss"
+                >
+                  ×
+                </button>
+              </div>
             </div>
           )}
 

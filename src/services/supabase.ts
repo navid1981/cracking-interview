@@ -13,6 +13,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 // Edge Function base URL
 export const EDGE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1`;
+export const SUPABASE_API_KEY = SUPABASE_ANON_KEY; // Export for edge function calls
 
 // Initialize Supabase client
 export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
