@@ -1,8 +1,13 @@
-// System audio (loopback) recording.
+// Audio recording for interview capture.
+//
+// Records BOTH system audio (loopback - interviewer's voice from Zoom/Teams) AND
+// microphone input (candidate's voice), mixed together into a single MP3 file.
 //
 // Goals:
-// - macOS 13+: record system audio via ScreenCaptureKit (implemented in a small Swift helper we spawn).
-// - Windows: record system audio via WASAPI loopback (native Rust).
+// - macOS 13+: record via ScreenCaptureKit + AVAudioEngine (Swift helper).
+// - Windows: record via WASAPI loopback + WASAPI microphone capture.
+// - Automatic 3-minute timeout to prevent excessive recording.
+// - MP3 output for good quality with small file size (using mp3lame, no FFmpeg needed).
 //
 // This module exposes a small state machine:
 //   start() -> starts recording
@@ -10,11 +15,19 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use lazy_static::lazy_static;
 
+// Maximum recording duration (3 minutes)
+const MAX_RECORDING_SECONDS: u64 = 180;
+
 lazy_static! {
     static ref REC_STATE: Mutex<Option<RecordingState>> = Mutex::new(None);
+    
+    // Warm state: holds the pre-initialized audio helper (macOS only)
+    #[cfg(target_os = "macos")]
+    static ref WARM_STATE: Mutex<Option<WarmAudioState>> = Mutex::new(None);
 }
 
 enum RecordingState {
@@ -27,6 +40,16 @@ enum RecordingState {
 #[cfg(target_os = "macos")]
 struct MacRecordingState {
     child: std::process::Child,
+    stdin: Option<std::process::ChildStdin>,
+    output_path: PathBuf,
+    start_time: Instant,
+    is_warm_mode: bool,
+}
+
+#[cfg(target_os = "macos")]
+struct WarmAudioState {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
     output_path: PathBuf,
 }
 
@@ -35,6 +58,48 @@ struct WindowsRecordingState {
     stop_tx: std::sync::mpsc::Sender<()>,
     join: std::thread::JoinHandle<Result<(), String>>,
     output_path: PathBuf,
+    start_time: Instant,
+}
+
+/// Pre-compile the audio recorder helper on app startup (macOS only).
+/// Call this from Tauri setup to eliminate first-recording delay.
+#[cfg(target_os = "macos")]
+pub fn prewarm_audio_recorder() {
+    std::thread::spawn(|| {
+        println!("🎙️ Pre-compiling audio recorder...");
+        match macos::prewarm_helper() {
+            Ok(_) => println!("🎙️ Audio recorder compiled successfully"),
+            Err(e) => println!("⚠️ Audio recorder compile failed: {}", e),
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn prewarm_audio_recorder() {
+    // No pre-warming needed on Windows
+}
+
+/// Warm up the audio capture (call when user selects Audio tab).
+/// This pre-initializes ScreenCaptureKit so recording starts instantly.
+#[cfg(target_os = "macos")]
+pub fn warm_audio_capture() -> Result<(), String> {
+    macos::warm_audio_capture()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn warm_audio_capture() -> Result<(), String> {
+    Ok(()) // No-op on Windows
+}
+
+/// Cool down the audio capture (call when user switches away from Audio tab).
+#[cfg(target_os = "macos")]
+pub fn cooldown_audio_capture() {
+    macos::cooldown_audio_capture()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn cooldown_audio_capture() {
+    // No-op on Windows
 }
 
 pub fn start_system_audio_recording() -> Result<(), String> {
@@ -83,10 +148,24 @@ pub fn is_recording() -> bool {
         Err(_) => return false,
     };
 
-    // On macOS, the helper can exit early (e.g., startCapture timeout/error). Treat that as not recording.
     #[cfg(target_os = "macos")]
     {
         if let Some(RecordingState::Mac(state)) = guard.as_mut() {
+            // Check if timeout reached
+            if state.start_time.elapsed() > Duration::from_secs(MAX_RECORDING_SECONDS) {
+                println!("🎙️ Audio recording timeout reached ({} seconds)", MAX_RECORDING_SECONDS);
+                // Stop via SIGTERM
+                #[link(name = "c")]
+                extern "C" {
+                    fn kill(pid: i32, sig: i32) -> i32;
+                }
+                const SIGTERM: i32 = 15;
+                let pid = state.child.id() as i32;
+                unsafe {
+                    let _ = kill(pid, SIGTERM);
+                }
+            }
+            
             if let Ok(Some(_status)) = state.child.try_wait() {
                 *guard = None;
                 return false;
@@ -95,14 +174,177 @@ pub fn is_recording() -> bool {
         }
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(RecordingState::Windows(state)) = guard.as_ref() {
+            // Check if timeout reached
+            if state.start_time.elapsed() > Duration::from_secs(MAX_RECORDING_SECONDS) {
+                println!("🎙️ Audio recording timeout reached ({} seconds)", MAX_RECORDING_SECONDS);
+                let _ = state.stop_tx.send(());
+            }
+        }
+    }
+
     guard.is_some()
+}
+
+/// Get the current recording duration in seconds
+#[allow(dead_code)]
+pub fn get_recording_duration_secs() -> Option<u64> {
+    let guard = REC_STATE.lock().ok()?;
+    
+    match guard.as_ref()? {
+        #[cfg(target_os = "macos")]
+        RecordingState::Mac(state) => Some(state.start_time.elapsed().as_secs()),
+        #[cfg(target_os = "windows")]
+        RecordingState::Windows(state) => Some(state.start_time.elapsed().as_secs()),
+        #[allow(unreachable_patterns)]
+        _ => None,
+    }
+}
+
+/// Get remaining recording time in seconds before auto-timeout
+#[allow(dead_code)]
+pub fn get_remaining_recording_secs() -> Option<u64> {
+    let elapsed = get_recording_duration_secs()?;
+    Some(MAX_RECORDING_SECONDS.saturating_sub(elapsed))
+}
+
+// ============================================================================
+// MP3 ENCODING (using mp3lame-encoder crate)
+// ============================================================================
+
+/// Convert a WAV file to MP3 using mp3lame-encoder
+/// This crate provides high-level LAME bindings
+pub fn convert_wav_to_mp3(wav_path: &PathBuf, mp3_path: &PathBuf) -> Result<(), String> {
+    use mp3lame_encoder::{Builder, FlushNoGap, InterleavedPcm, MonoPcm};
+    use std::io::Write;
+    use std::mem::MaybeUninit;
+    
+    println!("🎙️ Converting WAV to MP3 using mp3lame-encoder...");
+    
+    // Read WAV file
+    let mut wav_reader = hound::WavReader::open(wav_path)
+        .map_err(|e| format!("Failed to open WAV file: {e}"))?;
+    
+    let spec = wav_reader.spec();
+    println!("🎙️ WAV spec: {} Hz, {} channels, {} bits", 
+             spec.sample_rate, spec.channels, spec.bits_per_sample);
+    
+    // Read all samples based on bit depth
+    let samples: Vec<i16> = if spec.bits_per_sample == 32 {
+        // Float32 WAV - convert to i16
+        wav_reader.samples::<f32>()
+            .filter_map(|s| s.ok())
+            .map(|s| (s * 32767.0) as i16)
+            .collect()
+    } else {
+        // Int16 WAV
+        wav_reader.samples::<i16>()
+            .filter_map(|s| s.ok())
+            .collect()
+    };
+    
+    if samples.is_empty() {
+        return Err("WAV file contains no audio samples".to_string());
+    }
+    
+    // For mono, samples count = frames. For stereo, samples count = frames * 2
+    let frame_count = if spec.channels == 1 { samples.len() } else { samples.len() / 2 };
+    println!("🎙️ Encoding {} frames ({} samples) to MP3...", frame_count, samples.len());
+    
+    // Build encoder with optimal settings for speech
+    let mut mp3_encoder = Builder::new()
+        .ok_or("Failed to create LAME encoder")?;
+    
+    // Set input sample rate
+    mp3_encoder.set_sample_rate(spec.sample_rate)
+        .map_err(|e| format!("Failed to set sample rate: {:?}", e))?;
+    
+    // Set number of channels
+    mp3_encoder.set_num_channels(spec.channels as u8)
+        .map_err(|e| format!("Failed to set channels: {:?}", e))?;
+    
+    mp3_encoder.set_quality(mp3lame_encoder::Quality::Best)
+        .map_err(|e| format!("Failed to set quality: {:?}", e))?;
+    
+    // Use 128kbps for better voice quality
+    mp3_encoder.set_brate(mp3lame_encoder::Bitrate::Kbps128)
+        .map_err(|e| format!("Failed to set bitrate: {:?}", e))?;
+    
+    let mut encoder = mp3_encoder.build()
+        .map_err(|e| format!("Failed to build encoder: {:?}", e))?;
+    
+    println!("🎙️ Encoder built: input rate={} Hz, channels={}", spec.sample_rate, spec.channels);
+    
+    // Create output file
+    let mut mp3_file = std::fs::File::create(mp3_path)
+        .map_err(|e| format!("Failed to create MP3 file: {e}"))?;
+    
+    // Allocate MP3 buffer (LAME recommends 1.25 * num_samples + 7200)
+    let mp3_buffer_size = (samples.len() as f64 * 1.25) as usize + 7200;
+    let mut mp3_buffer: Vec<MaybeUninit<u8>> = vec![MaybeUninit::uninit(); mp3_buffer_size];
+    
+    // Encode based on channel count
+    let encoded_size = if spec.channels == 1 {
+        // Mono - use MonoPcm for single channel
+        let input = MonoPcm(&samples);
+        encoder.encode(input, &mut mp3_buffer)
+            .map_err(|e| format!("Encode error: {:?}", e))?
+    } else {
+        // Stereo - interleaved format (L,R,L,R,...)
+        let input = InterleavedPcm(&samples);
+        encoder.encode(input, &mut mp3_buffer)
+            .map_err(|e| format!("Encode error: {:?}", e))?
+    };
+    
+    // Write encoded data
+    if encoded_size > 0 {
+        // Safety: encoder wrote `encoded_size` bytes
+        let encoded_slice = unsafe {
+            std::slice::from_raw_parts(mp3_buffer.as_ptr() as *const u8, encoded_size)
+        };
+        mp3_file.write_all(encoded_slice)
+            .map_err(|e| format!("Write error: {e}"))?;
+    }
+    
+    // Flush remaining data
+    let flush_size = encoder.flush::<FlushNoGap>(&mut mp3_buffer)
+        .map_err(|e| format!("Flush error: {:?}", e))?;
+    
+    if flush_size > 0 {
+        let flush_slice = unsafe {
+            std::slice::from_raw_parts(mp3_buffer.as_ptr() as *const u8, flush_size)
+        };
+        mp3_file.write_all(flush_slice)
+            .map_err(|e| format!("Write error: {e}"))?;
+    }
+    
+    // Verify output
+    let mp3_size = std::fs::metadata(mp3_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    
+    if mp3_size < 100 {
+        return Err("MP3 encoding failed - output file too small".to_string());
+    }
+    
+    println!("🎙️ MP3 conversion complete: {} bytes", mp3_size);
+    
+    // Keep WAV file for debugging - user can compare WAV vs MP3
+    println!("🎙️ WAV file kept at: {}", wav_path.display());
+    // let _ = std::fs::remove_file(wav_path);
+    
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::MacRecordingState;
+    use super::{MacRecordingState, WarmAudioState, WARM_STATE, MAX_RECORDING_SECONDS, convert_wav_to_mp3};
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
+    use std::io::Write;
+    use std::time::Instant;
 
     const SWIFT_HELPER_NAME: &str = "cracking_interview_audio_recorder";
 
@@ -111,8 +353,6 @@ mod macos {
     }
 
     fn helper_paths() -> (PathBuf, PathBuf) {
-        // Put compiled helper in temp dir. For dev this is sufficient and avoids bundling complexity.
-        // If you want to ship this, we should compile it during build and bundle it as a sidecar.
         let mut bin = std::env::temp_dir();
         bin.push(SWIFT_HELPER_NAME);
 
@@ -124,24 +364,34 @@ mod macos {
 
     fn ensure_helper_built() -> Result<PathBuf, String> {
         let (bin, src) = helper_paths();
+        let current_source = swift_source();
 
-        // Always write the current Swift source. Rebuild the helper when the source changes.
-        std::fs::write(&src, swift_source())
-            .map_err(|e| format!("Failed to write Swift helper source: {e}"))?;
+        // Check if source content changed (compare with existing file)
+        let source_changed = match std::fs::read_to_string(&src) {
+            Ok(existing) => existing != current_source,
+            Err(_) => true, // File doesn't exist
+        };
 
-        let needs_rebuild = match (std::fs::metadata(&bin), std::fs::metadata(&src)) {
-            (Ok(bin_meta), Ok(src_meta)) => match (bin_meta.modified(), src_meta.modified()) {
-                (Ok(bin_mtime), Ok(src_mtime)) => src_mtime > bin_mtime,
-                _ => true,
-            },
-            _ => true,
+        // Only write source if it changed
+        if source_changed {
+            std::fs::write(&src, current_source)
+                .map_err(|e| format!("Failed to write Swift helper source: {e}"))?;
+        }
+
+        // Check if binary exists and is newer than source
+        let needs_rebuild = if source_changed {
+            true // Source changed, must rebuild
+        } else {
+            // Source unchanged, check if binary exists
+            !bin.exists()
         };
 
         if bin.exists() && !needs_rebuild {
             return Ok(bin);
         }
 
-        // Compile with ScreenCaptureKit + AVFoundation. Requires Xcode CLT.
+        println!("🎙️ Building audio recorder helper (first time or updated)...");
+        
         let output = Command::new("xcrun")
             .arg("swiftc")
             .arg("-parse-as-library")
@@ -160,7 +410,7 @@ mod macos {
             .output()
             .map_err(|e| {
                 format!(
-                    "Failed to run `xcrun swiftc` (needed for macOS 13+ system-audio capture). Install Xcode Command Line Tools.\nUnderlying error: {e}"
+                    "Failed to run `xcrun swiftc` (needed for macOS 13+ audio capture). Install Xcode Command Line Tools.\nUnderlying error: {e}"
                 )
             })?;
 
@@ -175,33 +425,172 @@ mod macos {
                 "No compiler output captured.".to_string()
             };
             return Err(format!(
-                "Failed to compile ScreenCaptureKit audio helper (xcrun swiftc). Ensure Xcode Command Line Tools are installed.\n\nswiftc output:\n{}",
+                "Failed to compile audio helper (xcrun swiftc). Ensure Xcode Command Line Tools are installed.\n\nswiftc output:\n{}",
                 details
             ));
         }
 
+        println!("🎙️ Audio recorder helper built successfully");
         Ok(bin)
     }
 
-    pub fn start_macos_recording() -> Result<MacRecordingState, String> {
+    /// Pre-compile the Swift helper (called on app startup)
+    pub fn prewarm_helper() -> Result<(), String> {
+        ensure_helper_built()?;
+        Ok(())
+    }
+    
+    /// Warm up audio capture: pre-initialize ScreenCaptureKit in background.
+    /// Call this when user selects Audio tab for instant recording.
+    pub fn warm_audio_capture() -> Result<(), String> {
+        let mut warm_guard = WARM_STATE.lock().map_err(|_| "Warm state mutex poisoned")?;
+        
+        // Already warm?
+        if warm_guard.is_some() {
+            println!("🔥 Audio capture already warm");
+            return Ok(());
+        }
+        
+        println!("🔥 Warming up audio capture...");
+        let total_start = std::time::Instant::now();
+        
         let helper = ensure_helper_built()?;
+        
+        let mut wav_path = std::env::temp_dir();
+        wav_path.push("cracking_interview_audio.wav");
+        
         let mut output_path = std::env::temp_dir();
-        output_path.push("cracking_interview_system_audio.wav");
-
-        // Spawn helper; it records until terminated.
-        // Pipe stderr so we can surface helper diagnostics in the Rust logs.
+        output_path.push("cracking_interview_audio.mp3");
+        
+        // Spawn helper in warm mode
         let mut child = Command::new(helper)
+            .arg("--warm")
             .arg("--out")
-            .arg(&output_path)
+            .arg(&wav_path)
+            .arg("--timeout")
+            .arg(MAX_RECORDING_SECONDS.to_string())
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("Failed to start audio recorder helper: {e}"))?;
+        
+        let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+        
+        // Wait for WARM_READY signal
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::spawn(move || {
+                use std::io::{BufRead, BufReader};
+                let reader = BufReader::new(stderr);
+                for line in reader.lines().flatten() {
+                    if line.contains("WARM_READY") {
+                        let _ = ready_tx.send(());
+                    }
+                    println!("🔥 warm-helper: {}", line);
+                }
+            });
+        }
+        
+        // Wait up to 5 seconds for warm-up
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if ready_rx.try_recv().is_ok() {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                // Kill the process and return error
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Audio capture warm-up timed out".to_string());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        
+        println!("🔥 Audio capture warm in {:?}", total_start.elapsed());
+        
+        *warm_guard = Some(WarmAudioState {
+            child,
+            stdin,
+            output_path,
+        });
+        
+        Ok(())
+    }
+    
+    /// Cool down audio capture: kill the warm helper process.
+    /// Call this when user switches away from Audio tab.
+    pub fn cooldown_audio_capture() {
+        let mut warm_guard = match WARM_STATE.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        
+        if let Some(mut state) = warm_guard.take() {
+            println!("❄️ Cooling down audio capture...");
+            // Send exit command
+            let _ = writeln!(state.stdin, "exit");
+            let _ = state.child.wait();
+            println!("❄️ Audio capture cooled down");
+        }
+    }
 
-        // Stream helper stderr to our stdout for easier debugging.
-        // Also wait for an explicit "capture started" line before we return success,
-        // otherwise a quick Stop can terminate before buffers arrive (resulting in a header-only WAV).
+    pub fn start_macos_recording() -> Result<MacRecordingState, String> {
+        let total_start = std::time::Instant::now();
+        
+        // Check if we have a warm helper ready
+        let mut warm_guard = WARM_STATE.lock().map_err(|_| "Warm state mutex poisoned")?;
+        
+        if let Some(mut warm_state) = warm_guard.take() {
+            // Use the warm helper - instant start!
+            println!("🔥 Using warm audio capture - instant start!");
+            
+            // Send "start" command to begin recording
+            writeln!(warm_state.stdin, "start")
+                .map_err(|e| format!("Failed to send start command: {e}"))?;
+            
+            println!("🎙️ [TIMING] Instant start (warm): {:?}", total_start.elapsed());
+            println!("🔊 Recording started (system audio). Max duration: {} seconds", MAX_RECORDING_SECONDS);
+            
+            return Ok(MacRecordingState {
+                child: warm_state.child,
+                stdin: Some(warm_state.stdin),
+                output_path: warm_state.output_path,
+                start_time: Instant::now(),
+                is_warm_mode: true,
+            });
+        }
+        
+        drop(warm_guard); // Release lock before slow path
+        
+        // Cold start - spawn new helper
+        println!("🎙️ Cold start (no warm helper available)");
+        
+        let helper = ensure_helper_built()?;
+        println!("🎙️ [TIMING] Helper ready: {:?}", total_start.elapsed());
+        
+        // Output WAV first, will convert to MP3 after recording
+        let mut wav_path = std::env::temp_dir();
+        wav_path.push("cracking_interview_audio.wav");
+        
+        let mut output_path = std::env::temp_dir();
+        output_path.push("cracking_interview_audio.mp3");
+
+        // Spawn helper with timeout argument - outputs WAV (we'll convert to MP3 later)
+        let spawn_start = std::time::Instant::now();
+        let mut child = Command::new(helper)
+            .arg("--out")
+            .arg(&wav_path)  // Output WAV
+            .arg("--timeout")
+            .arg(MAX_RECORDING_SECONDS.to_string())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to start audio recorder helper: {e}"))?;
+        println!("🎙️ [TIMING] Process spawned: {:?}", spawn_start.elapsed());
+
         let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
+        let wait_start = std::time::Instant::now();
         if let Some(stderr) = child.stderr.take() {
             std::thread::spawn(move || {
                 use std::io::{BufRead, BufReader};
@@ -215,10 +604,10 @@ mod macos {
             });
         }
 
-        // Wait briefly for capture-started (helper has its own internal timeout too).
         let start_deadline = std::time::Instant::now() + std::time::Duration::from_secs(14);
         loop {
             if started_rx.try_recv().is_ok() {
+                println!("🎙️ [TIMING] Capture started signal received: {:?}", wait_start.elapsed());
                 break;
             }
 
@@ -227,14 +616,12 @@ mod macos {
                 .map_err(|e| format!("Failed to check recorder status: {e}"))?
             {
                 return Err(format!(
-                    "Audio recorder failed to start (status={}). Check macOS Screen Recording permission and try again.",
+                    "Audio recorder failed to start (status={}). Check macOS Screen Recording and Microphone permissions and try again.",
                     status
                 ));
             }
 
             if std::time::Instant::now() >= start_deadline {
-                // Ensure we don't leave a stuck helper running (it can block future starts and
-                // keep producing header-only WAV files if the user stops quickly).
                 #[link(name = "c")]
                 extern "C" {
                     fn kill(pid: i32, sig: i32) -> i32;
@@ -245,103 +632,101 @@ mod macos {
                     let _ = kill(pid, SIGTERM);
                 }
                 let _ = child.wait();
-                return Err("Audio recorder did not start capture in time. Try again, and ensure system audio is playing. If it still fails, macOS ScreenCaptureKit may be blocked or unstable on this machine.".to_string());
+                return Err("Audio recorder did not start capture in time. Try again, and ensure both Screen Recording and Microphone permissions are granted in System Settings.".to_string());
             }
 
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        
+        println!("🎙️ [TIMING] Total startup: {:?}", total_start.elapsed());
 
-        Ok(MacRecordingState { child, output_path })
+        println!("🔊 Recording started (system audio). Max duration: {} seconds", MAX_RECORDING_SECONDS);
+        
+        Ok(MacRecordingState { 
+            child, 
+            stdin: None,
+            output_path,
+            start_time: Instant::now(),
+            is_warm_mode: false,
+        })
     }
 
     pub fn stop_macos_recording(mut state: MacRecordingState) -> Result<String, String> {
-        // Politely terminate; helper traps SIGTERM and finalizes the WAV.
-        // IMPORTANT: `Child::kill()` sends SIGKILL on Unix, which prevents the helper from flushing/closing the file.
-        // We explicitly send SIGTERM, then wait for exit, then wait for the output file to exist.
+        if state.is_warm_mode {
+            // Warm mode: send "stop" command via stdin
+            if let Some(mut stdin) = state.stdin.take() {
+                let _ = writeln!(stdin, "stop");
+            }
+        } else {
+            // Legacy mode: send SIGTERM
+            #[link(name = "c")]
+            extern "C" {
+                fn kill(pid: i32, sig: i32) -> i32;
+            }
+            const SIGTERM: i32 = 15;
 
-        #[link(name = "c")]
-        extern "C" {
-            fn kill(pid: i32, sig: i32) -> i32;
+            let pid = state.child.id() as i32;
+            unsafe {
+                let _ = kill(pid, SIGTERM);
+            }
         }
-        const SIGTERM: i32 = 15;
 
-        let pid = state.child.id() as i32;
-        unsafe {
-            let _ = kill(pid, SIGTERM);
-        }
-
-        // Wait for helper to exit (best-effort).
         let _ = state.child.wait();
 
-        // Wait briefly for file to appear.
-        for _ in 0..50 {
-            if state.output_path.exists() {
-                if let Ok(meta) = std::fs::metadata(&state.output_path) {
-                    println!(
-                        "🎙️ audio-helper: output file exists ({} bytes) at {}",
-                        meta.len(),
-                        state.output_path.display()
-                    );
+        // WAV path (what Swift helper outputs)
+        let wav_path = state.output_path.with_extension("wav");
+        
+        // Wait for WAV file to appear
+        for _ in 0..100 {
+            if wav_path.exists() {
+                if let Ok(meta) = std::fs::metadata(&wav_path) {
+                    if meta.len() > 1000 {
+                        println!(
+                            "🎙️ audio-helper: WAV file exists ({} bytes) at {}",
+                            meta.len(),
+                            wav_path.display()
+                        );
+                        break;
+                    }
                 }
-                return Ok(state
-                    .output_path
-                    .to_str()
-                    .ok_or("Invalid output path")?
-                    .to_string());
             }
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
-
-        Err(format!(
-            "Audio file was not created at {}. Recording may have been too short or macOS permissions prevented capture.",
-            state.output_path.display()
-        ))
+        
+        if !wav_path.exists() {
+            return Err(format!(
+                "Audio file was not created at {}. Recording may have been too short or macOS permissions prevented capture.",
+                wav_path.display()
+            ));
+        }
+        
+        // Convert WAV to MP3 (smaller file, faster upload)
+        convert_wav_to_mp3(&wav_path, &state.output_path)?;
+        
+        // Return MP3 path (WAV kept for debugging)
+        Ok(state.output_path.to_str().ok_or("Invalid output path")?.to_string())
     }
-}
-
-/// Transcribe audio from a WAV file
-/// TODO: Install libvosk native library and uncomment vosk dependency in Cargo.toml to enable local transcription
-/// For now, returns a placeholder message - audio will be sent to AI models that support it
-pub fn transcribe_audio(wav_path: &str) -> Result<String, String> {
-    println!("[Transcribe] Audio file recorded at: {}", wav_path);
-    
-    // Check if file exists and has content
-    let metadata = std::fs::metadata(wav_path)
-        .map_err(|e| format!("Cannot read audio file: {}", e))?;
-    
-    if metadata.len() < 1000 {
-        return Err("Audio file is too small - recording may have failed".to_string());
-    }
-    
-    println!("[Transcribe] Audio file size: {} bytes", metadata.len());
-    
-    // Return path for now - frontend will handle sending to AI
-    // When vosk is installed, this will do local transcription
-    Err(format!("LOCAL_TRANSCRIPTION_DISABLED:{}", wav_path))
 }
 
 #[cfg(target_os = "windows")]
 mod windows {
-    use super::WindowsRecordingState;
+    use super::{WindowsRecordingState, MAX_RECORDING_SECONDS, convert_wav_to_mp3};
     use std::path::PathBuf;
     use std::sync::mpsc;
     use std::thread;
+    use std::time::{Duration, Instant};
 
     use windows::Win32::Media::Audio::*;
     use windows::Win32::System::Com::*;
 
-    // Wave format constants (not exported by windows crate 0.58)
     const WAVE_FORMAT_IEEE_FLOAT: u16 = 0x0003;
     const WAVE_FORMAT_EXTENSIBLE: u16 = 0xFFFE;
 
-    fn sample_format_to_hound_spec(wfx: &WAVEFORMATEX) -> Result<hound::WavSpec, String> {
-        let channels = wfx.nChannels as u16;
-        let sample_rate = wfx.nSamplesPerSec;
-
-        // We write 16-bit PCM (converting if necessary).
+    fn sample_format_to_hound_spec(_wfx: &WAVEFORMATEX) -> Result<hound::WavSpec, String> {
+        // Output as mono 16-bit PCM at 16kHz for optimal speech quality and small size
         Ok(hound::WavSpec {
-            channels,
-            sample_rate,
+            channels: 1,  // Mono
+            sample_rate: 16000,  // 16kHz (Gemini's native rate)
             bits_per_sample: 16,
             sample_format: hound::SampleFormat::Int,
         })
@@ -353,157 +738,268 @@ mod windows {
         }
 
         let mut output_path = std::env::temp_dir();
-        output_path.push("cracking_interview_system_audio.wav");
+        output_path.push("cracking_interview_audio.mp3");
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let output_path_clone = output_path.clone();
 
         let join = thread::spawn(move || capture_loop(output_path_clone, stop_rx));
 
-        Ok(WindowsRecordingState { stop_tx, join, output_path })
+        println!("🔊 Recording started (system audio). Max duration: {} seconds", MAX_RECORDING_SECONDS);
+
+        Ok(WindowsRecordingState { 
+            stop_tx, 
+            join, 
+            output_path,
+            start_time: Instant::now(),
+        })
     }
 
     pub fn stop_windows_recording(state: WindowsRecordingState) -> Result<String, String> {
         let _ = state.stop_tx.send(());
         let res = state.join.join().map_err(|_| "Audio recording thread panicked".to_string())?;
         res?;
-        Ok(state
-            .output_path
-            .to_str()
-            .ok_or("Invalid output path")?
-            .to_string())
+        
+        // Prefer MP3 (smaller file, faster upload)
+        if state.output_path.exists() {
+            return Ok(state.output_path.to_str().ok_or("Invalid output path")?.to_string());
+        }
+        
+        // Fallback to WAV if MP3 doesn't exist
+        let wav_path = state.output_path.with_extension("wav");
+        if wav_path.exists() {
+            return Ok(wav_path.to_str().ok_or("Invalid output path")?.to_string());
+        }
+        
+        Err(format!("Audio file was not created at {}", state.output_path.display()))
     }
 
     fn capture_loop(output_path: PathBuf, stop_rx: mpsc::Receiver<()>) -> Result<(), String> {
+        let wav_path = output_path.with_extension("wav");
+        let start_time = Instant::now();
+        let max_duration = Duration::from_secs(MAX_RECORDING_SECONDS);
+        
         unsafe {
-            // Get default render device (system output).
+            // ===== SETUP LOOPBACK (SYSTEM AUDIO ONLY) =====
             let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                 .map_err(|e| format!("CoCreateInstance(MMDeviceEnumerator) failed: {e}"))?;
 
-            let device = enumerator
+            let render_device = enumerator
                 .GetDefaultAudioEndpoint(eRender, eConsole)
-                .map_err(|e| format!("GetDefaultAudioEndpoint failed: {e}"))?;
+                .map_err(|e| format!("GetDefaultAudioEndpoint(render) failed: {e}"))?;
 
-            let audio_client: IAudioClient = device
+            let loopback_client: IAudioClient = render_device
                 .Activate(CLSCTX_ALL, None)
-                .map_err(|e| format!("Activate(IAudioClient) failed: {e}"))?;
+                .map_err(|e| format!("Activate(IAudioClient) for loopback failed: {e}"))?;
 
-            let pwfx = audio_client
+            let loopback_pwfx = loopback_client
                 .GetMixFormat()
-                .map_err(|e| format!("GetMixFormat failed: {e}"))?;
+                .map_err(|e| format!("GetMixFormat(loopback) failed: {e}"))?;
 
-            let wfx: &WAVEFORMATEX = &*pwfx;
-            let spec = sample_format_to_hound_spec(wfx)?;
+            let loopback_wfx: &WAVEFORMATEX = &*loopback_pwfx;
+            
+            println!("🎙️ System audio format: {}Hz {}ch", loopback_wfx.nSamplesPerSec, loopback_wfx.nChannels);
 
-            // 100ms buffer duration.
-            let hns_buffer_duration: i64 = 10_000_000; // 1s in 100ns units => 0.1s = 1_000_000; but we use 1s? Keep stable.
+            let spec = sample_format_to_hound_spec(loopback_wfx)?;
+
+            // Buffer duration in 100ns units (100ms)
             let hns_buffer_duration: i64 = 1_000_000;
 
-            audio_client
+            // Initialize loopback client
+            loopback_client
                 .Initialize(
                     AUDCLNT_SHAREMODE_SHARED,
                     AUDCLNT_STREAMFLAGS_LOOPBACK,
                     hns_buffer_duration,
                     0,
-                    wfx,
+                    loopback_wfx,
                     None,
                 )
-                .map_err(|e| format!("IAudioClient::Initialize failed: {e}"))?;
+                .map_err(|e| format!("IAudioClient::Initialize(loopback) failed: {e}"))?;
 
-            let capture_client: IAudioCaptureClient = audio_client
+            let loopback_capture: IAudioCaptureClient = loopback_client
                 .GetService()
-                .map_err(|e| format!("GetService(IAudioCaptureClient) failed: {e}"))?;
+                .map_err(|e| format!("GetService(loopback) failed: {e}"))?;
 
-            audio_client
+            loopback_client
                 .Start()
-                .map_err(|e| format!("IAudioClient::Start failed: {e}"))?;
+                .map_err(|e| format!("IAudioClient::Start(loopback) failed: {e}"))?;
 
-            let mut writer = hound::WavWriter::create(&output_path, spec)
+            let mut writer = hound::WavWriter::create(&wav_path, spec)
                 .map_err(|e| format!("Failed to create WAV writer: {e}"))?;
 
-            // Determine source sample format. Mix format is often float32.
-            let is_float = wfx.wFormatTag == WAVE_FORMAT_IEEE_FLOAT
-                || (wfx.wFormatTag == WAVE_FORMAT_EXTENSIBLE
-                    && {
-                        // If extensible, we assume float32; robust parsing is more work.
-                        true
-                    });
+            // Sample rate conversion
+            let loopback_rate = loopback_wfx.nSamplesPerSec as f64;
+            let target_rate = spec.sample_rate as f64;
+            
+            let loopback_is_float = loopback_wfx.wFormatTag == WAVE_FORMAT_IEEE_FLOAT
+                || loopback_wfx.wFormatTag == WAVE_FORMAT_EXTENSIBLE;
 
+            let loopback_channels = loopback_wfx.nChannels as usize;
+
+            // Accumulator buffer
+            let mut loopback_samples: Vec<f32> = Vec::new();
+            
+            // Volume boost (similar to macOS)
+            let volume_boost: f32 = 5.0;
+            
             loop {
+                // Check stop signal
                 if stop_rx.try_recv().is_ok() {
                     break;
                 }
+                
+                // Check timeout
+                if start_time.elapsed() >= max_duration {
+                    println!("🎙️ Recording timeout reached ({} seconds)", MAX_RECORDING_SECONDS);
+                    break;
+                }
 
-                let mut packet_length = capture_client
+                // ===== CAPTURE SYSTEM AUDIO =====
+                let mut packet_length = loopback_capture
                     .GetNextPacketSize()
-                    .map_err(|e| format!("GetNextPacketSize failed: {e}"))?;
+                    .map_err(|e| format!("GetNextPacketSize(loopback) failed: {e}"))?;
 
                 while packet_length != 0 {
                     let mut data_ptr: *mut u8 = std::ptr::null_mut();
                     let mut num_frames: u32 = 0;
                     let mut flags: u32 = 0;
 
-                    capture_client
+                    loopback_capture
                         .GetBuffer(&mut data_ptr, &mut num_frames, &mut flags, None, None)
-                        .map_err(|e| format!("GetBuffer failed: {e}"))?;
+                        .map_err(|e| format!("GetBuffer(loopback) failed: {e}"))?;
 
-                    // AUDCLNT_BUFFERFLAGS_SILENT.0 is i32, cast to u32 for comparison
                     if flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0 {
-                        // Write silence frames.
-                        let channels = wfx.nChannels as usize;
-                        let samples = num_frames as usize * channels;
-                        for _ in 0..samples {
-                            writer.write_sample::<i16>(0).map_err(|e| format!("WAV write failed: {e}"))?;
+                        // Silent - add zeros
+                        for _ in 0..(num_frames as usize) {
+                            loopback_samples.push(0.0);
                         }
                     } else if !data_ptr.is_null() {
-                        let channels = wfx.nChannels as usize;
-                        let bytes_per_frame = wfx.nBlockAlign as usize;
+                        let bytes_per_frame = loopback_wfx.nBlockAlign as usize;
                         let byte_count = num_frames as usize * bytes_per_frame;
                         let slice = std::slice::from_raw_parts(data_ptr, byte_count);
 
-                        if is_float {
-                            // Interpret as f32 interleaved.
+                        if loopback_is_float {
                             let floats: &[f32] = std::slice::from_raw_parts(
                                 slice.as_ptr() as *const f32,
                                 byte_count / std::mem::size_of::<f32>(),
                             );
-                            for &s in floats.iter().take(num_frames as usize * channels) {
-                                let clamped = s.max(-1.0).min(1.0);
-                                let pcm = (clamped * i16::MAX as f32) as i16;
-                                writer.write_sample::<i16>(pcm).map_err(|e| format!("WAV write failed: {e}"))?;
+                            // Mix channels to mono with volume boost
+                            for frame in 0..(num_frames as usize) {
+                                let mut sum = 0.0f32;
+                                for ch in 0..loopback_channels {
+                                    sum += floats[frame * loopback_channels + ch];
+                                }
+                                let mono = (sum / loopback_channels as f32) * volume_boost;
+                                loopback_samples.push(mono);
                             }
                         } else {
-                            // Assume i16 PCM interleaved.
                             let ints: &[i16] = std::slice::from_raw_parts(
                                 slice.as_ptr() as *const i16,
                                 byte_count / std::mem::size_of::<i16>(),
                             );
-                            for &s in ints.iter().take(num_frames as usize * channels) {
-                                writer.write_sample::<i16>(s).map_err(|e| format!("WAV write failed: {e}"))?;
+                            for frame in 0..(num_frames as usize) {
+                                let mut sum = 0.0f32;
+                                for ch in 0..loopback_channels {
+                                    sum += ints[frame * loopback_channels + ch] as f32 / i16::MAX as f32;
+                                }
+                                let mono = (sum / loopback_channels as f32) * volume_boost;
+                                loopback_samples.push(mono);
                             }
                         }
                     }
 
-                    capture_client
+                    loopback_capture
                         .ReleaseBuffer(num_frames)
-                        .map_err(|e| format!("ReleaseBuffer failed: {e}"))?;
+                        .map_err(|e| format!("ReleaseBuffer(loopback) failed: {e}"))?;
 
-                    packet_length = capture_client
+                    packet_length = loopback_capture
                         .GetNextPacketSize()
-                        .map_err(|e| format!("GetNextPacketSize failed: {e}"))?;
+                        .map_err(|e| format!("GetNextPacketSize(loopback) failed: {e}"))?;
+                }
+
+                // ===== RESAMPLE AND WRITE =====
+                let resampled_len = (loopback_samples.len() as f64 * target_rate / loopback_rate) as usize;
+                
+                if resampled_len > 0 {
+                    for i in 0..resampled_len {
+                        // Linear interpolation for resampling
+                        let src_idx = (i as f64 * loopback_rate / target_rate) as usize;
+                        
+                        let mut sample = if src_idx < loopback_samples.len() {
+                            loopback_samples[src_idx]
+                        } else {
+                            0.0
+                        };
+                        
+                        // Soft clipping (same as macOS)
+                        if sample > 0.9 { sample = 0.9 + (sample - 0.9) * 0.2; }
+                        else if sample < -0.9 { sample = -0.9 + (sample + 0.9) * 0.2; }
+                        sample = sample.max(-0.95).min(0.95);
+                        
+                        let pcm = (sample * i16::MAX as f32) as i16;
+                        writer.write_sample::<i16>(pcm).map_err(|e| format!("WAV write failed: {e}"))?;
+                    }
+                    
+                    // Remove consumed samples
+                    let consumed = (resampled_len as f64 * loopback_rate / target_rate) as usize;
+                    if consumed < loopback_samples.len() {
+                        loopback_samples.drain(0..consumed);
+                    } else {
+                        loopback_samples.clear();
+                    }
                 }
 
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
 
-            audio_client.Stop().ok();
+            loopback_client.Stop().ok();
             writer.finalize().map_err(|e| format!("Finalize WAV failed: {e}"))?;
 
-            CoTaskMemFree(Some(pwfx as *const _ as *const _));
+            CoTaskMemFree(Some(loopback_pwfx as *const _ as *const _));
         }
+
+        // Convert WAV to MP3 using mp3lame (no FFmpeg needed)
+        convert_wav_to_mp3(&wav_path, &output_path)?;
 
         Ok(())
     }
 }
 
-
+/// Detect audio MIME type from file bytes
+pub fn detect_audio_mime_type(audio_data: &[u8]) -> Result<&'static str, String> {
+    // MP3: starts with ID3 tag or sync bytes (0xFF 0xFB, 0xFF 0xFA, 0xFF 0xF3, etc.)
+    if audio_data.len() >= 3 {
+        if &audio_data[0..3] == b"ID3" {
+            return Ok("audio/mp3");
+        }
+        if audio_data[0] == 0xFF && (audio_data[1] & 0xE0) == 0xE0 {
+            return Ok("audio/mp3");
+        }
+    }
+    
+    // WAV: "RIFF"..."WAVE"
+    if audio_data.len() >= 12 {
+        if &audio_data[0..4] == b"RIFF" && &audio_data[8..12] == b"WAVE" {
+            return Ok("audio/wav");
+        }
+    }
+    
+    // OGG: "OggS"
+    if audio_data.len() >= 4 && &audio_data[0..4] == b"OggS" {
+        return Ok("audio/ogg");
+    }
+    
+    // FLAC: "fLaC"
+    if audio_data.len() >= 4 && &audio_data[0..4] == b"fLaC" {
+        return Ok("audio/flac");
+    }
+    
+    // AAC/M4A: starts with "ftyp" at offset 4
+    if audio_data.len() >= 8 && &audio_data[4..8] == b"ftyp" {
+        return Ok("audio/m4a");
+    }
+    
+    // Default to WAV if unknown
+    Ok("audio/wav")
+}

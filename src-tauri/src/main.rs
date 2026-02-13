@@ -555,24 +555,42 @@ fn stop_audio_recording() -> Result<String, String> {
     audio::stop_system_audio_recording()
 }
 
+/// Pre-initialize audio capture when user selects Audio tab (instant recording)
+#[tauri::command]
+async fn warm_audio_capture() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| audio::warm_audio_capture())
+        .await
+        .map_err(|e| format!("Failed to warm audio capture: {e}"))?
+}
+
+/// Cleanup audio capture when user switches away from Audio tab
+#[tauri::command]
+fn cooldown_audio_capture() {
+    audio::cooldown_audio_capture();
+}
+
 #[tauri::command]
 fn is_audio_recording() -> Result<bool, String> {
     Ok(audio::is_recording())
 }
 
-/// Stop audio recording and transcribe the result using Vosk
+/// Stop audio recording and return the file path
+/// Note: Local transcription is disabled - audio is sent directly to AI instead
 #[tauri::command]
 fn stop_audio_recording_and_transcribe() -> Result<String, String> {
-    let wav_path = audio::stop_system_audio_recording()?;
-    println!("[Audio] Recording stopped, transcribing: {}", wav_path);
-    let text = audio::transcribe_audio(&wav_path)?;
-    Ok(text)
+    let audio_path = audio::stop_system_audio_recording()?;
+    println!("[Audio] Recording stopped, file: {}", audio_path);
+    // Return an error format that frontend can detect to use the audio path
+    // Format: "LOCAL_TRANSCRIPTION_DISABLED:<path>" for backward compatibility
+    Err(format!("LOCAL_TRANSCRIPTION_DISABLED:{}", audio_path))
 }
 
 /// Transcribe an existing audio file
+/// Note: Local transcription is disabled - audio is sent directly to AI instead
 #[tauri::command]
-fn transcribe_audio_file(wav_path: String) -> Result<String, String> {
-    audio::transcribe_audio(&wav_path)
+fn transcribe_audio_file(audio_path: String) -> Result<String, String> {
+    // Local transcription disabled - return error with path
+    Err(format!("LOCAL_TRANSCRIPTION_DISABLED:{}", audio_path))
 }
 
 #[tauri::command]
@@ -1220,6 +1238,152 @@ async fn query_ai_via_proxy_with_image(
     })
 }
 
+/// Query AI via proxy with audio (base64 encoded)
+/// Audio is sent directly to Gemini model via OpenRouter - no transcription needed
+#[tauri::command]
+async fn query_ai_via_proxy_with_audio(
+    prompt: String,
+    audio_path: String,
+    model: String,
+    access_token: String,
+) -> Result<AIProxyResponse, String> {
+    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
+
+    println!("[Rust AI Proxy Audio] Starting request to ai-proxy...");
+    println!("[Rust AI Proxy Audio] Model: {}", model);
+    println!("[Rust AI Proxy Audio] Prompt length: {} chars", prompt.len());
+    println!("[Rust AI Proxy Audio] Audio path: {}", audio_path);
+
+    // Read and encode audio
+    let audio_data = std::fs::read(&audio_path)
+        .map_err(|e| format!("Failed to read audio file: {}", e))?;
+    
+    // Validate audio file size (must have actual content)
+    if audio_data.len() < 1000 {
+        return Err(format!(
+            "Audio file is too small ({} bytes). Recording may have failed or been too short.",
+            audio_data.len()
+        ));
+    }
+    
+    let mime_type = audio::detect_audio_mime_type(&audio_data)?;
+    let base64_audio = general_purpose::STANDARD.encode(&audio_data);
+    println!("[Rust AI Proxy Audio] Audio size: {} bytes, mime: {}", audio_data.len(), mime_type);
+
+    // Use static client (reuses TLS connections)
+    let client = &*AI_PROXY_CLIENT;
+
+    // Build multimodal message with audio
+    // OpenRouter expects input_audio format per docs:
+    // https://openrouter.ai/docs/guides/overview/multimodal/audio
+    let audio_format = match mime_type {
+        "audio/wav" | "audio/x-wav" => "wav",
+        "audio/mp3" | "audio/mpeg" => "mp3",
+        "audio/ogg" => "ogg",
+        "audio/flac" => "flac",
+        "audio/aac" => "aac",
+        "audio/m4a" => "m4a",
+        _ => "wav", // default to wav
+    };
+    
+    let messages = serde_json::json!([
+        {
+            "role": "user",
+            "content": [
+                { "type": "text", "text": prompt },
+                { 
+                    "type": "input_audio", 
+                    "input_audio": { 
+                        "data": base64_audio,
+                        "format": audio_format
+                    }
+                }
+            ]
+        }
+    ]);
+
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+        "max_tokens": 4096
+    });
+
+    println!("[Rust AI Proxy Audio] Sending POST to {}/functions/v1/ai-proxy", SUPABASE_URL);
+    let start = std::time::Instant::now();
+
+    let response = client
+        .post(format!("{}/functions/v1/ai-proxy", SUPABASE_URL))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| {
+            let elapsed = start.elapsed();
+            println!("[Rust AI Proxy Audio] Request FAILED after {:?}", elapsed);
+            if e.is_timeout() {
+                println!("[Rust AI Proxy Audio] Error type: TIMEOUT");
+                "❌ AI request timed out after 30 seconds. Please try again.".to_string()
+            } else {
+                println!("[Rust AI Proxy Audio] Error type: {}", e);
+                format!("❌ AI Proxy request failed: {}", e)
+            }
+        })?;
+
+    let elapsed = start.elapsed();
+    println!("[Rust AI Proxy Audio] Response received after {:?}", elapsed);
+
+    let status = response.status();
+    println!("[Rust AI Proxy Audio] Response status: {}", status);
+
+    println!("[Rust AI Proxy Audio] Reading response body...");
+    let body_start = std::time::Instant::now();
+    let response_text = response.text().await
+        .map_err(|e| {
+            println!("[Rust AI Proxy Audio] Body read FAILED after {:?}", body_start.elapsed());
+            format!("❌ Failed to read AI Proxy response: {}", e)
+        })?;
+
+    println!("[Rust AI Proxy Audio] Body read in {:?}, length: {} chars", body_start.elapsed(), response_text.len());
+
+    println!("[Rust AI Proxy Audio] Parsing JSON response...");
+    let proxy_response: serde_json::Value = serde_json::from_str(&response_text)
+        .unwrap_or_else(|e| {
+            println!("[Rust AI Proxy Audio] JSON parse error: {}", e);
+            serde_json::json!({ "error": response_text })
+        });
+
+    if !status.is_success() {
+        let error_msg = proxy_response["error"]
+            .as_str()
+            .unwrap_or(&response_text);
+        println!("[Rust AI Proxy Audio] Non-success status, error: {}", error_msg);
+        return Err(format!("❌ AI Proxy Error ({}): {}", status.as_u16(), error_msg));
+    }
+
+    // Parse usage info
+    let usage = proxy_response["usage"].as_object().map(|u| AIProxyUsage {
+        requests_used: u.get("requests_used").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        requests_limit: u.get("requests_limit").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        period_end: u.get("period_end").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        is_paid: u.get("is_paid").and_then(|v| v.as_bool()).unwrap_or(false),
+    });
+
+    let ai_response_text = proxy_response["response"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    println!("[Rust AI Proxy Audio] SUCCESS! Response length: {} chars", ai_response_text.len());
+
+    Ok(AIProxyResponse {
+        response: ai_response_text,
+        usage,
+        error: None,
+    })
+}
+
 
 // ============================================================================
 // GOOGLE OAUTH COMMANDS
@@ -1303,6 +1467,8 @@ fn main() {
             get_display_thumbnail,
             start_audio_recording,
             stop_audio_recording,
+            warm_audio_capture,
+            cooldown_audio_capture,
             is_audio_recording,
             stop_audio_recording_and_transcribe,
             transcribe_audio_file,
@@ -1311,6 +1477,7 @@ fn main() {
             query_ai_with_audio,
             query_ai_via_proxy,
             query_ai_via_proxy_with_image,
+            query_ai_via_proxy_with_audio,
             create_checkout_session,
             create_billing_portal_session,
             open_url,
@@ -1332,6 +1499,9 @@ fn main() {
         .setup(|app| {
             println!("🚀 CrackingInterview starting...");
             screenshot::request_screen_recording_permission();
+            
+            // Pre-compile audio recorder helper in background (eliminates first-recording delay)
+            audio::prewarm_audio_recorder();
 
             // Load configured hotkeys, store in state, and register them.
             let cfg = load_hotkeys_from_disk(app.handle());

@@ -265,34 +265,47 @@ function App() {
 
   const toggleAudioRecording = async () => {
     // Guard against duplicate hotkey events (React StrictMode/dev can double-register listeners)
-    // and against rapid double presses.
+    // and against rapid double presses. Use longer debounce to prevent accidental double-clicks.
     const now = Date.now();
     if (audioToggleInFlightRef.current) return;
-    if (now - lastAudioToggleAtRef.current < 350) return;
+    if (now - lastAudioToggleAtRef.current < 1000) return;  // 1 second debounce
+    
+    // Set in-flight flag IMMEDIATELY to prevent race conditions
+    audioToggleInFlightRef.current = true;
     lastAudioToggleAtRef.current = now;
 
     // Audio is only available for Pro users (active or cancelling status)
     const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
     if (!isPro) {
       setMessage('⚠️ Audio input requires Pro subscription.');
+      audioToggleInFlightRef.current = false;
       return;
     }
 
     // Start recording
     if (!isRecordingAudioRef.current) {
-      audioToggleInFlightRef.current = true;
       try {
-        // Avoid duplicating the recording banner; the UI shows a dedicated timer banner while recording.
-        setMessage('');
+        // Show "Starting..." message while audio initializes
+        setMessage('🔊 Starting audio capture...');
         try { await invoke('frontend_log', { message: 'audio: start recording' }); } catch {}
         // Flip ref immediately to avoid races on repeated triggers.
         isRecordingAudioRef.current = true;
+
+        // Wait for backend to actually start recording BEFORE showing UI
+        await invoke('start_audio_recording');
+        
+        // NOW recording has actually started - show the UI
+        setMessage(''); // Clear "Starting..." message
         setIsRecordingAudio(true);
         setAudioSeconds(0);
         if (audioTimerRef.current) window.clearInterval(audioTimerRef.current);
         audioTimerRef.current = window.setInterval(() => setAudioSeconds((s) => s + 1), 1000);
-
-        await invoke('start_audio_recording');
+        
+        // Recording started successfully - reset flag to allow STOP to be called
+        // But we need to wait a bit to prevent accidental double-clicks
+        setTimeout(() => {
+          audioToggleInFlightRef.current = false;
+        }, 500);
       } catch (e) {
         // Roll back state on failure.
         isRecordingAudioRef.current = false;
@@ -302,36 +315,26 @@ function App() {
           audioTimerRef.current = null;
         }
         setMessage(`❌ Error: ${String(e)}`);
-      } finally {
         audioToggleInFlightRef.current = false;
       }
       return;
     }
 
     // Stop recording and solve
-    audioToggleInFlightRef.current = true;
     setIsLoading(true);
     setAiResponse('');
     setMessage('⏹️ Stopping recording...');
     try { await invoke('frontend_log', { message: 'audio: stop recording' }); } catch {}
     try {
-      // Use Vosk to transcribe the audio locally
-      setMessage('🎙️ Transcribing audio...');
-      const transcribedText = await invoke<string>('stop_audio_recording_and_transcribe');
-      try { await invoke('frontend_log', { message: `audio: transcribed: ${transcribedText.substring(0, 100)}...` }); } catch {}
+      // Stop recording and get the audio file path (MP3 or WAV)
+      const audioFilePath = await invoke<string>('stop_audio_recording');
+      try { await invoke('frontend_log', { message: `audio: stopped, file: ${audioFilePath}` }); } catch {}
 
       isRecordingAudioRef.current = false;
       setIsRecordingAudio(false);
       if (audioTimerRef.current) {
         window.clearInterval(audioTimerRef.current);
         audioTimerRef.current = null;
-      }
-
-      if (!transcribedText.trim()) {
-        setMessage('⚠️ No speech detected in audio. Please speak clearly and try again.');
-        setIsLoading(false);
-        audioToggleInFlightRef.current = false;
-        return;
       }
 
       // Get access token for proxy calls
@@ -352,17 +355,19 @@ function App() {
         }
       }
 
-      // Determine model based on subscription
-      const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
-      const modelToUse = isPro ? aiConfig.selected_model : FREE_MODEL.id;
+      // IMPORTANT: Audio input ALWAYS uses gemini-3-flash model (supports audio input)
+      // This overrides the user's model selection because other models don't support audio
+      const AUDIO_MODEL = 'gemini-3-flash';
 
-      setMessage('🤖 Solving with AI...');
-      const audioInstructions = `You received a transcribed interview question from audio:\n\n"${transcribedText}"\n\nSolve this question. Provide a clear Explanation and a final Solution.`;
+      setMessage('🤖 Sending audio to AI...');
+      const audioInstructions = `Listen to the interview question in the audio carefully and solve it step by step. Provide a clear Explanation and a final Solution.`;
       const prompt = buildPrompt(selectedTemplate, selectedLanguage, audioInstructions);
       
-      const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy', {
+      // Send audio directly to Gemini via proxy (no transcription needed)
+      const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_audio', {
         prompt,
-        model: modelToUse,
+        audioPath: audioFilePath,
+        model: AUDIO_MODEL,
         accessToken,
       });
       
@@ -871,6 +876,7 @@ function App() {
       }
       
       // Add Audio source (always available) + combine all sources (Chrome tabs, displays, then Audio)
+      // Audio records BOTH system audio (Zoom/Teams) AND microphone for interview capture
       const audioSource: AudioSource = {
         id: 'audio',
         name: 'Audio (System)',
@@ -1215,9 +1221,25 @@ function App() {
               sources={allSources}
               selectedSource={selectedTab}
               onSelect={(source) => {
+                const wasAudio = selectedTab && isAudio(selectedTab);
+                const nowAudio = isAudio(source);
+                
                 setSelectedTab(source);
                 const title = isAudio(source) ? source.name : isDisplay(source) ? source.name : source.title;
                 setMessage(`Selected: ${title}`);
+                
+                // Warm up audio capture when selecting Audio source
+                if (nowAudio && !wasAudio) {
+                  console.log('🔥 Warming up audio capture...');
+                  invoke('warm_audio_capture')
+                    .then(() => console.log('🔥 Audio capture warm and ready'))
+                    .catch((e) => console.warn('⚠️ Audio warm-up failed:', e));
+                }
+                // Cool down when switching away from Audio
+                else if (wasAudio && !nowAudio) {
+                  console.log('❄️ Cooling down audio capture...');
+                  invoke('cooldown_audio_capture').catch(() => {});
+                }
               }}
               disabled={false}
             />

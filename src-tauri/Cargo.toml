@@ -41,6 +41,9 @@ lazy_static = "1.5"
 image = "0.25"
 hound = "3.5"
 
+# MP3 encoding - LAME encoder (high-level wrapper)
+mp3lame-encoder = "0.2"
+
 # Speech recognition - TODO: install libvosk native library and uncomment to enable local transcription
 # vosk = "0.2"
 # dirs = "5"

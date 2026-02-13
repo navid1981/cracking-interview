@@ -3,383 +3,462 @@ import AVFoundation
 import CoreMedia
 import ScreenCaptureKit
 import CoreGraphics
-import AppKit
 
-// Records system audio using ScreenCaptureKit until the process is terminated.
-// Usage:
-//   cracking_interview_audio_recorder --out /path/to/file.wav
+// Records SYSTEM AUDIO via ScreenCaptureKit.
 //
-// Notes:
-// - Requires macOS 13+.
-// - Will prompt for Screen Recording permission (ScreenCaptureKit).
+// Modes:
+//   --warm         : Initialize ScreenCaptureKit and wait for "start" command on stdin
+//   (no --warm)    : Start recording immediately (legacy mode)
+//
+// Commands (warm mode only, via stdin):
+//   start          : Begin recording
+//   stop           : Stop recording and exit
+//
+// Usage:
+//   # Warm mode (pre-initialize, wait for commands)
+//   cracking_interview_audio_recorder --warm --out /path/to/file.wav --timeout 180
+//
+//   # Legacy mode (start immediately)
+//   cracking_interview_audio_recorder --out /path/to/file.wav --timeout 180
 
 @available(macOS 13.0, *)
 final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
   private var stream: SCStream?
   private var audioFile: AVAudioFile?
-  private var sourceFormat: AVAudioFormat?
-  private var targetFormat: AVAudioFormat?
-  private var converter: AVAudioConverter?
-  private var totalFramesWritten: Int64 = 0
-  private var didLogInit: Bool = false
+  
+  private var totalFrames: Int64 = 0
   private var didLogFirstBuffer: Bool = false
-  private var didLogFirstScreenBuffer: Bool = false
-  private var writeErrorCount: Int = 0
+  private var isRecording: Bool = false
+  
   private let outURL: URL
-  private let startLock = NSLock()
-  private var startDidComplete: Bool = false
-  private var startCompletion: ((Result<Void, any Error>) -> Void)?
+  private var timeoutSeconds: Int
+  private var timeoutWorkItem: DispatchWorkItem?
+  
+  private let outputSampleRate: Double = 44100
+  private let outputChannels: AVAudioChannelCount = 1
+  private let volumeBoost: Float = 5.0
 
-  init(outURL: URL) {
+  init(outURL: URL, timeoutSeconds: Int = 180) {
     self.outURL = outURL
+    self.timeoutSeconds = timeoutSeconds
   }
-
-  private func ensureOutputFileReady() {
-    if audioFile != nil && targetFormat != nil { return }
-    // Pre-create the output WAV so Stop never fails with "file not created",
-    // even if no audio buffers arrive (e.g., user records while system audio is silent).
-    let fixedRate = 48000.0
-    let fixedChannels: AVAudioChannelCount = 2
-    guard let dstFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: fixedRate, channels: fixedChannels, interleaved: true) else {
-      fputs("Failed to create fixed target PCM format\n", stderr)
+  
+  private func ensureFileReady() {
+    if audioFile != nil { return }
+    
+    guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: outputSampleRate, channels: outputChannels, interleaved: false) else {
+      fputs("Failed to create output format\n", stderr)
       return
     }
-    self.targetFormat = dstFormat
+    
     do {
       try? FileManager.default.removeItem(at: outURL)
-      self.audioFile = try AVAudioFile(forWriting: outURL, settings: dstFormat.settings, commonFormat: .pcmFormatInt16, interleaved: true)
-      fputs("Audio output file opened: \(outURL.path)\n", stderr)
+      audioFile = try AVAudioFile(forWriting: outURL, settings: format.settings)
+      fputs("Output file opened: \(outURL.path)\n", stderr)
     } catch {
-      fputs("Failed to open WAV output: \(error)\n", stderr)
+      fputs("Failed to create output file: \(error)\n", stderr)
     }
   }
 
+  /// Initialize ScreenCaptureKit (warm up) but don't start recording yet
   @MainActor
-  func start() async throws {
-    fputs("AudioRecorder start() begin.\n", stderr)
-
-    // ScreenCaptureKit requires Screen Recording permission. If it's not granted,
-    // startCapture() can appear to hang. Proactively request it and fail with a clear log.
+  func warmUp() async throws {
+    let totalStart = Date()
+    fputs("[WARM] Initializing ScreenCaptureKit...\n", stderr)
+    fflush(stderr)
+    
+    // Check Screen Recording permission
     if !CGPreflightScreenCaptureAccess() {
-      fputs("Screen Recording permission not granted. Requesting access...\n", stderr)
+      fputs("Requesting Screen Recording permission...\n", stderr)
+      fflush(stderr)
       let granted = CGRequestScreenCaptureAccess()
       if !granted {
-        fputs("Screen Recording permission denied. Enable it in System Settings → Privacy & Security → Screen Recording.\n", stderr)
         throw NSError(domain: "AudioRecorder", code: 2, userInfo: [NSLocalizedDescriptionKey: "Screen Recording permission denied"])
       }
-      fputs("Screen Recording permission granted.\n", stderr)
-    } else {
-      fputs("Screen Recording permission already granted.\n", stderr)
     }
 
-    // Prefer the main display; we only need a "source" to enable system audio capture.
-    fputs("AudioRecorder fetching shareable content...\n", stderr)
-    let content = try await SCShareableContent.current
-    fputs("AudioRecorder shareable content loaded. displays=\(content.displays.count)\n", stderr)
-    guard let first = content.displays.first else {
-      throw NSError(domain: "AudioRecorder", code: 1, userInfo: [NSLocalizedDescriptionKey: "No display found"])
+    // Get shareable content
+    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+    
+    guard !content.displays.isEmpty else {
+      throw NSError(domain: "AudioRecorder", code: 1, userInfo: [NSLocalizedDescriptionKey: "No displays found"])
     }
-    let mainID = CGMainDisplayID()
-    let display = content.displays.first(where: { $0.displayID == mainID }) ?? first
-    fputs("AudioRecorder using display id=\(display.displayID).\n", stderr)
+    
+    // Use main display
+    let mainDisplayID = CGMainDisplayID()
+    let display = content.displays.first(where: { $0.displayID == mainDisplayID }) ?? content.displays[0]
 
+    // Create filter and config
     let filter = SCContentFilter(display: display, excludingWindows: [])
-    let config = SCStreamConfiguration()
 
-    // Minimize video cost; still enables system audio capture.
-    // Extremely tiny sizes can be flaky on some setups; keep it small but not trivial.
-    config.width = 64
-    config.height = 64
+    let config = SCStreamConfiguration()
+    config.width = 2
+    config.height = 2
     config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
     config.capturesAudio = true
-    // Encourage system audio delivery in a well-known format.
-    // (These properties exist on macOS 13+)
+    config.excludesCurrentProcessAudio = false
     config.sampleRate = 48000
     config.channelCount = 2
     config.showsCursor = false
 
+    // Create stream
     let stream = SCStream(filter: filter, configuration: config, delegate: self)
     self.stream = stream
+    try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "audio.queue", qos: .userInteractive))
 
-    ensureOutputFileReady()
-
-    // Some setups appear to hang on audio-only streams; adding a minimal screen output
-    // makes startCapture() more reliable while keeping video cost near-zero.
-    try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "screen.sample.queue"))
-    try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "audio.sample.queue"))
-    fputs("AudioRecorder starting capture...\n", stderr)
-    // Avoid hanging forever inside startCapture(). Use a GCD watchdog so we don't rely
-    // on Swift concurrency scheduling (which can be impacted by system-level deadlocks).
-    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, any Error>) in
-      func completeOnce(_ result: Result<Void, any Error>) {
-        startLock.lock()
-        defer { startLock.unlock() }
-        if startDidComplete { return }
-        startDidComplete = true
-        startCompletion = nil
-        cont.resume(with: result)
-      }
-
-      // Allow SCStreamDelegate callbacks to fail start immediately (e.g. Code=-3805).
-      startLock.lock()
-      startDidComplete = false
-      startCompletion = completeOnce
-      startLock.unlock()
-
-      let timeoutSeconds: Double = 12
-      let timeoutWork = DispatchWorkItem {
-        let err = NSError(
-          domain: "AudioRecorder",
-          code: 3,
-          userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for ScreenCaptureKit startCapture(). This is usually caused by permissions, OS bugs, or capture configuration issues."]
-        )
-        fputs("AudioRecorder startCapture failed/timeout: \(err)\n", stderr)
-        completeOnce(.failure(err))
-      }
-      DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds, execute: timeoutWork)
-
-      Task.detached {
-        do {
-          try await stream.startCapture()
-          timeoutWork.cancel()
-          completeOnce(.success(()))
-        } catch {
-          timeoutWork.cancel()
-          fputs("AudioRecorder startCapture failed: \(error)\n", stderr)
-          completeOnce(.failure(error))
-        }
-      }
+    // Start the stream (but don't write to file yet)
+    try await stream.startCapture()
+    
+    fputs("[WARM] Ready in \(String(format: "%.3f", Date().timeIntervalSince(totalStart)))s. Waiting for 'start' command...\n", stderr)
+    fputs("WARM_READY\n", stderr)
+    fflush(stderr)
+  }
+  
+  /// Begin recording (after warm up)
+  func startRecording() {
+    fputs("[WARM] Recording started\n", stderr)
+    fflush(stderr)
+    isRecording = true
+    totalFrames = 0
+    didLogFirstBuffer = false
+    
+    // Start timeout timer
+    let timeoutWork = DispatchWorkItem { [weak self] in
+      fputs("Timeout reached. Stopping recording.\n", stderr)
+      self?.stopRecording()
+      exit(0)
     }
+    self.timeoutWorkItem = timeoutWork
+    DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(timeoutSeconds), execute: timeoutWork)
+    
     fputs("AudioRecorder capture started.\n", stderr)
+    fflush(stderr)
   }
 
-  func stop() async {
-    if let stream = self.stream {
-      try? await stream.stopCapture()
+  /// Legacy mode: Initialize and start recording immediately
+  @MainActor
+  func start() async throws {
+    let totalStart = Date()
+    fputs("[TIMING] start() begin\n", stderr)
+    fflush(stderr)
+    
+    // Check Screen Recording permission
+    let permStart = Date()
+    if !CGPreflightScreenCaptureAccess() {
+      fputs("Requesting Screen Recording permission...\n", stderr)
+      fflush(stderr)
+      let granted = CGRequestScreenCaptureAccess()
+      if !granted {
+        throw NSError(domain: "AudioRecorder", code: 2, userInfo: [NSLocalizedDescriptionKey: "Screen Recording permission denied"])
+      }
     }
-    self.stream = nil
-    self.audioFile = nil
-    self.sourceFormat = nil
-    self.targetFormat = nil
-    self.converter = nil
-    self.totalFramesWritten = 0
-    self.didLogInit = false
-    self.didLogFirstBuffer = false
-    self.didLogFirstScreenBuffer = false
-    self.writeErrorCount = 0
+    fputs("[TIMING] Permission check: \(String(format: "%.3f", Date().timeIntervalSince(permStart)))s\n", stderr)
+    fflush(stderr)
+
+    // Get shareable content
+    let contentStart = Date()
+    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+    fputs("[TIMING] Get shareable content: \(String(format: "%.3f", Date().timeIntervalSince(contentStart)))s (\(content.displays.count) displays)\n", stderr)
+    fflush(stderr)
+    
+    guard !content.displays.isEmpty else {
+      throw NSError(domain: "AudioRecorder", code: 1, userInfo: [NSLocalizedDescriptionKey: "No displays found"])
+    }
+    
+    let mainDisplayID = CGMainDisplayID()
+    let display = content.displays.first(where: { $0.displayID == mainDisplayID }) ?? content.displays[0]
+
+    let filter = SCContentFilter(display: display, excludingWindows: [])
+
+    let config = SCStreamConfiguration()
+    config.width = 2
+    config.height = 2
+    config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+    config.capturesAudio = true
+    config.excludesCurrentProcessAudio = false
+    config.sampleRate = 48000
+    config.channelCount = 2
+    config.showsCursor = false
+
+    let streamStart = Date()
+    let stream = SCStream(filter: filter, configuration: config, delegate: self)
+    self.stream = stream
+    try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "audio.queue", qos: .userInteractive))
+    fputs("[TIMING] Stream setup: \(String(format: "%.3f", Date().timeIntervalSince(streamStart)))s\n", stderr)
+    fflush(stderr)
+
+    let captureStart = Date()
+    try await stream.startCapture()
+    fputs("[TIMING] startCapture(): \(String(format: "%.3f", Date().timeIntervalSince(captureStart)))s\n", stderr)
+    fflush(stderr)
+    
+    // Start recording immediately in legacy mode
+    isRecording = true
+    
+    // Start timeout timer
+    let timeoutWork = DispatchWorkItem { [weak self] in
+      fputs("Timeout reached. Stopping recording.\n", stderr)
+      Task { await self?.stop(); exit(0) }
+    }
+    self.timeoutWorkItem = timeoutWork
+    DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(timeoutSeconds), execute: timeoutWork)
+    
+    fputs("[TIMING] Total startup: \(String(format: "%.3f", Date().timeIntervalSince(totalStart)))s\n", stderr)
+    fputs("AudioRecorder capture started.\n", stderr)
+    fflush(stderr)
   }
 
   func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
-    if outputType == .screen {
-      if !didLogFirstScreenBuffer {
-        didLogFirstScreenBuffer = true
-        fputs("First screen buffer received.\n", stderr)
-      }
-      return
-    }
     guard outputType == .audio else { return }
     guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
-
-    // Lazily initialize source format + converter based on first buffer.
-    ensureOutputFileReady()
-    if sourceFormat == nil || targetFormat == nil || converter == nil {
-      guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
-      guard let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else { return }
-      var asbd = asbdPtr.pointee
-
-      guard let srcFormat = AVAudioFormat(streamDescription: &asbd) else { return }
-      self.sourceFormat = srcFormat
-
-      guard let dstFormat = self.targetFormat else { return }
-      if let conv = AVAudioConverter(from: srcFormat, to: dstFormat) {
-        self.converter = conv
-      } else {
-        fputs("Failed to create AVAudioConverter\n", stderr)
-        return
-      }
-
-      if !didLogInit {
-        didLogInit = true
-        fputs("AudioRecorder started. srcRate=\(srcFormat.sampleRate) srcCh=\(srcFormat.channelCount) -> dstRate=\(dstFormat.sampleRate) dstCh=\(dstFormat.channelCount) out=\(outURL.path)\n", stderr)
-      }
-    }
-
-    guard let srcFormat = self.sourceFormat, let dstFormat = self.targetFormat, let conv = self.converter, let file = self.audioFile else { return }
-
+    guard isRecording else { return }  // Don't write unless recording
+    
+    ensureFileReady()
+    guard let file = audioFile else { return }
+    
+    guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+          let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else { return }
+    
+    var asbd = asbdPtr.pointee
+    guard let srcFormat = AVAudioFormat(streamDescription: &asbd) else { return }
+    
     let numSamples = CMSampleBufferGetNumSamples(sampleBuffer)
     guard numSamples > 0 else { return }
-
+    
     guard let inBuffer = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: AVAudioFrameCount(numSamples)) else { return }
     inBuffer.frameLength = AVAudioFrameCount(numSamples)
-
-    // Copy audio data into inBuffer via raw AudioBufferList -> inBuffer.audioBufferList.
-    // IMPORTANT: AudioBufferList is a variable-length struct. Allocate a sufficiently large buffer.
+    
     var blockBuffer: CMBlockBuffer?
-    // First pass: ask CoreMedia how many bytes are needed for the AudioBufferList.
     var neededSize: Int = 0
-    let status1 = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-      sampleBuffer,
-      bufferListSizeNeededOut: &neededSize,
-      bufferListOut: nil,
-      bufferListSize: 0,
-      blockBufferAllocator: nil,
-      blockBufferMemoryAllocator: nil,
-      flags: 0,
-      blockBufferOut: &blockBuffer
-    )
-    if status1 != noErr || neededSize <= 0 {
-      if writeErrorCount < 3 {
-        writeErrorCount += 1
-        fputs("CMSampleBufferGetAudioBufferList size query failed: status=\(status1) needed=\(neededSize)\n", stderr)
-      }
-      return
-    }
-
+    CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sampleBuffer, bufferListSizeNeededOut: &neededSize, bufferListOut: nil, bufferListSize: 0, blockBufferAllocator: nil, blockBufferMemoryAllocator: nil, flags: 0, blockBufferOut: &blockBuffer)
+    
+    guard neededSize > 0 else { return }
+    
     let raw = UnsafeMutableRawPointer.allocate(byteCount: neededSize, alignment: MemoryLayout<AudioBufferList>.alignment)
     defer { raw.deallocate() }
     raw.initializeMemory(as: UInt8.self, repeating: 0, count: neededSize)
     let sourceABLPtr = raw.bindMemory(to: AudioBufferList.self, capacity: 1)
-
-    let status2 = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-      sampleBuffer,
-      bufferListSizeNeededOut: &neededSize,
-      bufferListOut: sourceABLPtr,
-      bufferListSize: neededSize,
-      blockBufferAllocator: nil,
-      blockBufferMemoryAllocator: nil,
-      flags: 0,
-      blockBufferOut: &blockBuffer
-    )
-    if status2 != noErr {
-      if writeErrorCount < 3 {
-        writeErrorCount += 1
-        fputs("CMSampleBufferGetAudioBufferList fill failed: status=\(status2) size=\(neededSize)\n", stderr)
-      }
-      return
-    }
-
+    
+    CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sampleBuffer, bufferListSizeNeededOut: &neededSize, bufferListOut: sourceABLPtr, bufferListSize: neededSize, blockBufferAllocator: nil, blockBufferMemoryAllocator: nil, flags: 0, blockBufferOut: &blockBuffer)
+    
     let srcBuffers = UnsafeMutableAudioBufferListPointer(sourceABLPtr)
     let dstABL = inBuffer.mutableAudioBufferList
     let dstBuffers = UnsafeMutableAudioBufferListPointer(dstABL)
-
-    // Copy buffer-by-buffer (works for both interleaved and planar formats).
-    let count = min(srcBuffers.count, dstBuffers.count)
-    for i in 0..<count {
+    
+    for i in 0..<min(srcBuffers.count, dstBuffers.count) {
       guard let src = srcBuffers[i].mData else { continue }
       let bytes = min(Int(srcBuffers[i].mDataByteSize), Int(dstBuffers[i].mDataByteSize))
       if let dst = dstBuffers[i].mData, bytes > 0 {
         memcpy(dst, src, bytes)
       }
     }
-
-    if !didLogFirstBuffer {
-      // Log first buffer info once (helps diagnose "header only" files).
-      didLogFirstBuffer = true
-      let srcBytes = (0..<srcBuffers.count).map { Int(srcBuffers[$0].mDataByteSize) }.reduce(0, +)
-      let dstBytes = (0..<dstBuffers.count).map { Int(dstBuffers[$0].mDataByteSize) }.reduce(0, +)
-      fputs("First audio buffer received: samples=\(numSamples) neededABL=\(neededSize) srcBuffers=\(srcBuffers.count) srcBytes=\(srcBytes) dstBuffers=\(dstBuffers.count) dstBytes=\(dstBytes)\n", stderr)
+    
+    guard let floatData = inBuffer.floatChannelData else { return }
+    
+    let srcChannels = Int(srcFormat.channelCount)
+    let srcFrames = Int(inBuffer.frameLength)
+    let srcRate = srcFormat.sampleRate
+    
+    let ratio = outputSampleRate / srcRate
+    let outputFrameCount = Int(Double(srcFrames) * ratio)
+    
+    guard let outFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: outputSampleRate, channels: outputChannels, interleaved: false),
+          let outBuffer = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: AVAudioFrameCount(outputFrameCount)) else {
+      return
     }
-
-    do {
-      // Convert to Int16 PCM if needed.
-      guard let outBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: inBuffer.frameCapacity) else { return }
-      var error: NSError?
-
-      var didProvide = false
-      let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
-        if didProvide {
-          outStatus.pointee = .endOfStream
-          return nil
-        }
-        didProvide = true
-        outStatus.pointee = .haveData
-        return inBuffer
+    outBuffer.frameLength = AVAudioFrameCount(outputFrameCount)
+    
+    guard let outData = outBuffer.floatChannelData else { return }
+    
+    for i in 0..<outputFrameCount {
+      let srcIdx = Double(i) / ratio
+      let idx0 = Int(srcIdx)
+      let frac = Float(srcIdx - Double(idx0))
+      
+      var s0: Float = 0
+      var s1: Float = 0
+      if idx0 < srcFrames {
+        for ch in 0..<srcChannels { s0 += floatData[ch][idx0] }
+        s0 /= Float(srcChannels)
       }
+      if idx0 + 1 < srcFrames {
+        for ch in 0..<srcChannels { s1 += floatData[ch][idx0 + 1] }
+        s1 /= Float(srcChannels)
+      } else {
+        s1 = s0
+      }
+      
+      var sample = (s0 * (1 - frac) + s1 * frac) * volumeBoost
+      
+      if sample > 0.9 { sample = 0.9 + (sample - 0.9) * 0.2 }
+      else if sample < -0.9 { sample = -0.9 + (sample + 0.9) * 0.2 }
+      sample = max(-0.95, min(0.95, sample))
+      
+      outData[0][i] = sample
+    }
+    
+    do {
+      try file.write(from: outBuffer)
+      totalFrames += Int64(outputFrameCount)
+      
+      if !didLogFirstBuffer {
+        didLogFirstBuffer = true
+        fputs("First buffer written: \(outputFrameCount) frames (from \(srcFrames) @ \(srcRate)Hz)\n", stderr)
+      }
+    } catch {
+      fputs("Write error: \(error)\n", stderr)
+    }
+  }
+  
+  func stopRecording() {
+    fputs("Stopping recording...\n", stderr)
+    isRecording = false
+    timeoutWorkItem?.cancel()
+    timeoutWorkItem = nil
+    audioFile = nil
+    convertToInt16()
+    fputs("Recording stopped. Total frames: \(totalFrames)\n", stderr)
+  }
 
-      let _ = conv.convert(to: outBuffer, error: &error, withInputFrom: inputBlock)
-      if let error = error {
-        if writeErrorCount < 3 {
-          writeErrorCount += 1
-          fputs("Audio convert error: \(error)\n", stderr)
-        }
+  func stop() async {
+    fputs("Stopping...\n", stderr)
+    
+    isRecording = false
+    timeoutWorkItem?.cancel()
+    timeoutWorkItem = nil
+    
+    if let stream = self.stream {
+      try? await stream.stopCapture()
+    }
+    self.stream = nil
+    audioFile = nil
+    
+    convertToInt16()
+    
+    fputs("Recording stopped. Total frames: \(totalFrames)\n", stderr)
+  }
+  
+  private func convertToInt16() {
+    guard totalFrames > 0 else { return }
+    
+    do {
+      let floatFile = try AVAudioFile(forReading: outURL)
+      let frames = AVAudioFrameCount(floatFile.length)
+      
+      guard frames > 0 else { return }
+      
+      guard let floatFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: outputSampleRate, channels: outputChannels, interleaved: false),
+            let floatBuffer = AVAudioPCMBuffer(pcmFormat: floatFormat, frameCapacity: frames) else {
         return
       }
-
-      try file.write(from: outBuffer)
-      totalFramesWritten += Int64(outBuffer.frameLength)
-    } catch {
-      if writeErrorCount < 3 {
-        writeErrorCount += 1
-        fputs("Audio write error: \(error)\n", stderr)
+      
+      try floatFile.read(into: floatBuffer)
+      
+      guard let floatData = floatBuffer.floatChannelData else { return }
+      
+      guard let int16Format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: outputSampleRate, channels: outputChannels, interleaved: false),
+            let int16Buffer = AVAudioPCMBuffer(pcmFormat: int16Format, frameCapacity: frames) else {
+        return
       }
+      int16Buffer.frameLength = frames
+      
+      guard let int16Data = int16Buffer.int16ChannelData else { return }
+      
+      for i in 0..<Int(frames) {
+        int16Data[0][i] = Int16(floatData[0][i] * Float(Int16.max))
+      }
+      
+      let tempURL = outURL.deletingLastPathComponent().appendingPathComponent("temp_int16.wav")
+      try? FileManager.default.removeItem(at: tempURL)
+      
+      let outFile = try AVAudioFile(forWriting: tempURL, settings: int16Format.settings, commonFormat: .pcmFormatInt16, interleaved: false)
+      try outFile.write(from: int16Buffer)
+      
+      try? FileManager.default.removeItem(at: outURL)
+      try FileManager.default.moveItem(at: tempURL, to: outURL)
+      
+      fputs("Converted to Int16: \(frames) frames\n", stderr)
+    } catch {
+      fputs("Int16 conversion error: \(error)\n", stderr)
     }
   }
 
   func stream(_ stream: SCStream, didStopWithError error: any Error) {
-    fputs("SCStream didStopWithError: \(error)\n", stderr)
-
-    // If startCapture is currently pending, fail it immediately so we don't sit in a timeout loop.
-    startLock.lock()
-    let completion = startCompletion
-    startLock.unlock()
-    if let completion {
-      completion(.failure(error))
-    }
+    fputs("Stream stopped with error: \(error)\n", stderr)
   }
 }
 
-func parseOutPath() -> String? {
-  let args = CommandLine.arguments
-  if let idx = args.firstIndex(of: "--out"), idx + 1 < args.count {
-    return args[idx + 1]
-  }
-  return nil
-}
+// MARK: - Main
+
+var globalRecorder: AudioRecorder?
 
 @available(macOS 13.0, *)
 @main
-struct Main {
-  static func main() {
-    // ScreenCaptureKit tends to behave more reliably when AppKit is initialized,
-    // even in a CLI helper.
-    _ = NSApplication.shared
-    NSApp.setActivationPolicy(.prohibited)
-
-    guard let out = parseOutPath() else {
-      fputs("Missing --out /path/to/file.wav\n", stderr)
-      exit(2)
-    }
-
-    let url = URL(fileURLWithPath: out)
-    let recorder = AudioRecorder(outURL: url)
-
-    // Stop gracefully on termination signals.
-    signal(SIGINT, SIG_IGN)
-    signal(SIGTERM, SIG_IGN)
-
-    let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-    term.setEventHandler {
-      Task { await recorder.stop(); exit(0) }
-    }
-    term.resume()
-
-    let intr = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
-    intr.setEventHandler {
-      Task { await recorder.stop(); exit(0) }
-    }
-    intr.resume()
-
-    Task {
-      do {
-        try await recorder.start()
-      } catch {
-        fputs("Failed to start capture: \(error)\n", stderr)
-        exit(1)
+struct AudioRecorderApp {
+  static func main() async {
+    var outPath = "/tmp/cracking_interview_audio.wav"
+    var timeout = 180
+    var warmMode = false
+    
+    let args = CommandLine.arguments
+    for i in 0..<args.count {
+      if args[i] == "--out" && i + 1 < args.count {
+        outPath = args[i + 1]
+      }
+      if args[i] == "--timeout" && i + 1 < args.count {
+        timeout = Int(args[i + 1]) ?? 180
+      }
+      if args[i] == "--warm" {
+        warmMode = true
       }
     }
-
-    dispatchMain()
+    
+    fputs("Audio Recorder starting. Output: \(outPath), Timeout: \(timeout)s, Warm: \(warmMode)\n", stderr)
+    fflush(stderr)
+    
+    let recorder = AudioRecorder(outURL: URL(fileURLWithPath: outPath), timeoutSeconds: timeout)
+    globalRecorder = recorder
+    
+    // Handle SIGTERM for graceful shutdown
+    signal(SIGTERM) { _ in
+      fputs("Received SIGTERM\n", stderr)
+      fflush(stderr)
+      globalRecorder?.stopRecording()
+      exit(0)
+    }
+    
+    do {
+      if warmMode {
+        // Warm mode: initialize and wait for commands
+        try await recorder.warmUp()
+        
+        // Read commands from stdin
+        while let line = readLine() {
+          let cmd = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+          fputs("Received command: \(cmd)\n", stderr)
+          fflush(stderr)
+          
+          if cmd == "start" {
+            recorder.startRecording()
+          } else if cmd == "stop" {
+            recorder.stopRecording()
+            exit(0)
+          } else if cmd == "exit" || cmd == "quit" {
+            exit(0)
+          }
+        }
+      } else {
+        // Legacy mode: start immediately
+        try await recorder.start()
+        
+        // Keep running until stopped
+        while true {
+          try await Task.sleep(nanoseconds: 100_000_000)
+        }
+      }
+    } catch {
+      fputs("Error: \(error)\n", stderr)
+      exit(1)
+    }
   }
 }
-
-
