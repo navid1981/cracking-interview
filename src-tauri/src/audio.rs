@@ -24,9 +24,11 @@ const MAX_RECORDING_SECONDS: u64 = 180;
 
 lazy_static! {
     static ref REC_STATE: Mutex<Option<RecordingState>> = Mutex::new(None);
-    
-    // Warm state: holds the pre-initialized audio helper (macOS only)
-    #[cfg(target_os = "macos")]
+}
+
+// Warm state: holds the pre-initialized audio helper (macOS only)
+#[cfg(target_os = "macos")]
+lazy_static! {
     static ref WARM_STATE: Mutex<Option<WarmAudioState>> = Mutex::new(None);
 }
 
@@ -143,6 +145,7 @@ pub fn stop_system_audio_recording() -> Result<String, String> {
 }
 
 pub fn is_recording() -> bool {
+    #[allow(unused_mut)]  // mut needed on macOS only
     let mut guard = match REC_STATE.lock() {
         Ok(g) => g,
         Err(_) => return false,
@@ -798,7 +801,10 @@ mod windows {
 
             let loopback_wfx: &WAVEFORMATEX = &*loopback_pwfx;
             
-            println!("🎙️ System audio format: {}Hz {}ch", loopback_wfx.nSamplesPerSec, loopback_wfx.nChannels);
+            // Copy packed struct fields to avoid unaligned reference errors
+            let sample_rate = loopback_wfx.nSamplesPerSec;
+            let channels = loopback_wfx.nChannels;
+            println!("🎙️ System audio format: {}Hz {}ch", sample_rate, channels);
 
             let spec = sample_format_to_hound_spec(loopback_wfx)?;
 
