@@ -56,7 +56,11 @@ The primary source code is:
   - `create-billing-portal-test/index.ts`: Stripe Customer Portal (test mode)
   - `stripe-webhook/index.ts`: Stripe webhook handler (production)
   - `stripe-webhook-test/index.ts`: Stripe webhook handler (test mode)
+  - `notification/index.ts`: Announcement system (returns announcements based on user type + app version)
   - `ping/index.ts`: Network latency diagnostic
+- **Scripts** (project root):
+  - `toggle-visibility.sh`: Toggle stealth/normal mode in `.env`
+  - `restart-app.sh`: Kill and restart the Tauri dev app
 
 ### "Is this file used?" — how to verify quickly
 
@@ -305,6 +309,7 @@ Subscription:
 Utility:
 
 - `open_url(url: String) -> ()` (opens URL in system browser)
+- `open_external_url(url: String) -> ()` (opens URL in default browser, used by announcement link handler)
 - `resize_window(window: Window, width: f64, height: f64) -> ()`
 
 Hotkeys:
@@ -321,6 +326,14 @@ Backend registers global hotkeys on startup (customizable in Settings → HotKey
 | Extract text → Solve | `Cmd+1` | `Alt+1` | `Ctrl+1` |
 | Screenshot → Solve | `Cmd+2` | `Alt+2` | `Ctrl+2` |
 | Audio Start/Stop → Solve | `Cmd+3` | `Alt+3` | `Ctrl+3` |
+| Scroll Up | `Cmd+Up` | `Ctrl+Up` | `Ctrl+Up` |
+| Scroll Down | `Cmd+Down` | `Ctrl+Down` | `Ctrl+Down` |
+| Move Up | `Cmd+Shift+Up` | `Alt+Shift+Up` | `Ctrl+Shift+Up` |
+| Move Down | `Cmd+Shift+Down` | `Alt+Shift+Down` | `Ctrl+Shift+Down` |
+| Move Left | `Cmd+Shift+Left` | `Alt+Shift+Left` | `Ctrl+Shift+Left` |
+| Move Right | `Cmd+Shift+Right` | `Alt+Shift+Right` | `Ctrl+Shift+Right` |
+| Toggle Visibility (stealth) | `Cmd+Shift+H` | `Alt+Shift+H` | `Ctrl+Shift+H` |
+| Quit App | `Cmd+Shift+Q` | `Alt+Shift+Q` | `Ctrl+Shift+Q` |
 
 When pressed, Rust emits events that the frontend listens for:
 
@@ -365,6 +378,7 @@ The app includes a full authentication and subscription system using Supabase an
 │    - create-billing-portal / create-billing-portal-test (manage sub)     │
 │    - stripe-webhook / stripe-webhook-test (subscription lifecycle)       │
 │    - ai-proxy (OpenRouter proxy with quota enforcement)                  │
+│    - notification (announcement system based on user attributes)         │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                     ┌───────────────┴───────────────┐
@@ -531,6 +545,158 @@ Audio input **always** uses `gemini-3-flash` regardless of user's model selectio
 - This is because only certain models support audio input
 - `gemini-3-flash` → OpenRouter model ID: `google/gemini-3-flash-preview`
 - Other Pro models (GPT-5.2, Claude 4.5, Grok 4.1) don't support audio input
+
+### Stealth Mode (Screen Capture Protection)
+
+The app includes a "stealth mode" that makes it invisible to screen capture software (Zoom, Teams, OBS, screenshots, screen recording) and hides it from the Dock/Taskbar. This is designed for real interview scenarios where the user doesn't want the app to appear on shared screens.
+
+#### Configuration
+
+Controlled via environment variable in `.env`:
+
+```
+APP_VISIBILITY=stealth   # Enable stealth mode
+APP_VISIBILITY=normal    # Disable stealth mode (default)
+```
+
+A convenience script `toggle-visibility.sh` toggles between the two modes and reminds you to restart the app.
+
+#### How It Works
+
+Stealth mode is applied at app startup in `src-tauri/src/main.rs` → `setup()`:
+
+1. Read `APP_VISIBILITY` from `.env`
+2. If `"stealth"`, apply platform-specific protections:
+
+**macOS:**
+- `apply_macos_dock_hiding()` — Sets `NSApp.activationPolicy` to `.accessory` (1) via raw ObjC runtime. Hides from Dock and Cmd+Tab.
+- `apply_macos_screen_capture_protection(win)` — Sets `NSWindow.sharingType` to `NSWindowSharingNone` (0). This is the only reliable way to exclude a window from screen capture on macOS.
+- `win.set_content_protected(true)` — Tauri cross-platform fallback.
+- `win.set_skip_taskbar(true)` — Tauri cross-platform fallback.
+
+**Windows:**
+- `apply_windows_stealth(win)` — Uses Win32 API:
+  - `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` (0x11) — Excludes window from screen capture (Windows 10 2004+).
+  - Modifies extended window styles: adds `WS_EX_TOOLWINDOW`, removes `WS_EX_APPWINDOW` — Hides from taskbar and Alt+Tab.
+- Same Tauri cross-platform fallbacks as macOS.
+
+**When stealth is OFF:**
+- `restore_macos_screen_capture_visibility(win)` — Sets `NSWindow.sharingType` back to `NSWindowSharingReadWrite` (1) to allow screen capture.
+- `win.set_content_protected(false)` and `win.set_skip_taskbar(false)`.
+
+#### Toggle Visibility Hotkey
+
+A global hotkey allows quickly hiding/showing the app window (works in both stealth and normal modes):
+
+| Platform | Default Hotkey |
+|----------|---------------|
+| macOS | `Cmd+Shift+H` |
+| Windows | `Alt+Shift+H` |
+| Linux | `Ctrl+Shift+H` |
+
+Implementation: `register_toggle_visibility_hotkey()` in `main.rs` — checks `win.is_visible()`, calls `win.hide()` or `win.show()` + `win.unminimize()` + `win.set_focus()`.
+
+#### Quit App Hotkey
+
+Since stealth mode hides the app from Dock/Taskbar, there's also a quit hotkey:
+
+| Platform | Default Hotkey |
+|----------|---------------|
+| macOS | `Cmd+Shift+Q` |
+| Windows | `Alt+Shift+Q` |
+| Linux | `Ctrl+Shift+Q` |
+
+Both hotkeys are customizable in Settings → HotKeys tab.
+
+#### Key Files
+
+- `src-tauri/src/main.rs`: Stealth mode helpers (`apply_macos_dock_hiding`, `apply_macos_screen_capture_protection`, `apply_windows_stealth`, `restore_macos_screen_capture_visibility`) and startup logic
+- `.env`: `APP_VISIBILITY=stealth|normal`
+- `toggle-visibility.sh`: Toggle script
+- `restart-app.sh`: Restart after changing visibility mode
+
+### Notification / Announcement System
+
+The app displays announcements to users after login. Announcements are defined in a Supabase Edge Function and selected based on user attributes (user type, app version).
+
+#### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     Announcement Flow                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  User logs in  →  fetchAnnouncement(email, subscription)                 │
+│                    ├── Determine user_type ('free' or 'pro')             │
+│                    ├── Get app_version from package.json                  │
+│                    └── POST to /functions/v1/notification                 │
+│                        ├── Headers: Authorization (JWT), apikey (anon)   │
+│                        └── Body: { email, user_type, app_version }       │
+│                                                                          │
+│  Edge Function  →  getMatchingAnnouncement(user_type, app_version)       │
+│                    ├── IF conditions on user attributes                   │
+│                    └── Return first matching { id, title, message }       │
+│                                                                          │
+│  Frontend  →  Display announcement in status screen area                 │
+│               ├── HTML rendered via dangerouslySetInnerHTML               │
+│               ├── Links open in system browser (invoke open_external_url) │
+│               ├── User can dismiss via ✕ button                          │
+│               └── Auto-dismissed on first AI query                       │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Edge Function: `notification`
+
+File: `supabase/functions/notification/index.ts`
+
+Announcements are defined as **data only** (just `id`, `title`, `message`):
+
+```typescript
+const ANNOUNCEMENTS = {
+  free_welcome: { id: '...', title: '...', message: '<p>HTML content</p>' },
+  pro_welcome:  { id: '...', title: '...', message: '<p>HTML content</p>' },
+  update_available: { id: '...', title: '...', message: '<p>HTML content</p>' },
+}
+```
+
+Selection logic uses **IF conditions** on user attributes (`user_type`, `app_version`):
+
+```typescript
+function getMatchingAnnouncement(user_type: 'free' | 'pro', app_version: string) {
+  if (app_version >= '0.0.0' && app_version < '1.0.0') {
+    return ANNOUNCEMENTS.update_available
+  }
+  if (user_type === 'free') {
+    return ANNOUNCEMENTS.free_welcome
+  }
+  if (user_type === 'pro') {
+    return ANNOUNCEMENTS.pro_welcome
+  }
+  return null
+}
+```
+
+**To add a new announcement:** Add entry to `ANNOUNCEMENTS` object + add IF condition to `getMatchingAnnouncement`. Deploy via Supabase Dashboard.
+
+#### Frontend Integration
+
+In `src/App.tsx`:
+
+- **State**: `announcement` (data) + `showAnnouncement` (visibility boolean)
+- **Fetch trigger**: `useEffect` watches for `subscription` + `authUser` → calls `fetchAnnouncement()`
+- **Also called from**: `onAuthStateChange` callback for robust login path coverage
+- **Request headers**: `Authorization: Bearer {access_token}` + `apikey: SUPABASE_ANON_KEY` (both safe for client-side, see [Supabase API Keys](https://supabase.com/docs/guides/api/api-keys))
+- **Dismiss**: Manual ✕ button → `setShowAnnouncement(false)`, or auto-dismiss when `solveWithAI()` is called
+- **Link handling**: Click handler on announcement div intercepts `<a>` clicks → `invoke('open_external_url', { url })` to open in system browser (Tauri webview doesn't handle `target="_blank"`)
+- **Styling**: `.info-banner.announcement` in `src/App.css` (blue-green gradient, rounded corners)
+
+#### Key Files
+
+- `supabase/functions/notification/index.ts`: Edge function with announcements data + matching logic
+- `src/App.tsx`: `fetchAnnouncement()`, announcement state, UI rendering
+- `src/App.css`: `.info-banner.announcement` styles
+- `src/services/supabase.ts`: Exports `EDGE_FUNCTION_URL`, `SUPABASE_API_KEY`
 
 ### Billing Period vs Calendar Month
 

@@ -206,7 +206,7 @@ export function getTemplateLabel(template: PromptTemplate | string): string {
     case PromptTemplate.ExplainConcept:
       return 'Explain Concept';
     case PromptTemplate.VerbalInterviewAudio:
-      return 'Verbal Interview (Audio)';
+      return 'Verbal Interview';
   }
 }
 
@@ -219,6 +219,7 @@ export function supportsLanguageSelection(template: PromptTemplate | string): bo
   return template === PromptTemplate.AlgorithmOptimal || 
          template === PromptTemplate.AlgorithmBeginner;
 }
+
 
 export function isBuiltInTemplate(template: string): boolean {
   return Object.values(PromptTemplate).includes(template as PromptTemplate);

@@ -81,9 +81,39 @@
 }
 
 .prompt-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, 92px);
   gap: 8px;
   flex-shrink: 0;
+}
+
+/* Audio badge - matches button size exactly */
+.audio-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: 1px solid #667eea;
+  color: white;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 16px;
+  min-width: 92px;
+  width: 92px;
+  height: 30px;
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.audio-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+}
+
+.audio-badge:active {
+  transform: translateY(0);
 }
 
 /* Prompt-row actions: match app button language (clean border, subtle hover), but compact */

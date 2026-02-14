@@ -24,6 +24,7 @@ export default function PromptListView({
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [showNewPromptDialog, setShowNewPromptDialog] = useState(false);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
+  const [showAudioBadgeInfo, setShowAudioBadgeInfo] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [targetTemplateId, setTargetTemplateId] = useState<string>('');
   const [inputValue, setInputValue] = useState('');
@@ -267,29 +268,40 @@ export default function PromptListView({
             </div>
 
             <div className="prompt-actions">
-              <button
-                onClick={() => onEditPrompt(template.id)}
-                className="prompt-action-btn"
-                title="Edit"
-              >
-                ✏️ Edit
-              </button>
-
               {!template.isCustom ? (
                 <>
+                  {template.id === 'verbal_interview_audio' ? (
+                    <div 
+                      className="audio-badge" 
+                      title="Default prompt for audio input source"
+                      onClick={() => setShowAudioBadgeInfo(true)}
+                    >
+                      🎤
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleDuplicate(template.id)}
+                      className="prompt-action-btn"
+                      title="Duplicate"
+                    >
+                      📋 Duplicate
+                    </button>
+                  )}
+                  
+                  <button
+                    onClick={() => onEditPrompt(template.id)}
+                    className="prompt-action-btn"
+                    title="Edit"
+                  >
+                    ✏️ Edit
+                  </button>
+
                   <button
                     onClick={() => handleRestore(template.id)}
                     className="prompt-action-btn"
                     title="Restore to default"
                   >
                     🔄 Restore
-                  </button>
-                  <button
-                    onClick={() => handleDuplicate(template.id)}
-                    className="prompt-action-btn"
-                    title="Duplicate"
-                  >
-                    📋 Duplicate
                   </button>
                 </>
               ) : (
@@ -434,6 +446,21 @@ export default function PromptListView({
             <p>{errorMessage}</p>
             <div className="dialog-actions">
               <button onClick={() => setShowErrorDialog(false)} className="dialog-btn confirm">
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Audio Badge Info Dialog */}
+      {showAudioBadgeInfo && (
+        <div className="dialog-overlay" onClick={() => setShowAudioBadgeInfo(false)}>
+          <div className="dialog-box" onClick={(e) => e.stopPropagation()}>
+            <h3>🎤 Audio Prompt</h3>
+            <p>This is the only editable Prompt for Audio input source</p>
+            <div className="dialog-actions">
+              <button onClick={() => setShowAudioBadgeInfo(false)} className="dialog-btn confirm">
                 OK
               </button>
             </div>

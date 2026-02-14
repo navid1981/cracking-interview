@@ -95,6 +95,7 @@ function App() {
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
   const [showAnnouncement, setShowAnnouncement] = useState(true);
+  const [showAudioPromptWarning, setShowAudioPromptWarning] = useState(false);
 
   // ========== APP STATE ==========
   const [cdpStatus, setCdpStatus] = useState('🔴 Chrome Not Running');
@@ -140,7 +141,7 @@ function App() {
         localStorage.removeItem('gemini_api_key');
       }
     } catch (e) {
-      console.warn('Failed to persist AI config:', e);
+      // Silent fail - non-critical
     }
   }, [aiConfig.selected_model, aiConfig.gemini_api_key]);
   
@@ -174,6 +175,7 @@ function App() {
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
   const solveWithAIRef = useRef<((mode?: 'auto' | 'text' | 'screenshot') => Promise<void>) | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const previousTemplateRef = useRef<string | null>(null); // Stores template before auto-switching to Audio
 
   // ========== AUTH INITIALIZATION ==========
   useEffect(() => {
@@ -383,7 +385,8 @@ function App() {
 
       setMessage('🤖 Sending audio to AI...');
       const audioInstructions = `Listen to the interview question in the audio carefully and solve it step by step. Provide a clear Explanation and a final Solution.`;
-      const prompt = buildPrompt(selectedTemplate, selectedLanguage, audioInstructions);
+      // Audio ALWAYS uses the Verbal Interview (Audio) prompt
+      const prompt = buildPrompt(PromptTemplate.VerbalInterviewAudio, selectedLanguage, audioInstructions);
       
       // Send audio directly to Gemini via proxy (no transcription needed)
       const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_audio', {
@@ -479,6 +482,12 @@ function App() {
           try { await invoke('frontend_log', { message: 'FE received hotkey-audio-toggle' }); } catch {}
           const audio = (allSourcesRef.current || []).find((s) => isAudio(s) && s.id === 'audio') as any;
           setSelectedTab(audio || ({ id: 'audio', name: 'Audio (System)', source_type: 'audio' } as any));
+          // Auto-select Audio prompt when triggered via hotkey
+          if (selectedTemplate !== PromptTemplate.VerbalInterviewAudio) {
+            previousTemplateRef.current = selectedTemplate;
+            setSelectedTemplate(PromptTemplate.VerbalInterviewAudio);
+            localStorage.setItem('prompt_template', PromptTemplate.VerbalInterviewAudio);
+          }
           await toggleAudioRecording();
         });
         if (cancelled) { uAudio(); return; }
@@ -1318,17 +1327,29 @@ function App() {
                 const title = isAudio(source) ? source.name : isDisplay(source) ? source.name : source.title;
                 setMessage(`Selected: ${title}`);
                 
-                // Warm up audio capture when selecting Audio source
+                // Auto-select Verbal Interview (Audio) prompt when switching to Audio source
                 if (nowAudio && !wasAudio) {
+                  previousTemplateRef.current = selectedTemplate;
+                  setSelectedTemplate(PromptTemplate.VerbalInterviewAudio);
+                  localStorage.setItem('prompt_template', PromptTemplate.VerbalInterviewAudio);
                   console.log('🔥 Warming up audio capture...');
                   invoke('warm_audio_capture')
                     .then(() => console.log('🔥 Audio capture warm and ready'))
                     .catch((e) => console.warn('⚠️ Audio warm-up failed:', e));
                 }
-                // Cool down when switching away from Audio
+                // Restore previous prompt when switching away from Audio
                 else if (wasAudio && !nowAudio) {
+                  if (previousTemplateRef.current && previousTemplateRef.current !== PromptTemplate.VerbalInterviewAudio) {
+                    setSelectedTemplate(previousTemplateRef.current);
+                    localStorage.setItem('prompt_template', previousTemplateRef.current);
+                  }
+                  previousTemplateRef.current = null;
                   console.log('❄️ Cooling down audio capture...');
                   invoke('cooldown_audio_capture').catch(() => {});
+                }
+                // Warning: if selecting non-audio source while Audio prompt is active
+                else if (!nowAudio && selectedTemplate === PromptTemplate.VerbalInterviewAudio) {
+                  setShowAudioPromptWarning(true);
                 }
               }}
               disabled={false}
@@ -1902,6 +1923,26 @@ function App() {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Audio Prompt Warning Dialog */}
+      {showAudioPromptWarning && (
+        <div className="dialog-overlay" onClick={() => setShowAudioPromptWarning(false)}>
+          <div className="dialog-box" onClick={(e) => e.stopPropagation()}>
+            <h3>⚠️ Audio Prompt Selected</h3>
+            <p>
+              You have selected a non-audio input source, but the "Verbal Interview (Audio)" prompt is currently active.
+            </p>
+            <p>
+              Please change your prompt in the <strong>Settings → Prompts</strong> tab to match your input source.
+            </p>
+            <div className="dialog-actions">
+              <button onClick={() => setShowAudioPromptWarning(false)} className="dialog-btn confirm">
+                OK
+              </button>
             </div>
           </div>
         </div>
