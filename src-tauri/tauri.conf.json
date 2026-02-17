@@ -23,7 +23,7 @@
     "shortDescription": "AI-powered coding interview preparation tool",
     "longDescription": "CrackingInterview helps developers prepare for coding interviews using AI assistants to analyze and solve problems from Chrome browser tabs",
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "11.0"
     },
     "windows": {
       "certificateThumbprint": null,

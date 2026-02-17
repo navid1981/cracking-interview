@@ -16,6 +16,5 @@ CrackingInterview-CREDENTIALS.txt
 ./src-tauri/Cargo.lock
 ./package-lock.json
 
-# Helper scripts
-restart-app.sh
-toggle-visibility.sh
+# Notarization script (contains app-specific password)
+notarize.sh

@@ -32,7 +32,6 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: 
   return Promise.race([
     promise,
     new Promise<T>((resolve) => setTimeout(() => {
-      console.log(`[Supabase] Request timed out after ${timeoutMs}ms`);
       resolve(fallback);
     }, timeoutMs))
   ]);
@@ -130,7 +129,6 @@ export async function getUsageStats(userId: string, subscription?: UserSubscript
       return defaultStats;
     }
 
-    console.log(`[Usage] Count: ${count} (period: ${periodStart.toISOString().split('T')[0]} to ${periodEnd.toISOString().split('T')[0]})`);
 
     return {
       requests_used: count || 0,
@@ -149,7 +147,6 @@ export async function getUsageStats(userId: string, subscription?: UserSubscript
  * Uses Tauri command to bypass webview network restrictions
  */
 export async function createCheckoutSession(userId: string, email: string): Promise<string | null> {
-  console.log('[Checkout] Creating session via Tauri command...');
   
   try {
     // Use dynamic import to avoid issues when running in browser
@@ -160,7 +157,6 @@ export async function createCheckoutSession(userId: string, email: string): Prom
       userEmail: email,
     });
     
-    console.log('[Checkout] Got checkout URL:', checkoutUrl);
     return checkoutUrl;
   } catch (error) {
     console.error('[Checkout] Error:', error);
@@ -175,7 +171,6 @@ export async function createCheckoutSession(userId: string, email: string): Prom
  */
 export async function signUp(email: string, password: string): Promise<{ user: User | null; error: string | null }> {
   // On desktop app, always use Tauri backend to bypass SSL inspection issues
-  console.log('[Auth] Signing up via Tauri backend...');
   return await signUpViaTauri(email, password);
 }
 
@@ -185,28 +180,23 @@ export async function signUp(email: string, password: string): Promise<{ user: U
  */
 async function signUpViaTauri(email: string, password: string): Promise<{ user: User | null; error: string | null }> {
   try {
-    console.log('[Auth] Invoking Tauri supabase_sign_up command...');
     const { invoke } = await import('@tauri-apps/api/core');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await invoke<any>('supabase_sign_up', { email, password });
     
-    console.log('[Auth] Tauri sign up result:', JSON.stringify(result, null, 2));
     
     // Supabase signup returns user data at ROOT level (not nested under "user")
     // Response: { id: "uuid", email: "...", confirmation_sent_at: "...", ... }
     if (result.id && result.email) {
-      console.log('[Auth] Sign up successful, user:', result.email);
       return { user: result as unknown as User, error: null };
     }
     
     // Check for error in response
     const errorMsg = result.error || result.error_description || result.msg || result.message;
     if (errorMsg) {
-      console.log('[Auth] Sign up failed with error:', errorMsg);
       return { user: null, error: errorMsg };
     }
     
-    console.log('[Auth] Sign up completed - unexpected response format');
     return { user: null, error: 'Unexpected response from server' };
   } catch (e) {
     console.error('[Auth] Tauri sign up error:', e);
@@ -221,7 +211,6 @@ async function signUpViaTauri(email: string, password: string): Promise<{ user: 
  */
 export async function signIn(email: string, password: string): Promise<{ user: User | null; session: Session | null; error: string | null }> {
   // On desktop app, always use Tauri backend to bypass SSL inspection issues
-  console.log('[Auth] Signing in via Tauri backend...');
   return await signInViaTauri(email, password);
 }
 
@@ -232,22 +221,18 @@ export async function signIn(email: string, password: string): Promise<{ user: U
  */
 async function signInViaTauri(email: string, password: string): Promise<{ user: User | null; session: Session | null; error: string | null }> {
   try {
-    console.log('[Auth] Invoking Tauri supabase_sign_in command...');
     const { invoke } = await import('@tauri-apps/api/core');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await invoke<any>('supabase_sign_in', { email, password });
     
-    console.log('[Auth] Tauri sign in result:', JSON.stringify(result, null, 2));
     
     // Check for error first
     if (result.error || result.error_description) {
       const errorMsg = result.error_description || result.error || 'Sign in failed';
-      console.log('[Auth] Sign in failed with error:', errorMsg);
       return { user: null, session: null, error: errorMsg };
     }
     
     if (result.access_token && result.user) {
-      console.log('[Auth] Sign in successful, user:', result.user.email);
       
       // Build the session object
       const session: Session = {
@@ -262,23 +247,19 @@ async function signInViaTauri(email: string, password: string): Promise<{ user: 
       // Store in localStorage directly (instant, no network)
       const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
       localStorage.setItem(storageKey, JSON.stringify(session));
-      console.log('[Auth] Session stored in localStorage');
       
       // Fire-and-forget: try to set session in Supabase client (don't wait)
       supabase.auth.setSession({
         access_token: result.access_token,
         refresh_token: result.refresh_token || '',
       }).then(() => {
-        console.log('[Auth] Supabase session set successfully');
-      }).catch((e) => {
-        console.log('[Auth] setSession failed (VPN), but localStorage is set:', e);
+      }).catch(() => {
+        // Silent fail - setSession error (VPN/SSL issue)
       });
       
-      console.log('[Auth] Sign in complete, returning user');
       return { user: result.user as unknown as User, session, error: null };
     }
     
-    console.log('[Auth] Sign in failed - no token in response');
     return { user: null, session: null, error: 'Sign in failed - no token received' };
   } catch (e) {
     console.error('[Auth] Tauri sign in error:', e);
@@ -326,7 +307,6 @@ export async function getSession(): Promise<Session | null> {
   const supabasePromise = supabase.auth.getSession().then(({ data }) => data.session);
   const timeoutPromise = new Promise<Session | null>((resolve) => {
     setTimeout(() => {
-      console.log('[Auth] getSession timeout - checking localStorage');
       // Try to get session from localStorage as fallback
       const stored = localStorage.getItem(`sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`);
       if (stored) {

@@ -2,6 +2,9 @@
   "name": "cracking-interview",
   "version": "1.0.0",
   "description": "CrackingInterview - Cross-platform coding interview assistant",
+  "author": "Cracking Interview LLC",
+  "license": "UNLICENSED",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",

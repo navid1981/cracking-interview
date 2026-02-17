@@ -157,7 +157,7 @@ function App() {
     try {
       localStorage.setItem('use_screenshot', useScreenshot ? 'true' : 'false');
     } catch (e) {
-      console.warn('Failed to persist input mode:', e);
+      // Silent fail - non-critical
     }
   }, [useScreenshot]);
   const [previousWindowSize, setPreviousWindowSize] = useState<{width: number, height: number} | null>(null);
@@ -193,7 +193,6 @@ function App() {
           if (session.user?.email) {
             // Save email for auto-fill on next sign-in
             localStorage.setItem('cracking_interview_remembered_email', session.user.email);
-            console.log('[App] Remembered email:', session.user.email);
           }
         } catch (e) {
           console.error('[App] Failed to parse stored session:', e);
@@ -202,7 +201,6 @@ function App() {
       
       // Clear the auth session (force sign-in each time)
       localStorage.removeItem(storageKey);
-      console.log('[App] Cleared auth session on startup');
     };
 
     clearSessionOnStart();
@@ -219,7 +217,6 @@ function App() {
         return; // Skip duplicate SIGNED_IN for same user
       }
       
-      console.log('Auth state changed:', event);
       setAuthSession(session);
       setAuthUser(session?.user || null);
       
@@ -252,7 +249,6 @@ function App() {
   // Fetch announcement when subscription is loaded (handles both auth paths)
   useEffect(() => {
     if (authUser?.email && subscription) {
-      console.log('[App] Subscription loaded, fetching announcement...');
       fetchAnnouncement(authUser.email, subscription);
     }
   }, [authUser, subscription]);
@@ -311,7 +307,6 @@ function App() {
       try {
         // Show "Starting..." message while audio initializes
         setMessage('🔊 Starting audio capture...');
-        try { await invoke('frontend_log', { message: 'audio: start recording' }); } catch {}
         // Flip ref immediately to avoid races on repeated triggers.
         isRecordingAudioRef.current = true;
 
@@ -348,11 +343,9 @@ function App() {
     setIsLoading(true);
     setAiResponse('');
     setMessage('⏹️ Stopping recording...');
-    try { await invoke('frontend_log', { message: 'audio: stop recording' }); } catch {}
     try {
       // Stop recording and get the audio file path (MP3 or WAV)
       const audioFilePath = await invoke<string>('stop_audio_recording');
-      try { await invoke('frontend_log', { message: `audio: stopped, file: ${audioFilePath}` }); } catch {}
 
       isRecordingAudioRef.current = false;
       setIsRecordingAudio(false);
@@ -416,7 +409,6 @@ function App() {
         }
       }
     } catch (e) {
-      try { await invoke('frontend_log', { message: `audio: stop failed: ${String(e)}` }); } catch {}
       setMessage(`❌ Error: ${String(e)}`);
     } finally {
       setIsLoading(false);
@@ -465,21 +457,18 @@ function App() {
     (async () => {
       try {
         const uText = await listen('hotkey-solve-text', async () => {
-          try { await invoke('frontend_log', { message: 'FE received hotkey-solve-text' }); } catch {}
           if (solveWithAIRef.current) await solveWithAIRef.current('text');
         });
         if (cancelled) { uText(); return; }
         unsubs.push(uText);
 
         const uShot = await listen('hotkey-solve-screenshot', async () => {
-          try { await invoke('frontend_log', { message: 'FE received hotkey-solve-screenshot' }); } catch {}
           if (solveWithAIRef.current) await solveWithAIRef.current('screenshot');
         });
         if (cancelled) { uShot(); return; }
         unsubs.push(uShot);
 
         const uAudio = await listen('hotkey-audio-toggle', async () => {
-          try { await invoke('frontend_log', { message: 'FE received hotkey-audio-toggle' }); } catch {}
           const audio = (allSourcesRef.current || []).find((s) => isAudio(s) && s.id === 'audio') as any;
           setSelectedTab(audio || ({ id: 'audio', name: 'Audio (System)', source_type: 'audio' } as any));
           // Auto-select Audio prompt when triggered via hotkey
@@ -494,7 +483,6 @@ function App() {
         unsubs.push(uAudio);
 
         const uScrollUp = await listen('hotkey-scroll-up', async () => {
-          try { await invoke('frontend_log', { message: 'FE received hotkey-scroll-up' }); } catch {}
           const el = contentScrollRef.current;
           if (el) el.scrollBy({ top: -260, behavior: 'smooth' });
         });
@@ -502,7 +490,6 @@ function App() {
         unsubs.push(uScrollUp);
 
         const uScrollDown = await listen('hotkey-scroll-down', async () => {
-          try { await invoke('frontend_log', { message: 'FE received hotkey-scroll-down' }); } catch {}
           const el = contentScrollRef.current;
           if (el) el.scrollBy({ top: 260, behavior: 'smooth' });
         });
@@ -510,35 +497,30 @@ function App() {
         unsubs.push(uScrollDown);
 
         const uMoveUp = await listen('hotkey-move-up', async () => {
-          try { await invoke('frontend_log', { message: 'FE received hotkey-move-up' }); } catch {}
           await invoke('move_window_by', { dx: 0, dy: -80 });
         });
         if (cancelled) { uMoveUp(); return; }
         unsubs.push(uMoveUp);
 
         const uMoveDown = await listen('hotkey-move-down', async () => {
-          try { await invoke('frontend_log', { message: 'FE received hotkey-move-down' }); } catch {}
           await invoke('move_window_by', { dx: 0, dy: 80 });
         });
         if (cancelled) { uMoveDown(); return; }
         unsubs.push(uMoveDown);
 
         const uMoveLeft = await listen('hotkey-move-left', async () => {
-          try { await invoke('frontend_log', { message: 'FE received hotkey-move-left' }); } catch {}
           await invoke('move_window_by', { dx: -80, dy: 0 });
         });
         if (cancelled) { uMoveLeft(); return; }
         unsubs.push(uMoveLeft);
 
         const uMoveRight = await listen('hotkey-move-right', async () => {
-          try { await invoke('frontend_log', { message: 'FE received hotkey-move-right' }); } catch {}
           await invoke('move_window_by', { dx: 80, dy: 0 });
         });
         if (cancelled) { uMoveRight(); return; }
         unsubs.push(uMoveRight);
       } catch (e) {
-        console.warn('Failed to listen for hotkey solve events:', e);
-        try { await invoke('frontend_log', { message: `FE failed to listen hotkey events: ${String(e)}` }); } catch {}
+        // Silent fail - hotkey registration error
       }
     })();
 
@@ -569,7 +551,6 @@ function App() {
       setHotkeysDraft(cfg);
       setHotkeysStatus('');
     } catch (e) {
-      console.warn('Failed to load hotkeys:', e);
       setHotkeysStatus(`Failed to load hotkeys: ${String(e)}`);
     }
   };
@@ -609,13 +590,9 @@ function App() {
   };
 
   const handleOpenSettings = async () => {
-    try { await invoke('frontend_log', { message: 'handleOpenSettings clicked' }); } catch {}
-    console.log('🎯 handleOpenSettings called!');
     
     try {
       const currentSize = await invoke<{ width: number; height: number }>('get_window_inner_size');
-      try { await invoke('frontend_log', { message: `currentSize=${currentSize.width}x${currentSize.height}` }); } catch {}
-      console.log('📏 Current window size:', currentSize.width, 'x', currentSize.height);
       
       // Match the app's default window size from `src-tauri/tauri.conf.json`
       // so Settings content is always fully visible after a user resizes.
@@ -624,29 +601,15 @@ function App() {
 
       // Always save the user's current size on Settings open so we can restore it on close.
       setPreviousWindowSize({ width: currentSize.width, height: currentSize.height });
-      console.log('💾 Saved user size:', currentSize.width, 'x', currentSize.height);
 
       // Force resize BEFORE opening the modal (more reliable).
       // Prefer backend resize (native context), fall back to JS API.
       try {
         await invoke('resize_window', { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
-        console.log('✅ resize_window invoked');
-        try { await invoke('frontend_log', { message: `resize_window invoked ${DEFAULT_WIDTH}x${DEFAULT_HEIGHT}` }); } catch {}
       } catch (e) {
-        console.warn('❌ resize_window command failed:', e);
-        try { await invoke('frontend_log', { message: `resize_window failed: ${String(e)}` }); } catch {}
+        // Silent fail - resize error
       }
 
-      // Read back size so we can confirm resize actually happened.
-      try {
-        const after = await invoke<{ width: number; height: number }>('get_window_inner_size');
-        console.log('📏 After resize size:', after.width, 'x', after.height);
-        try { await invoke('frontend_log', { message: `afterSize=${after.width}x${after.height}` }); } catch {}
-      } catch (e) {
-        console.warn('Failed to read size after resize:', e);
-      }
-
-      console.log('⚙️ Resized to default:', DEFAULT_WIDTH, 'x', DEFAULT_HEIGHT);
       // Give the OS a moment to apply resize before showing modal.
       await new Promise((r) => setTimeout(r, 150));
     } catch (error) {
@@ -659,24 +622,19 @@ function App() {
   };
 
   const handleCloseSettings = async () => {
-    console.log('🎯 handleCloseSettings called!');
-    try { await invoke('frontend_log', { message: 'handleCloseSettings called' }); } catch {}
     setShowSettings(false);
     
     setTimeout(async () => {
       if (previousWindowSize) {
         try {
-          console.log('🔄 Restoring to:', previousWindowSize.width, 'x', previousWindowSize.height);
           
           await invoke('resize_window', { width: previousWindowSize.width, height: previousWindowSize.height });
-          console.log('✅ Restored!');
           setPreviousWindowSize(null);
         } catch (error) {
           console.error('❌ Restore error:', error);
           setPreviousWindowSize(null);
         }
       } else {
-        console.log('ℹ️  No size to restore');
       }
     }, 100);
   };
@@ -690,7 +648,6 @@ function App() {
       const userType = (sub?.subscription_status === 'active' || sub?.subscription_status === 'cancelling') ? 'pro' : 'free';
       const appVersion = packageJson.version;
       
-      console.log(`[Announcement] Fetching for ${email} (${userType}, v${appVersion})`);
       
       // Get access token from localStorage
       const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
@@ -727,7 +684,6 @@ function App() {
       }
       
       const data = await response.json();
-      console.log('[Announcement] Received:', data);
       
       if (data.announcement) {
         setAnnouncement(data.announcement);
@@ -742,7 +698,6 @@ function App() {
   };
 
   const handleAuthSuccess = async () => {
-    console.log('[App] handleAuthSuccess called');
     
     // Close settings modal if open (e.g., user signed out from Account tab)
     setShowSettings(false);
@@ -760,7 +715,6 @@ function App() {
     if (storedSession) {
       try {
         const session = JSON.parse(storedSession);
-        console.log('[App] Found session in localStorage:', session.user?.email);
         
         setAuthSession(session);
         setAuthUser(session.user);
@@ -784,7 +738,6 @@ function App() {
         console.error('[App] Failed to parse stored session:', e);
       }
     } else {
-      console.log('[App] No session found in localStorage');
     }
   };
 
@@ -804,16 +757,11 @@ function App() {
   };
 
   const handleSubscribe = async () => {
-    console.log('[Subscribe] Button clicked!');
-    console.log('[Subscribe] authUser:', authUser);
-    
     if (!authUser || !authUser.email) {
-      console.log('[Subscribe] No user or email, aborting');
       setMessage('❌ Please sign in first');
       return;
     }
 
-    console.log('[Subscribe] Starting checkout for:', authUser.id, authUser.email);
     setIsSubscribing(true);
     setMessage('🔄 Opening Stripe checkout...');
 
@@ -822,7 +770,6 @@ function App() {
       
       if (checkoutUrl) {
         // Open Stripe checkout in system browser using Tauri command
-        console.log('[Subscribe] Opening checkout URL:', checkoutUrl);
         try {
           await invoke('open_external_url', { url: checkoutUrl });
           setMessage('✅ Checkout opened in browser. Complete payment there.');
@@ -944,7 +891,7 @@ function App() {
             const thumbnail = await invoke<string>('get_display_thumbnail', { displayId: display.id });
             return { ...display, thumbnail };
           } catch (error) {
-            console.warn(`Failed to get display thumbnail for ${display.id}:`, error);
+            // Silent fail - continue without thumbnail
             return display;
           }
         })
@@ -962,7 +909,7 @@ function App() {
               const thumbnail = await invoke<string>('get_tab_thumbnail', { tabId: tab.id });
               return { ...tab, thumbnail };
             } catch (error) {
-              console.warn(`Failed to get thumbnail for ${tab.id}:`, error);
+              // Silent fail - continue without thumbnail
               return tab;
             }
           })
@@ -1011,16 +958,8 @@ function App() {
       setSelectedTab(sourceToUse);
     }
 
-    try {
-      const selected = sourceToUse
-        ? `${isAudio(sourceToUse) ? 'audio' : isDisplay(sourceToUse) ? 'display' : 'tab'}:${sourceToUse.id}`
-        : 'none';
-      await invoke('frontend_log', { message: `solveWithAI start mode=${mode} selected=${selected}` });
-    } catch {}
-
     if (!sourceToUse) {
       setMessage('❌ No input source available');
-      try { await invoke('frontend_log', { message: 'solveWithAI abort: no selectedTab' }); } catch {}
       return;
     }
 
@@ -1332,10 +1271,9 @@ function App() {
                   previousTemplateRef.current = selectedTemplate;
                   setSelectedTemplate(PromptTemplate.VerbalInterviewAudio);
                   localStorage.setItem('prompt_template', PromptTemplate.VerbalInterviewAudio);
-                  console.log('🔥 Warming up audio capture...');
                   invoke('warm_audio_capture')
-                    .then(() => console.log('🔥 Audio capture warm and ready'))
-                    .catch((e) => console.warn('⚠️ Audio warm-up failed:', e));
+                    .then(() => {})
+                    .catch(() => {});
                 }
                 // Restore previous prompt when switching away from Audio
                 else if (wasAudio && !nowAudio) {
@@ -1344,7 +1282,6 @@ function App() {
                     localStorage.setItem('prompt_template', previousTemplateRef.current);
                   }
                   previousTemplateRef.current = null;
-                  console.log('❄️ Cooling down audio capture...');
                   invoke('cooldown_audio_capture').catch(() => {});
                 }
                 // Warning: if selecting non-audio source while Audio prompt is active

@@ -25,16 +25,13 @@ export default function SignInForm({ onSuccess, onSwitchToSignUp, onForgotPasswo
     setError(null);
     setIsLoading(true);
     
-    console.log('[SignInForm] Starting sign in...');
 
     try {
       const result = await signIn(email, password);
-      console.log('[SignInForm] signIn returned:', result);
       
       setIsLoading(false);
 
       if (result.error) {
-        console.log('[SignInForm] Sign in error:', result.error);
         // Map common errors to user-friendly messages
         if (result.error.includes('Invalid login credentials')) {
           setError('Invalid email or password. Please try again.');
@@ -44,7 +41,6 @@ export default function SignInForm({ onSuccess, onSwitchToSignUp, onForgotPasswo
           setError(result.error);
         }
       } else {
-        console.log('[SignInForm] Sign in successful, calling onSuccess');
         onSuccess();
       }
     } catch (err) {

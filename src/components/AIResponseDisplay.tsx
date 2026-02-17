@@ -12,19 +12,16 @@ function parseResponse(response: string): ParsedResponse {
   let explanation = '';
   let solution = '';
 
-  console.log('🔍 Parsing response, length:', response.length);
 
   const explanationMatch = response.match(/EXPLANATION_START\s*([\s\S]*?)\s*EXPLANATION_END/);
   const solutionMatch = response.match(/SOLUTION_START\s*([\s\S]*?)\s*SOLUTION_END/);
 
   if (explanationMatch) {
     explanation = explanationMatch[1].trim();
-    console.log('✅ Found explanation via markers:', explanation.substring(0, 100));
   }
 
   if (solutionMatch) {
     solution = solutionMatch[1].trim();
-    console.log('✅ Found solution via markers:', solution.substring(0, 100));
   }
 
   if (!solution) {
@@ -33,7 +30,6 @@ function parseResponse(response: string): ParsedResponse {
       solution = codeBlockMatch[1].trim();
       const codeBlockIndex = response.indexOf('```');
       explanation = response.substring(0, codeBlockIndex).trim();
-      console.log('✅ Found via markdown blocks');
     }
   }
 
@@ -42,16 +38,13 @@ function parseResponse(response: string): ParsedResponse {
     if (parts.length > 1) {
       explanation = parts[0].trim();
       solution = 'class Solution' + parts[1].trim();
-      console.log('✅ Found via class Solution split');
     }
   }
 
   if (!explanation && !solution) {
     explanation = response;
-    console.log('⚠️  No parsing worked, using full response as explanation');
   }
 
-  console.log('📊 Final: explanation length:', explanation.length, 'solution length:', solution.length);
 
   return { explanation, solution };
 }
