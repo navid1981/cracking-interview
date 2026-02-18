@@ -60,7 +60,6 @@ export default function SignUpForm({ onSuccess, onSwitchToSignIn }: SignUpFormPr
   return (
     <form className="auth-form" onSubmit={handleSubmit}>
       <h2>Create Account</h2>
-      <p className="auth-hint">Start your free trial with 2 AI-powered solves</p>
 
       {error && <p className="auth-message error">{error}</p>}
 
@@ -122,13 +121,12 @@ export default function SignUpForm({ onSuccess, onSwitchToSignIn }: SignUpFormPr
       </button>
 
       <div className="signup-benefits">
-        <h4>What you get:</h4>
-        <ul>
-          <li>✓ 2 free AI-powered solves</li>
-          <li>✓ Support for LeetCode, HackerRank & more</li>
-          <li>✓ Multiple AI models (Claude, Gemini)</li>
-          <li>✓ System audio capture for verbal interviews</li>
-        </ul>
+        <p style={{ fontSize: '12px', lineHeight: '1.6', color: '#666', margin: '0 0 8px 0' }}>
+          <strong>Free users:</strong> 3 free AI calls, Limited sites (LeetCode, Codewars,...), Gemini Flash AI model, Chrome tab text & screenshot capture
+        </p>
+        <p style={{ fontSize: '12px', lineHeight: '1.6', color: '#666', margin: 0 }}>
+          <strong>Upgrade to Pro:</strong> Unlimited sites, 150 calls/month, Premium AI models, Display screenshot capture & Verbal interviews
+        </p>
       </div>
     </form>
   );

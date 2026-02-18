@@ -411,6 +411,16 @@ The app includes a full authentication and subscription system using Supabase an
 **Audio Input:**
 - Always uses Gemini 3 Flash (only model supporting audio input)
 - Model selection is overridden when audio source is used
+- Auto-selects "Verbal Interview (Audio)" prompt when audio source is chosen
+- Shows warning if user selects non-audio source with audio prompt active
+
+**OpenRouter Model Mapping:**
+- Frontend model IDs → OpenRouter API model IDs:
+  - `gpt-5.2-codex` → `openai/gpt-5.2-codex`
+  - `claude-sonnet-4.5` → `anthropic/claude-sonnet-4.5`
+  - `gemini-3-flash` → `google/gemini-3-flash-preview`
+  - `grok-4.1-fast` → `x-ai/grok-4.1-fast`
+  - `gemini-2.5-flash` → `google/gemini-2.5-flash` (free tier)
 
 ### AI Routing Logic
 
@@ -445,6 +455,9 @@ The app supports recording system audio (sound from Zoom/Teams/browser) and send
 │  User clicks Record  →  start_audio_recording()                         │
 │                         ├── macOS: Swift helper via ScreenCaptureKit    │
 │                         └── Windows: WASAPI loopback capture            │
+│                         ├── Auto-selects "Verbal Interview (Audio)"     │
+│                         │   prompt (if not already selected)            │
+│                         └── Stores previous prompt for restoration       │
 │                                                                         │
 │  User clicks Stop  →  stop_audio_recording()                            │
 │                       ├── Stop capture                                  │
@@ -545,6 +558,21 @@ Audio input **always** uses `gemini-3-flash` regardless of user's model selectio
 - This is because only certain models support audio input
 - `gemini-3-flash` → OpenRouter model ID: `google/gemini-3-flash-preview`
 - Other Pro models (GPT-5.2, Claude 4.5, Grok 4.1) don't support audio input
+
+#### Audio Prompt Auto-Selection
+
+When the user selects an audio input source or uses the audio recording hotkey (`Cmd+3` / `Alt+3`):
+
+1. **Auto-select audio prompt**: The app automatically switches to "Verbal Interview (Audio)" prompt
+2. **Store previous prompt**: The previously selected prompt is saved in `previousTemplateRef`
+3. **Restore on switch**: When user switches away from audio input, the previous prompt is restored
+4. **Warning dialog**: If user manually selects a non-audio source while "Verbal Interview (Audio)" is active, a warning popup appears suggesting to change the prompt
+
+Implementation in `src/App.tsx`:
+- `previousTemplateRef` (useRef) stores the last non-audio prompt
+- `onSelect` handler in `TabDropdown` triggers auto-selection
+- `hotkey-audio-toggle` listener also triggers auto-selection
+- `showAudioPromptWarning` state controls warning dialog visibility
 
 ### Stealth Mode (Screen Capture Protection)
 
@@ -751,9 +779,25 @@ The webhook handler (`stripe-webhook` / `stripe-webhook-test`) processes:
 - `request_count` (int, default 1)
 - `created_at` (timestamp)
 
+**Automatic user creation**:
+- Database trigger `on_auth_user_created` automatically creates a `public.users` entry when a new user signs up via `auth.users`
+- Trigger function: `handle_new_user()` (defined in migration `20260217000000_create_users_and_trigger.sql`)
+- This ensures every authenticated user has a corresponding record in `public.users` for subscription/quota tracking
+
 **Automatic cleanup job** (pg_cron):
 - Runs daily at 3:00 AM UTC
 - Deletes api_usage records older than 3 months
+
+**Database Migrations**:
+- `supabase/migrations/20260217000000_create_users_and_trigger.sql`: Creates `public.users` table with RLS policies and auto-creation trigger
+- `supabase/migrations/20260217000001_fix_existing_user.sql`: Example migration to backfill existing auth users
+
+To apply migrations:
+```bash
+supabase db push
+```
+
+Or manually via Supabase Dashboard → SQL Editor
 
 ### Auth Flow
 
@@ -775,6 +819,40 @@ The webhook handler (`stripe-webhook` / `stripe-webhook-test`) processes:
 **Frontend constants** (in `src/services/supabase.ts`):
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
+
+### OpenRouter Integration
+
+The app uses OpenRouter as an AI model aggregator to access multiple AI providers through a single API.
+
+#### Configuration
+
+1. **Get API key**: Sign up at [openrouter.ai](https://openrouter.ai) and create an API key
+2. **Add to Supabase secrets**:
+   ```bash
+   supabase secrets set OPENROUTER_API_KEY=sk-or-v1-...your-key...
+   ```
+3. **Redeploy edge function**:
+   ```bash
+   supabase functions deploy ai-proxy
+   ```
+
+#### Troubleshooting
+
+**Error: "User not found" (401)**
+- Cause: Invalid or missing `OPENROUTER_API_KEY` in Supabase secrets
+- Solution: Verify key matches your OpenRouter dashboard, regenerate if needed, update secret, redeploy
+
+**Error: "Insufficient credits"**
+- Cause: OpenRouter account has no credits/BYOK configured
+- Solution: Add credits at openrouter.ai or configure "Bring Your Own Key" for specific providers
+
+**Verify configuration**:
+```bash
+# Check if secret exists
+supabase secrets list
+
+# Check OpenRouter key status at: https://openrouter.ai/keys
+```
 
 ## Build + run
 

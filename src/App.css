@@ -136,14 +136,40 @@ body {
   border-radius: 8px;
   font-size: 16px;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .refresh-btn:hover:not(:disabled) {
   border-color: var(--primary-blue);
+  background: #f0f7ff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(51, 128, 230, 0.15);
+}
+
+.refresh-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(51, 128, 230, 0.1);
 }
 
 .refresh-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Spinning animation for refresh button */
+.refresh-btn.refreshing {
+  animation: spin 0.8s linear infinite;
+  border-color: var(--primary-blue);
+  background: #f0f7ff;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .solve-button {

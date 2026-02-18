@@ -8,6 +8,7 @@ interface PromptListViewProps {
   onEditPrompt: (templateId: string) => void;
   selectedLanguage: ProgrammingLanguage;
   onLanguageChange: (language: ProgrammingLanguage) => void;
+  isPro: boolean;
 }
 
 export default function PromptListView({
@@ -15,7 +16,8 @@ export default function PromptListView({
   onSelectTemplate,
   onEditPrompt,
   selectedLanguage,
-  onLanguageChange
+  onLanguageChange,
+  isPro
 }: PromptListViewProps) {
   const [templates, setTemplates] = useState(getAllTemplates());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -245,23 +247,35 @@ export default function PromptListView({
             <option value={ProgrammingLanguage.JavaScript}>{ProgrammingLanguage.JavaScript}</option>
             <option value={ProgrammingLanguage.Cpp}>{ProgrammingLanguage.Cpp}</option>
             <option value={ProgrammingLanguage.Swift}>{ProgrammingLanguage.Swift}</option>
+            <option value={ProgrammingLanguage.Go}>{ProgrammingLanguage.Go}</option>
+            <option value={ProgrammingLanguage.PHP}>{ProgrammingLanguage.PHP}</option>
+            <option value={ProgrammingLanguage.Ruby}>{ProgrammingLanguage.Ruby}</option>
+            <option value={ProgrammingLanguage.SQL}>{ProgrammingLanguage.SQL}</option>
           </select>
         </div>
       )}
 
       <div className="prompts-list">
-        {templates.map(template => (
-          <div key={template.id} className="prompt-item">
+        {templates.map(template => {
+          const isAudioPrompt = template.id === PromptTemplate.VerbalInterviewAudio;
+          const isDisabled = isAudioPrompt && !isPro;
+          
+          return (
+          <div key={template.id} className={`prompt-item ${isDisabled ? 'disabled' : ''}`}>
             <input
               type="radio"
               name="active-prompt"
               checked={selectedTemplate === template.id}
-              onChange={() => onSelectTemplate(template.id)}
+              onChange={() => !isDisabled && onSelectTemplate(template.id)}
               className="prompt-radio"
+              disabled={isDisabled}
             />
 
             <div className="prompt-info">
-              <span className="prompt-name">{template.label}</span>
+              <span className="prompt-name">
+                {template.label}
+                {isDisabled && <span className="pro-badge">PRO</span>}
+              </span>
               {selectedTemplate === template.id && (
                 <span className="active-badge">Active</span>
               )}
@@ -324,7 +338,8 @@ export default function PromptListView({
               )}
             </div>
           </div>
-        ))}
+        );
+        })}
       </div>
 
       {/* Delete Confirmation Dialog */}

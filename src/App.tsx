@@ -91,6 +91,7 @@ function App() {
   const [_authSession, setAuthSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [subscription, setSubscription] = useState<UserSubscription | null>(null);
+  const subscriptionRef = useRef<UserSubscription | null>(null);
   const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
@@ -106,6 +107,7 @@ function App() {
   const [aiResponse, setAiResponse] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isOpeningChrome, setIsOpeningChrome] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [message, setMessage] = useState('');
   
   const [selectedTemplate, setSelectedTemplate] = useState<string>(
@@ -283,6 +285,11 @@ function App() {
     isRecordingAudioRef.current = isRecordingAudio;
   }, [isRecordingAudio]);
 
+  // Keep subscription ref in sync for hotkey access to latest subscription state
+  useEffect(() => {
+    subscriptionRef.current = subscription;
+  }, [subscription]);
+
   const toggleAudioRecording = async () => {
     // Guard against duplicate hotkey events (React StrictMode/dev can double-register listeners)
     // and against rapid double presses. Use longer debounce to prevent accidental double-clicks.
@@ -295,7 +302,7 @@ function App() {
     lastAudioToggleAtRef.current = now;
 
     // Audio is only available for Pro users (active or cancelling status)
-    const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+    const isPro = subscriptionRef.current?.subscription_status === 'active' || subscriptionRef.current?.subscription_status === 'cancelling';
     if (!isPro) {
       setMessage('⚠️ Audio input requires Pro subscription.');
       audioToggleInFlightRef.current = false;
@@ -880,6 +887,7 @@ function App() {
   };
 
   const fetchTabs = async () => {
+    setIsRefreshing(true);
     try {
       // Fetch displays (always available)
       const displaysData = await invoke<DisplayInfo[]>('get_displays');
@@ -943,6 +951,8 @@ function App() {
       }
     } catch (error) {
       console.error('Failed to fetch sources:', error);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -960,6 +970,12 @@ function App() {
 
     if (!sourceToUse) {
       setMessage('❌ No input source available');
+      return;
+    }
+
+    // WARNING: If audio prompt is selected but source is not audio, show warning
+    if (selectedTemplate === PromptTemplate.VerbalInterviewAudio && !isAudio(sourceToUse)) {
+      setShowAudioPromptWarning(true);
       return;
     }
 
@@ -1293,8 +1309,9 @@ function App() {
             />
             <button
               onClick={fetchTabs}
-              className="refresh-btn"
-              title="Refresh sources"
+              className={`refresh-btn ${isRefreshing ? 'refreshing' : ''}`}
+              title="Refresh Input Sources"
+              disabled={isRefreshing}
             >
               🔄
             </button>
@@ -1699,6 +1716,7 @@ function App() {
                         setSelectedLanguage(lang);
                         localStorage.setItem('language', lang);
                       }}
+                      isPro={subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling'}
                     />
                   ) : (
                     <>

@@ -15,6 +15,10 @@ export enum ProgrammingLanguage {
   JavaScript = 'JavaScript',
   Cpp = 'C++',
   Swift = 'Swift',
+  Go = 'Go',
+  PHP = 'PHP',
+  Ruby = 'Ruby',
+  SQL = 'SQL',
 }
 
 export interface CustomPrompt {

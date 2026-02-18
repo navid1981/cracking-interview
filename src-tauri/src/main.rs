@@ -775,7 +775,7 @@ async fn create_checkout_session(
     println!("[Checkout] Sending request to Edge Function...");
     
     let response = client
-        .post(format!("{}/functions/v1/create-checkout-test", SUPABASE_URL))
+        .post(format!("{}/functions/v1/create-checkout", SUPABASE_URL))
         .header("Content-Type", "application/json")
         .header("apikey", SUPABASE_ANON_KEY)
         .header("Authorization", format!("Bearer {}", SUPABASE_ANON_KEY))
@@ -828,7 +828,7 @@ async fn create_billing_portal_session(
     });
 
     let response = client
-        .post(format!("{}/functions/v1/create-billing-portal-test", SUPABASE_URL))
+        .post(format!("{}/functions/v1/create-billing-portal", SUPABASE_URL))
         .header("Content-Type", "application/json")
         .header("apikey", SUPABASE_ANON_KEY)
         .header("Authorization", format!("Bearer {}", SUPABASE_ANON_KEY))
