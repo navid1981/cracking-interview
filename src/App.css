@@ -70,6 +70,33 @@ body {
   background: var(--background-light);
 }
 
+/* Clickable "Open Chrome" button in header */
+button.chrome-open-btn {
+  border: 1px solid #e5e5e5;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  color: var(--primary-blue);
+  background: #f0f7ff;
+}
+
+button.chrome-open-btn:hover:not(:disabled) {
+  background: var(--primary-blue);
+  color: white;
+  border-color: var(--primary-blue);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(51, 128, 230, 0.3);
+}
+
+button.chrome-open-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+button.chrome-open-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .settings-btn {
   background: transparent;
   border: none;
@@ -195,6 +222,86 @@ body {
   cursor: not-allowed;
 }
 
+
+/* ========== Solve Progress Stepper ========== */
+.solve-stepper {
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.stepper-track {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
+.stepper-item-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.stepper-connector {
+  width: 40px;
+  height: 2px;
+  background: #e0e0e0;
+  transition: background 0.3s ease;
+}
+
+.stepper-connector.active {
+  background: var(--primary-blue);
+}
+
+.stepper-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #f5f5f5;
+  border: 2px solid transparent;
+  transition: all 0.3s ease;
+  min-width: 70px;
+}
+
+.stepper-step.active {
+  background: #e3f2fd;
+  border-color: var(--primary-blue);
+  box-shadow: 0 2px 8px rgba(51, 128, 230, 0.2);
+  animation: stepper-pulse 1.5s ease-in-out infinite;
+}
+
+.stepper-step.completed {
+  background: #e8f5e9;
+  border-color: #4caf50;
+}
+
+.stepper-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.stepper-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #666;
+  white-space: nowrap;
+}
+
+.stepper-step.active .stepper-label {
+  color: var(--primary-blue);
+}
+
+.stepper-step.completed .stepper-label {
+  color: #4caf50;
+}
+
+@keyframes stepper-pulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(51, 128, 230, 0.2); }
+  50% { box-shadow: 0 2px 16px rgba(51, 128, 230, 0.4); }
+}
+
 .info-banner {
   padding: 16px;
   border-radius: 12px;
@@ -311,7 +418,7 @@ body {
 }
 
 .collapse-arrow {
-  font-size: 10px;
+  font-size: 14px;
   color: #888;
   transition: transform 0.2s ease;
   display: inline-block;
@@ -640,6 +747,34 @@ body {
   background: var(--primary-blue);
   color: white;
   border-color: var(--primary-blue);
+}
+
+/* Mode buttons with icon + label + description */
+.toggle-btn.mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 10px;
+}
+
+.mode-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.mode-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mode-desc {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.toggle-btn.mode-btn.active .mode-desc {
+  opacity: 0.85;
 }
 
 .alert-badge {

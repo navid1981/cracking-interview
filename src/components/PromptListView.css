@@ -114,29 +114,32 @@
   flex-shrink: 0;
 }
 
-/* Audio badge - matches button size exactly */
+/* Audio badge - styled to match prompt-action-btn */
 .audio-badge {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border: 1px solid #667eea;
-  color: white;
+  gap: 4px;
+  background: white;
+  border: 1px solid #e5e5e5;
+  color: var(--text-secondary);
   padding: 6px 10px;
   border-radius: 8px;
-  font-size: 16px;
+  font-size: 12px;
+  font-weight: 600;
   min-width: 92px;
-  width: 92px;
-  height: 30px;
-  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
+  white-space: nowrap;
+  text-align: center;
   box-sizing: border-box;
   cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
 }
 
 .audio-badge:hover {
+  border-color: var(--primary-blue);
+  color: var(--primary-blue);
+  background: #f0f7ff;
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
 }
 
 .audio-badge:active {

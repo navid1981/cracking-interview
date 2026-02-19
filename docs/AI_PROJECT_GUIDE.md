@@ -94,17 +94,26 @@ Component responsibilities:
   - supports thumbnail previews (`thumbnail` is expected to be a base64 data URL)
   - imports its own styles from `src/components/TabDropdown.css`
 - `src/components/AIResponseDisplay.tsx`
-  - tries to parse response using markers (EXPLANATION_START/END, SOLUTION_START/END)
-  - falls back to markdown code fences or heuristics (`class Solution`)
-  - uses `react-syntax-highlighter` for code formatting
+  - Parses response using markers (EXPLANATION_START/END, SOLUTION_START/END), falls back to markdown code fences or heuristics (`class Solution`)
+  - Uses `react-syntax-highlighter` for code formatting
+  - **Markdown rendering**: `renderMarkdown()` converts `**bold**`, `*italic*`, `` `code` `` to HTML via `dangerouslySetInnerHTML`
+  - **Collapsible Explanation**: Expanded by default, toggleable via clickable header with rotating chevron (`▶`)
+  - **Close buttons (✕)**: Each section (Explanation, Solution) has a dismiss button in its header
+  - **Auto-reappear on new solve**: `useEffect` resets `showExplanation`, `showSolution`, `explanationVisible` to `true` when `response` prop changes
+  - **Copy Code with feedback**: "📋 Copy Code" button → "✅ Copied!" for 2 seconds
 - `src/components/AuthScreen.tsx`
   - Container for authentication views (sign in, sign up, forgot password)
   - Light theme with app branding
 - `src/components/SignInForm.tsx`
   - Email/password sign in
-  - Auto-fills email from previous session
+  - Auto-fills email (always) and password (if "Remember me" was checked)
+  - "Remember me" checkbox — controls password persistence only
+  - Show/hide password toggle (eye icon)
+  - "Forgot password" link
 - `src/components/SignUpForm.tsx`
-  - Email/password sign up
+  - Email/password sign up with confirmation
+  - Show/hide password toggle (eye icon)
+  - Compact benefits summary (free tier vs Pro tier)
 
 ## Backend file map (Rust/Tauri)
 
@@ -566,7 +575,7 @@ When the user selects an audio input source or uses the audio recording hotkey (
 1. **Auto-select audio prompt**: The app automatically switches to "Verbal Interview (Audio)" prompt
 2. **Store previous prompt**: The previously selected prompt is saved in `previousTemplateRef`
 3. **Restore on switch**: When user switches away from audio input, the previous prompt is restored
-4. **Warning dialog**: If user manually selects a non-audio source while "Verbal Interview (Audio)" is active, a warning popup appears suggesting to change the prompt
+4. **Warning dialog**: If user manually selects a non-audio source while "Verbal Interview (Audio)" is active, a warning popup appears suggesting to change the prompt. This also triggers when the user clicks "Solve" or uses `Cmd+1`/`Cmd+2` hotkeys with the audio prompt active on a non-audio source — prevents sending mismatched requests.
 
 Implementation in `src/App.tsx`:
 - `previousTemplateRef` (useRef) stores the last non-audio prompt
@@ -801,11 +810,23 @@ Or manually via Supabase Dashboard → SQL Editor
 
 ### Auth Flow
 
-1. User opens app → Auth session cleared (must sign in each session)
-2. Email from previous session auto-filled for convenience
-3. Sign in → Session stored in localStorage + Supabase
-4. On success → Settings modal closes, main app shown
-5. Sign out → Session cleared, returns to auth screen
+1. User opens app → **Supabase auth session always cleared** (`handleSessionOnStart` removes `sb-*-auth-token` from localStorage). There is no "Stay signed in" — every app launch requires sign-in.
+2. **Email always pre-filled** from previous session (`cracking_interview_remembered_email` in localStorage).
+3. **Password pre-filled only if "Remember me" was checked** on last sign-in (`cracking_interview_remembered_password` in localStorage).
+4. Sign in → Session stored in localStorage + Supabase.
+5. On success → Auth screen hidden, main app shown.
+6. Sign out → Supabase session cleared, returns to auth screen. Saved email/password **not** cleared (persists for next sign-in).
+
+**"Remember me" checkbox** (`SignInForm.tsx`):
+- Controls **password persistence only** — email is always saved.
+- Defaults to checked if a saved password exists, unchecked otherwise.
+- When checked: saves `cracking_interview_remember_me`, `cracking_interview_remembered_password` to localStorage.
+- When unchecked: removes both keys from localStorage.
+- `App.tsx` does **not** manage saved credentials — `SignInForm` is the sole owner.
+
+**Show Password toggle** (both `SignInForm.tsx` and `SignUpForm.tsx`):
+- Eye icon button (`👁️` / `🙈`) toggles password field between `text` and `password` type.
+- Styled via `.password-input-wrapper` and `.password-toggle-btn` in `AuthScreen.css`.
 
 ### Environment Setup
 
@@ -853,6 +874,108 @@ supabase secrets list
 
 # Check OpenRouter key status at: https://openrouter.ai/keys
 ```
+
+### Chrome CDP Status (Header)
+
+The app no longer shows a yellow "Chrome CDP not running" banner in the main content area. Instead, Chrome status is shown compactly in the **header bar**:
+
+- **Chrome not running**: `🚀 Open Chrome` button (styled with `.chrome-open-btn`)
+- **Opening**: `⏳ Opening…` status text
+- **Ready**: `🟢 Chrome Ready` status text
+
+Implementation in `src/App.tsx`:
+- `cdpReady` (boolean state) tracks CDP availability
+- `isOpeningChrome` (boolean state) tracks connection in progress
+- `openChromeCdp()` function calls `invoke('open_chrome_cdp')` and manages state transitions
+- Header conditionally renders button or status text based on these states
+
+### Free User Audio Restriction
+
+Free users cannot use audio recording (it's a Pro feature). The "Verbal Interview (Audio)" prompt is visually disabled for free users:
+
+- `PromptListView.tsx` receives `isPro` prop from `App.tsx`
+- When `!isPro`: prompt item gets `.disabled` class (dimmed, no pointer events) and a purple "PRO" badge
+- Audio recording in `toggleAudioRecording()` checks `subscriptionRef.current` for active/cancelling status
+- **Important**: Uses `useRef` (`subscriptionRef`) instead of direct state to avoid stale closures in the global hotkey listener. A `useEffect` keeps `subscriptionRef.current` in sync with the `subscription` state.
+
+### Programming Languages
+
+The app supports a `{LANGUAGE}` placeholder in prompt templates. Available languages (defined in `ProgrammingLanguage` enum in `src/services/prompts.ts`):
+
+- Java, Python, JavaScript, C++, Swift, Go, PHP, Ruby, SQL
+
+The dropdown in `PromptListView.tsx` renders `<option>` tags for each language.
+
+### UI/UX Features
+
+#### Unified Progress Stepper
+
+During the solve flow, a 2-step progress stepper replaces separate status messages:
+
+| Flow Type | Step 1 | Step 2 |
+|-----------|--------|--------|
+| Text | 📝 Extract | 🤖 Asking AI |
+| Screenshot | 📸 Screenshot | 🤖 Asking AI |
+| Audio | 🎙️ Record | 🤖 Asking AI |
+
+Implementation in `src/App.tsx`:
+- `solvePhase` state: `'idle' | 'extract' | 'screenshot' | 'capture' | 'audio' | 'asking' | 'error'`
+- `solveFlowType` state: `'text' | 'screenshot' | 'audio' | null`
+- Stepper renders only when `solvePhase !== 'idle' && solvePhase !== 'error' && isLoading && !isRecordingAudio`
+- Steps light up as `active` (pulsing animation) or `completed` (green)
+- **No "Done" step** — stepper disappears immediately when AI responds (`solvePhase → 'idle'`)
+- Styled via `.solve-stepper`, `.stepper-track`, `.stepper-step`, `.stepper-connector` in `App.css`
+
+#### Solve Button Mode Indicator
+
+The "Solve" button dynamically shows the current input mode:
+
+- **Audio source selected**: `🎙️ Record` (or `⏹️ Stop (Xs)` while recording)
+- **Display source selected**: `📸 Solve` (always screenshot)
+- **Chrome tab selected**: `📝 Solve` (text mode) or `📸 Solve` (screenshot mode, based on `useScreenshot` setting)
+
+No separate label — the icon is part of the button text itself.
+
+#### Usage Badge (Header)
+
+The header shows a usage badge (`quota-badge`) with units:
+- **Pro**: `📊 94/150 calls` — tooltip shows detailed period info + reset date
+- **Free**: `🎁 2/3 calls` — tooltip shows "lifetime free calls used"
+- **BYO Key**: `🔑 BYO Key` — tooltip shows "Using your own Gemini API key"
+
+#### Usage Bar Gradient (Settings → Account)
+
+The usage bar in the Account settings tab uses a dynamic gradient:
+- ≤50%: Green (`#4CAF50` → `#81C784`)
+- 51–80%: Yellow (`#FFEB3B` → `#FFC107`)
+- >80%: Orange to Red (`#FF9800` → `#F44336`)
+
+#### Input Mode Visual Buttons (Settings → Input Mode)
+
+The "Text Extraction" / "Screenshot Capture" toggle buttons include icons and descriptions:
+- 📝 Text Extraction — "Fast · Text only"
+- 📸 Screenshot Capture — "Visual · Images & diagrams"
+
+Styled via `.toggle-btn .mode-icon`, `.mode-label`, `.mode-description` in `App.css`.
+
+#### Verbal Interview Badge (Prompts Tab)
+
+The "Verbal Interview (Audio)" prompt shows a `🎙️ Audio` button (using `.prompt-action-btn` class for consistent styling) instead of a "Duplicate" button. This badge matches the font size, color, and hover effects of other action buttons.
+
+#### HTML Entity Decoding
+
+HTML entities (e.g., `&#39;`) in source titles are decoded using `DOMParser`:
+- `TabDropdown.tsx`: `decodeHtmlEntities()` applied to `getSourceTitle()` and `getSourceSubtitle()`
+- `App.tsx`: `decodeHtmlEntities()` applied to the status message when a source is selected
+
+#### Refresh Button (Input Source)
+
+The refresh button for input sources includes visual feedback:
+- **Hover**: Blue border, light blue background, slight lift (`translateY(-2px)`)
+- **Active/Click**: Press-down effect
+- **Refreshing**: Spinning animation (`.refreshing` class with `@keyframes spin`)
+- **Tooltip**: `title="Refresh Input Sources"`
+- `isRefreshing` state controls disabled + animation
 
 ## Build + run
 

@@ -109,6 +109,9 @@ function App() {
   const [isOpeningChrome, setIsOpeningChrome] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [message, setMessage] = useState('');
+  // Solve progress stepper: tracks which phase we're in
+  const [solvePhase, setSolvePhase] = useState<'idle' | 'extract' | 'screenshot' | 'capture' | 'audio' | 'asking' | 'error'>('idle');
+  const [solveFlowType, setSolveFlowType] = useState<'text' | 'screenshot' | 'audio' | null>(null);
   
   const [selectedTemplate, setSelectedTemplate] = useState<string>(
     localStorage.getItem('prompt_template') || PromptTemplate.AlgorithmOptimal
@@ -181,31 +184,15 @@ function App() {
 
   // ========== AUTH INITIALIZATION ==========
   useEffect(() => {
-    // Clear session on app start - user must sign in each time
-    // But preserve the remembered email for convenience
-    const clearSessionOnStart = () => {
+    // On app start: always clear the session so user lands on Sign In page.
+    // "Remember me" only pre-fills credentials — it does NOT auto-login.
+    const handleSessionOnStart = () => {
       const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
       const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
-      
-      // Check if there's a stored session and save the email before clearing
-      const storedSession = localStorage.getItem(storageKey);
-      if (storedSession) {
-        try {
-          const session = JSON.parse(storedSession);
-          if (session.user?.email) {
-            // Save email for auto-fill on next sign-in
-            localStorage.setItem('cracking_interview_remembered_email', session.user.email);
-          }
-        } catch (e) {
-          console.error('[App] Failed to parse stored session:', e);
-        }
-      }
-      
-      // Clear the auth session (force sign-in each time)
       localStorage.removeItem(storageKey);
     };
 
-    clearSessionOnStart();
+    handleSessionOnStart();
     setAuthLoading(false);
 
     // Listen for auth state changes
@@ -383,6 +370,8 @@ function App() {
       // This overrides the user's model selection because other models don't support audio
       const AUDIO_MODEL = 'gemini-3-flash';
 
+      setSolveFlowType('audio');
+      setSolvePhase('asking');
       setMessage('🤖 Sending audio to AI...');
       const audioInstructions = `Listen to the interview question in the audio carefully and solve it step by step. Provide a clear Explanation and a final Solution.`;
       // Audio ALWAYS uses the Verbal Interview (Audio) prompt
@@ -401,7 +390,8 @@ function App() {
       }
       
       setAiResponse(proxyResponse.response);
-      setMessage('✅ Solution ready!');
+      setSolvePhase('idle');
+      setMessage('');
       
       // Update usage stats if returned
       if (proxyResponse.usage) {
@@ -416,6 +406,7 @@ function App() {
         }
       }
     } catch (e) {
+      setSolvePhase('error');
       setMessage(`❌ Error: ${String(e)}`);
     } finally {
       setIsLoading(false);
@@ -726,11 +717,6 @@ function App() {
         setAuthSession(session);
         setAuthUser(session.user);
         
-        // Save email for auto-fill on next sign-in (after app restart)
-        if (session.user?.email) {
-          localStorage.setItem('cracking_interview_remembered_email', session.user.email);
-        }
-        
         // Fetch subscription and usage data
         if (session.user?.id) {
           const sub = await getUserSubscription(session.user.id);
@@ -751,6 +737,8 @@ function App() {
   const handleSignOut = async () => {
     try {
       await supabaseSignOut();
+      // Note: Don't clear cracking_interview_remember_me or saved credentials here.
+      // "Remember me" means credentials persist across sign-out/sign-in cycles.
       setAuthUser(null);
       setAuthSession(null);
       setSubscription(null);
@@ -1055,17 +1043,22 @@ function App() {
 
     setIsLoading(true);
     setAiResponse('');
+    setSolvePhase('idle');
+    setSolveFlowType(null);
     
     try {
       let responseText: string;
       
       if (isDisplay(sourceToUse)) {
         // Display/Screen capture - always uses screenshot (Pro only)
+        setSolveFlowType('screenshot');
+        setSolvePhase('capture');
         setMessage('📸 Capturing display...');
         const screenshotPath = await invoke<string>('capture_display_screenshot', { 
           displayId: sourceToUse.id 
         });
         
+        setSolvePhase('asking');
         setMessage('🤖 Analyzing screenshot with AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage);
         
@@ -1096,6 +1089,8 @@ function App() {
         }
       } else if (mode === 'screenshot' || (mode === 'auto' && useScreenshot)) {
         // Chrome tab - screenshot mode
+        setSolveFlowType('screenshot');
+        setSolvePhase('screenshot');
         setMessage('📸 Taking screenshot...');
         await invoke('activate_tab', { tabId: sourceToUse.id });
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -1104,6 +1099,7 @@ function App() {
           tabId: sourceToUse.id 
         });
         
+        setSolvePhase('asking');
         setMessage('🤖 Analyzing screenshot with AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage);
         
@@ -1151,12 +1147,14 @@ function App() {
         }
       } else {
         // Chrome tab - text mode
+        setSolvePhase('extract');
         setMessage('📝 Extracting text...');
         await invoke('activate_tab', { tabId: sourceToUse.id });
         await new Promise(resolve => setTimeout(resolve, 300));
         
         const text = await invoke<string>('extract_tab_text', { tabId: sourceToUse.id });
         
+        setSolvePhase('asking');
         setMessage('🤖 Asking AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage, text);
         
@@ -1203,8 +1201,10 @@ function App() {
       }
       
       setAiResponse(responseText);
-      setMessage('✅ Solution ready!');
+      setSolvePhase('idle');
+      setMessage('');
     } catch (error) {
+      setSolvePhase('error');
       setMessage(`❌ Error: ${error}`);
     } finally {
       setIsLoading(false);
@@ -1255,15 +1255,26 @@ function App() {
                   : `${subscription.lifetime_ai_calls || 0} of 3 lifetime free calls used`
             }>
               {isPaidUser ? (
-                <>📊 {usageStats ? `${usageStats.requests_used}/${usageStats.requests_limit}` : '...'}</>
+                <>📊 {usageStats ? `${usageStats.requests_used}/${usageStats.requests_limit} calls` : '...'}</>
               ) : (subscription.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key ? (
                 <>🔑 BYO Key</>
               ) : (
-                <>🎁 {subscription.lifetime_ai_calls || 0}/3 free</>
+                <>🎁 {subscription.lifetime_ai_calls || 0}/3 calls</>
               )}
             </span>
           )}
-          <span className="status-indicator">{cdpStatus}</span>
+          {cdpReady ? (
+            <span className="status-indicator">{cdpStatus}</span>
+          ) : (
+            <button 
+              className="status-indicator chrome-open-btn"
+              onClick={openChromeCdp}
+              disabled={isOpeningChrome}
+              title="Click to open Chrome with CDP"
+            >
+              {isOpeningChrome ? '⏳ Opening…' : '🚀 Open Chrome'}
+            </button>
+          )}
           <button 
             onClick={handleOpenSettings}
             className="settings-btn"
@@ -1334,7 +1345,7 @@ function App() {
         >
           {selectedTab && isAudio(selectedTab)
             ? (isRecordingAudio ? `⏹️ Stop (${audioSeconds}s)` : '🎙️ Record')
-            : '🚀 Solve'}
+            : `${selectedTab && (isDisplay(selectedTab) || useScreenshot) ? '📸' : '📝'} Solve`}
         </button>
       </div>
 
@@ -1347,15 +1358,6 @@ function App() {
       <div className="content" ref={contentScrollRef}>
         <div className="main-section">
           
-          {!cdpReady && (
-            <div className="info-banner warning">
-              <p>⚠️  Chrome CDP not running</p>
-              <button onClick={openChromeCdp} className="action-btn primary" style={{marginTop: '8px'}}>
-                🚀 Open Chrome CDP
-              </button>
-            </div>
-          )}
-
           {announcement && showAnnouncement && (
             <div className="info-banner announcement">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1404,7 +1406,59 @@ function App() {
             </div>
           )}
 
-          {message && !isRecordingAudio && (
+          {/* Progress stepper during solve flow (2 steps only — disappears when AI responds) */}
+          {solvePhase !== 'idle' && solvePhase !== 'error' && isLoading && !isRecordingAudio && (
+            <div className="solve-stepper">
+              {(() => {
+                type Step = { label: string; icon: string; key: string };
+                let steps: Step[];
+                if (solveFlowType === 'audio') {
+                  steps = [
+                    { label: 'Record', icon: '🎙️', key: 'audio' },
+                    { label: 'Asking AI', icon: '🤖', key: 'asking' },
+                  ];
+                } else if (solveFlowType === 'screenshot') {
+                  steps = [
+                    { label: 'Screenshot', icon: '📸', key: 'screenshot' },
+                    { label: 'Asking AI', icon: '🤖', key: 'asking' },
+                  ];
+                } else {
+                  steps = [
+                    { label: 'Extract', icon: '📝', key: 'extract' },
+                    { label: 'Asking AI', icon: '🤖', key: 'asking' },
+                  ];
+                }
+
+                const phaseOrder = ['extract', 'screenshot', 'capture', 'audio', 'asking'];
+                const currentIdx = phaseOrder.indexOf(solvePhase);
+
+                return (
+                  <div className="stepper-track">
+                    {steps.map((step, i) => {
+                      const stepIdx = phaseOrder.indexOf(step.key);
+                      const isActive = step.key === solvePhase || 
+                        (step.key === 'screenshot' && (solvePhase === 'capture' || solvePhase === 'screenshot'));
+                      const isCompleted = stepIdx < currentIdx && stepIdx >= 0;
+                      return (
+                        <div key={step.key} className="stepper-item-wrapper">
+                          {i > 0 && (
+                            <div className={`stepper-connector ${isCompleted || isActive ? 'active' : ''}`} />
+                          )}
+                          <div className={`stepper-step ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''}`}>
+                            <span className="stepper-icon">{step.icon}</span>
+                            <span className="stepper-label">{step.label}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Non-stepper messages (errors, status messages outside solve flow) */}
+          {message && !isRecordingAudio && (solvePhase === 'idle' || solvePhase === 'error') && (
             <div className="message-box">
               {message}
             </div>
@@ -1414,13 +1468,6 @@ function App() {
             response={aiResponse}
             language={selectedLanguage.toLowerCase()}
           />
-
-          {isLoading && (
-            <div className="loading">
-              <div className="spinner"></div>
-              <p>Processing...</p>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1493,14 +1540,23 @@ function App() {
                   <div className="form-group">
                     <label>Usage {isPaidUser ? 'This Month' : '(Lifetime)'}:</label>
                     <div className="usage-bar-container">
-                      <div 
-                        className="usage-bar" 
-                        style={{ 
-                          width: isPaidUser && usageStats 
-                            ? `${Math.min(100, (usageStats.requests_used / usageStats.requests_limit) * 100)}%` 
-                            : `${Math.min(100, ((subscription?.lifetime_ai_calls || 0) / 3) * 100)}%`
-                        }}
-                      />
+                      {(() => {
+                        const pct = isPaidUser && usageStats
+                          ? Math.min(100, (usageStats.requests_used / usageStats.requests_limit) * 100)
+                          : Math.min(100, ((subscription?.lifetime_ai_calls || 0) / 3) * 100);
+                        // Green → Yellow → Red gradient based on usage percentage
+                        const barColor = pct < 50
+                          ? `linear-gradient(90deg, #4caf50, #66bb6a)`
+                          : pct < 80
+                            ? `linear-gradient(90deg, #66bb6a, #ffc107)`
+                            : `linear-gradient(90deg, #ff9800, #f44336)`;
+                        return (
+                          <div
+                            className="usage-bar"
+                            style={{ width: `${pct}%`, background: barColor }}
+                          />
+                        );
+                      })()}
                     </div>
                     <div className="usage-text">
                       {isPaidUser ? (
@@ -1682,15 +1738,19 @@ function App() {
                     <div className="toggle-group">
                       <button
                         onClick={() => setUseScreenshot(false)}
-                        className={`toggle-btn ${!useScreenshot ? 'active' : ''}`}
+                        className={`toggle-btn mode-btn ${!useScreenshot ? 'active' : ''}`}
                       >
-                        📝 Text Extraction
+                        <span className="mode-icon">📝</span>
+                        <span className="mode-label">Text Extraction</span>
+                        <span className="mode-desc">Fast · Text only</span>
                       </button>
                       <button
                         onClick={() => setUseScreenshot(true)}
-                        className={`toggle-btn ${useScreenshot ? 'active' : ''}`}
+                        className={`toggle-btn mode-btn ${useScreenshot ? 'active' : ''}`}
                       >
-                        📸 Screenshot Capture
+                        <span className="mode-icon">📸</span>
+                        <span className="mode-label">Screenshot Capture</span>
+                        <span className="mode-desc">Visual · Images & diagrams</span>
                       </button>
                     </div>
                   </div>

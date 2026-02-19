@@ -14,6 +14,8 @@ export default function SignUpForm({ onSuccess, onSwitchToSignIn }: SignUpFormPr
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,29 +81,51 @@ export default function SignUpForm({ onSuccess, onSwitchToSignIn }: SignUpFormPr
 
       <div className="form-group">
         <label htmlFor="password">Password</label>
-        <input
-          id="password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="At least 6 characters"
-          required
-          minLength={6}
-          autoComplete="new-password"
-        />
+        <div className="password-input-wrapper">
+          <input
+            id="password"
+            type={showPassword ? 'text' : 'password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="At least 6 characters"
+            required
+            minLength={6}
+            autoComplete="new-password"
+          />
+          <button
+            type="button"
+            className="password-toggle-btn"
+            onClick={() => setShowPassword(v => !v)}
+            tabIndex={-1}
+            title={showPassword ? 'Hide password' : 'Show password'}
+          >
+            {showPassword ? '🙈' : '👁️'}
+          </button>
+        </div>
       </div>
 
       <div className="form-group">
         <label htmlFor="confirmPassword">Confirm Password</label>
-        <input
-          id="confirmPassword"
-          type="password"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-          placeholder="••••••••"
-          required
-          autoComplete="new-password"
-        />
+        <div className="password-input-wrapper">
+          <input
+            id="confirmPassword"
+            type={showConfirmPassword ? 'text' : 'password'}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="••••••••"
+            required
+            autoComplete="new-password"
+          />
+          <button
+            type="button"
+            className="password-toggle-btn"
+            onClick={() => setShowConfirmPassword(v => !v)}
+            tabIndex={-1}
+            title={showConfirmPassword ? 'Hide password' : 'Show password'}
+          >
+            {showConfirmPassword ? '🙈' : '👁️'}
+          </button>
+        </div>
       </div>
 
       <button type="submit" className="auth-button primary" disabled={isLoading}>

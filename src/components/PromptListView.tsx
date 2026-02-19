@@ -290,7 +290,7 @@ export default function PromptListView({
                       title="Default prompt for audio input source"
                       onClick={() => setShowAudioBadgeInfo(true)}
                     >
-                      🎤
+                      🎙️ Audio
                     </div>
                   ) : (
                     <button
