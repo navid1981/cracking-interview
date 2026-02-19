@@ -290,6 +290,64 @@ body {
 .section-header h3 {
   font-size: 16px;
   font-weight: 600;
+  margin: 0;
+}
+
+/* Collapse toggle button (left side of header) */
+.section-collapse-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.section-collapse-btn:hover h3 {
+  color: var(--primary-blue);
+}
+
+.collapse-arrow {
+  font-size: 10px;
+  color: #888;
+  transition: transform 0.2s ease;
+  display: inline-block;
+}
+
+.collapse-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.collapse-arrow.collapsed {
+  transform: rotate(0deg);
+}
+
+/* Right side actions in header */
+.section-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Close (x) button for sections */
+.section-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #aaa;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 0.15s, background 0.15s;
+}
+
+.section-close-btn:hover {
+  color: #e53935;
+  background: #ffeaea;
 }
 
 .copy-btn {
@@ -299,6 +357,8 @@ body {
   border-radius: 6px;
   font-size: 13px;
   cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  white-space: nowrap;
 }
 
 .copy-btn:hover {
@@ -306,10 +366,23 @@ body {
   color: white;
 }
 
+.copy-btn.copied {
+  background: #e8f5e9;
+  color: #2e7d32;
+  pointer-events: none;
+}
+
 .explanation-content {
   font-size: 14px;
   line-height: 1.8;
-  white-space: pre-wrap;
+}
+
+.explanation-content .inline-code {
+  background: #f0f0f0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 12px;
 }
 
 .solution-content {

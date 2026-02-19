@@ -1247,7 +1247,13 @@ function App() {
         <div className="header-right">
           {/* Quota Display */}
           {subscription && (
-            <span className="quota-badge" title={isPaidUser ? 'Monthly quota' : ((subscription.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key ? 'Using your Gemini API key' : 'Lifetime free calls')}>
+            <span className="quota-badge" title={
+              isPaidUser
+                ? `${usageStats?.requests_used ?? '?'} of ${usageStats?.requests_limit ?? 150} AI calls used this month${usageStats?.period_end ? ` · Resets ${usageStats.period_end.toLocaleDateString()}` : ''}`
+                : (subscription.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key
+                  ? 'Using your own Gemini API key (unlimited)'
+                  : `${subscription.lifetime_ai_calls || 0} of 3 lifetime free calls used`
+            }>
               {isPaidUser ? (
                 <>📊 {usageStats ? `${usageStats.requests_used}/${usageStats.requests_limit}` : '...'}</>
               ) : (subscription.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key ? (
@@ -1279,7 +1285,10 @@ function App() {
                 const nowAudio = isAudio(source);
                 
                 setSelectedTab(source);
-                const title = isAudio(source) ? source.name : isDisplay(source) ? source.name : source.title;
+                const rawTitle = isAudio(source) ? source.name : isDisplay(source) ? source.name : source.title;
+                const titleDiv = document.createElement('div');
+                titleDiv.innerHTML = rawTitle;
+                const title = titleDiv.textContent || titleDiv.innerText || rawTitle;
                 setMessage(`Selected: ${title}`);
                 
                 // Auto-select Verbal Interview (Audio) prompt when switching to Audio source

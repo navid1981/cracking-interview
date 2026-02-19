@@ -1,5 +1,6 @@
 // AI Response Display with syntax highlighting
 
+import { useState, useEffect } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
@@ -45,8 +46,17 @@ function parseResponse(response: string): ParsedResponse {
     explanation = response;
   }
 
-
   return { explanation, solution };
+}
+
+// Render basic markdown: **bold**, *italic*, `inline code`, line breaks
+function renderMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(.*?)__/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
+    .replace(/\n/g, '<br/>');
 }
 
 interface Props {
@@ -55,33 +65,77 @@ interface Props {
 }
 
 export default function AIResponseDisplay({ response, language = 'java' }: Props) {
+  const [showExplanation, setShowExplanation] = useState(true);
+  const [explanationVisible, setExplanationVisible] = useState(true);
+  const [showSolution, setShowSolution] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  // Reset visibility whenever a new response arrives
+  useEffect(() => {
+    setShowExplanation(true);
+    setShowSolution(true);
+    setExplanationVisible(true);
+  }, [response]);
+
   if (!response) return null;
 
   const { explanation, solution } = parseResponse(response);
 
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(solution);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div className="ai-response">
-      {explanation && (
+      {explanation && showExplanation && (
         <div className="explanation-section">
           <div className="section-header">
-            <h3>📄 Explanation</h3>
+            <button
+              className="section-collapse-btn"
+              onClick={() => setExplanationVisible(v => !v)}
+              title={explanationVisible ? 'Collapse' : 'Expand'}
+            >
+              <span className={`collapse-arrow ${explanationVisible ? 'expanded' : 'collapsed'}`}>▶</span>
+              <h3>📄 Explanation</h3>
+            </button>
+            <button
+              className="section-close-btn"
+              onClick={() => setShowExplanation(false)}
+              title="Close"
+            >
+              ✕
+            </button>
           </div>
-          <div className="explanation-content">
-            {explanation}
-          </div>
+          {explanationVisible && (
+            <div
+              className="explanation-content"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(explanation) }}
+            />
+          )}
         </div>
       )}
 
-      {solution && (
+      {solution && showSolution && (
         <div className="solution-section">
           <div className="section-header">
             <h3>⚡ Solution</h3>
-            <button 
-              onClick={() => navigator.clipboard.writeText(solution)}
-              className="copy-btn"
-            >
-              📋 Copy Code
-            </button>
+            <div className="section-header-actions">
+              <button
+                onClick={handleCopy}
+                className={`copy-btn ${copied ? 'copied' : ''}`}
+              >
+                {copied ? '✅ Copied!' : '📋 Copy Code'}
+              </button>
+              <button
+                className="section-close-btn"
+                onClick={() => setShowSolution(false)}
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
           </div>
           <div className="solution-content">
             <SyntaxHighlighter

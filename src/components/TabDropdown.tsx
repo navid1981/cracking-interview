@@ -36,6 +36,12 @@ function isAudio(source: InputSource): source is AudioSource {
   return (source as any).source_type === 'audio';
 }
 
+function decodeHtmlEntities(text: string): string {
+  const div = document.createElement('div');
+  div.innerHTML = text;
+  return div.textContent || div.innerText || text;
+}
+
 function getSourceTitle(source: InputSource): string {
   if (isDisplay(source)) {
     return `${source.name} (${source.width}x${source.height})${source.is_main ? ' - Main' : ''}`;
@@ -43,7 +49,7 @@ function getSourceTitle(source: InputSource): string {
   if (isAudio(source)) {
     return source.name;
   }
-  return source.title;
+  return decodeHtmlEntities(source.title);
 }
 
 function getSourceSubtitle(source: InputSource): string {
@@ -53,7 +59,7 @@ function getSourceSubtitle(source: InputSource): string {
   if (isAudio(source)) {
     return 'Records system audio (loopback)';
   }
-  return source.url;
+  return decodeHtmlEntities(source.url);
 }
 
 interface Props {
