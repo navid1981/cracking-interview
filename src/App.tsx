@@ -1296,7 +1296,7 @@ function App() {
                 const nowAudio = isAudio(source);
                 
                 setSelectedTab(source);
-                const rawTitle = isAudio(source) ? source.name : isDisplay(source) ? source.name : source.title;
+                const rawTitle = isAudio(source) ? source.name : isDisplay(source) ? source.name : (source.title?.trim() || (source as any).url || 'Unknown');
                 const titleDiv = document.createElement('div');
                 titleDiv.innerHTML = rawTitle;
                 const title = titleDiv.textContent || titleDiv.innerText || rawTitle;
@@ -1803,149 +1803,146 @@ function App() {
               )}
 
               {settingsTab === 'hotkeys' && (
-                <>
-                  <div className="form-group">
-                    <label>Global Hotkeys:</label>
-
+                <div className="hotkeys-panel">
+                  {/* Solve Section */}
+                  <div className="hotkeys-section">
+                    <div className="hotkeys-section-title">🎯 Solve</div>
                     <div className="hotkeys-two-col">
-                      <div className="hotkeys-col">
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Extract text → Solve</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.text}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, text: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + 1' : runtimePlatform === 'windows' ? 'Alt + 1' : 'Ctrl + 1'}
-                          />
-                        </div>
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Audio Start/Stop → Solve</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.audio_toggle}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, audio_toggle: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + 3' : runtimePlatform === 'windows' ? 'Alt + 3' : 'Ctrl + 3'}
-                          />
-                        </div>
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Scroll up (Explanation)</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.scroll_up}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_up: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + Up' : 'Ctrl + Up'}
-                          />
-                        </div>
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Move window up</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.move_up}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_up: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Up' : runtimePlatform === 'windows' ? 'Alt + Shift + Up' : 'Ctrl + Shift + Up'}
-                          />
-                        </div>
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Move window left</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.move_left}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_left: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Left' : runtimePlatform === 'windows' ? 'Alt + Shift + Left' : 'Ctrl + Shift + Left'}
-                          />
-                        </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">Extract text → Solve</div>
+                        <input
+                          className="input-field hotkey-input"
+                          value={hotkeysDraft.text}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, text: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + 1' : runtimePlatform === 'windows' ? 'Alt + 1' : 'Ctrl + 1'}
+                        />
                       </div>
-
-                      <div className="hotkeys-col">
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Screenshot → Solve</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.screenshot}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, screenshot: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + 2' : runtimePlatform === 'windows' ? 'Alt + 2' : 'Ctrl + 2'}
-                          />
-                        </div>
-                        <div className="hotkey-field hotkey-field-spacer" />
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Scroll down (Explanation)</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.scroll_down}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_down: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + Down' : 'Ctrl + Down'}
-                          />
-                        </div>
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Move window down</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.move_down}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_down: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Down' : runtimePlatform === 'windows' ? 'Alt + Shift + Down' : 'Ctrl + Shift + Down'}
-                          />
-                        </div>
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Move window right</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.move_right}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_right: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Right' : runtimePlatform === 'windows' ? 'Alt + Shift + Right' : 'Ctrl + Shift + Right'}
-                          />
-                        </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">Screenshot → Solve</div>
+                        <input
+                          className="input-field hotkey-input"
+                          value={hotkeysDraft.screenshot}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, screenshot: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + 2' : runtimePlatform === 'windows' ? 'Alt + 2' : 'Ctrl + 2'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">Audio Start/Stop → Solve</div>
+                        <input
+                          className="input-field hotkey-input"
+                          value={hotkeysDraft.audio_toggle}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, audio_toggle: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + 3' : runtimePlatform === 'windows' ? 'Alt + 3' : 'Ctrl + 3'}
+                        />
                       </div>
                     </div>
-
-                    <div className="hotkeys-two-col hotkeys-two-col-single">
-                      <div className="hotkeys-col">
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Quit app</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.quit_app}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, quit_app: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Q' : runtimePlatform === 'windows' ? 'Alt + Shift + Q' : 'Ctrl + Shift + Q'}
-                          />
-                        </div>
-                      </div>
-                      <div className="hotkeys-col">
-                        <div className="hotkey-field">
-                          <div className="hotkey-label">Show/Hide app window</div>
-                          <input
-                            className="input-field"
-                            value={hotkeysDraft.toggle_visibility}
-                            onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, toggle_visibility: e.target.value })}
-                            placeholder={runtimePlatform === 'macos' ? 'Command + Shift + H' : runtimePlatform === 'windows' ? 'Alt + Shift + H' : 'Ctrl + Shift + H'}
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{display: 'flex', gap: '8px', marginTop: '12px'}}>
-                      <button className="action-btn primary" style={{flex: 1}} onClick={saveHotkeys}>
-                        Save
-                      </button>
-                      <button className="action-btn secondary" style={{flex: 1}} onClick={resetHotkeys}>
-                        Reset to defaults
-                      </button>
-                    </div>
-
-                    {hotkeysStatus && (
-                      <div style={{marginTop: '10px', fontSize: '12px', color: hotkeysStatus.startsWith('❌') ? '#c62828' : '#666'}}>
-                        {hotkeysStatus}
-                      </div>
-                    )}
-
-                    <p style={{fontSize: '12px', color: '#666', marginTop: '10px'}}>
-                      If your selected Input Source is a Display, the app will automatically use the Screenshot approach even when you press the Extract hotkey.
-                    </p>
-
-                    <p style={{fontSize: '12px', color: '#666', marginTop: '12px'}}>
-                      Tip: avoid Shift-only shortcuts (e.g. Shift+L). Use Cmd/Ctrl/Alt (and optionally Shift).
-                    </p>
                   </div>
-                </>
+
+                  {/* Navigation Section */}
+                  <div className="hotkeys-section">
+                    <div className="hotkeys-section-title">🧭 Navigation</div>
+                    <div className="hotkeys-two-col">
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">Scroll up (Explanation)</div>
+                        <input
+                          className="input-field hotkey-input"
+                          value={hotkeysDraft.scroll_up}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_up: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Up' : 'Ctrl + Up'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">Scroll down (Explanation)</div>
+                        <input
+                          className="input-field hotkey-input"
+                          value={hotkeysDraft.scroll_down}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_down: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Down' : 'Ctrl + Down'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">Move window up</div>
+                        <input
+                          className="input-field hotkey-input"
+                          value={hotkeysDraft.move_up}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_up: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Up' : runtimePlatform === 'windows' ? 'Alt + Shift + Up' : 'Ctrl + Shift + Up'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">Move window down</div>
+                        <input
+                          className="input-field hotkey-input"
+                          value={hotkeysDraft.move_down}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_down: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Down' : runtimePlatform === 'windows' ? 'Alt + Shift + Down' : 'Ctrl + Shift + Down'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">Move window left</div>
+                        <input
+                          className="input-field hotkey-input"
+                          value={hotkeysDraft.move_left}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_left: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Left' : runtimePlatform === 'windows' ? 'Alt + Shift + Left' : 'Ctrl + Shift + Left'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">Move window right</div>
+                        <input
+                          className="input-field hotkey-input"
+                          value={hotkeysDraft.move_right}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_right: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Right' : runtimePlatform === 'windows' ? 'Alt + Shift + Right' : 'Ctrl + Shift + Right'}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* App Section */}
+                  <div className="hotkeys-section">
+                    <div className="hotkeys-section-title">⚙️ App</div>
+                    <div className="hotkeys-two-col">
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">Show/Hide app window</div>
+                        <input
+                          className="input-field hotkey-input"
+                          value={hotkeysDraft.toggle_visibility}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, toggle_visibility: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + H' : runtimePlatform === 'windows' ? 'Alt + Shift + H' : 'Ctrl + Shift + H'}
+                        />
+                      </div>
+                      <div className="hotkey-field">
+                        <div className="hotkey-label">Quit app</div>
+                        <input
+                          className="input-field hotkey-input"
+                          value={hotkeysDraft.quit_app}
+                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, quit_app: e.target.value })}
+                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Q' : runtimePlatform === 'windows' ? 'Alt + Shift + Q' : 'Ctrl + Shift + Q'}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{display: 'flex', gap: '8px', marginTop: '10px'}}>
+                    <button className="action-btn primary" style={{flex: 1}} onClick={saveHotkeys}>
+                      Save
+                    </button>
+                    <button className="action-btn secondary" style={{flex: 1}} onClick={resetHotkeys}>
+                      Reset to defaults
+                    </button>
+                  </div>
+
+                  {hotkeysStatus && (
+                    <div style={{marginTop: '8px', fontSize: '11px', color: hotkeysStatus.startsWith('❌') ? '#c62828' : '#666'}}>
+                      {hotkeysStatus}
+                    </div>
+                  )}
+
+                  <p style={{fontSize: '11px', color: '#999', marginTop: '8px', lineHeight: '1.4'}}>
+                    Display Input Source auto-uses Screenshot even with the Extract hotkey. Avoid Shift-only shortcuts (e.g. Shift+L).
+                  </p>
+                </div>
               )}
             </div>
           </div>

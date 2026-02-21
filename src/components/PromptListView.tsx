@@ -218,6 +218,7 @@ export default function PromptListView({
     });
     setTemplates(getAllTemplates());
     setShowNewPromptDialog(false);
+    onEditPrompt(newId);
   };
 
   const showLanguageSelector = supportsLanguageSelection(selectedTemplate);
@@ -326,6 +327,13 @@ export default function PromptListView({
                     title="Rename"
                   >
                     📝 Rename
+                  </button>
+                  <button
+                    onClick={() => onEditPrompt(template.id)}
+                    className="prompt-action-btn"
+                    title="Edit"
+                  >
+                    ✏️ Edit
                   </button>
                   <button
                     onClick={() => handleDelete(template.id)}

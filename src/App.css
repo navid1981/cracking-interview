@@ -627,52 +627,46 @@ button.chrome-open-btn:disabled {
   gap: 10px;
 }
 
+.hotkeys-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hotkeys-section {
+  padding: 8px 10px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #eee;
+}
+
+.hotkeys-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 6px;
+}
+
 .hotkeys-two-col {
-  margin-top: 10px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 14px; /* "invisible" vertical separator */
-  row-gap: 10px;
-}
-
-.hotkeys-col {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
-.hotkeys-two-col-single {
-  margin-top: 10px;
-}
-
-@media (max-width: 420px) {
-  .hotkeys-col-spacer {
-    display: none;
-  }
+  column-gap: 10px;
+  row-gap: 6px;
 }
 
 .hotkey-field {
   min-width: 0;
 }
 
-.hotkey-field-spacer {
-  height: 52px; /* Match approximate height of a hotkey field */
-}
-
 .hotkey-label {
-  font-size: 12px;
+  font-size: 11px;
   color: #666;
-  margin-bottom: 6px;
+  margin-bottom: 3px;
 }
 
-@media (max-width: 560px) {
-  .hotkeys-grid {
-    grid-template-columns: 1fr;
-  }
-  .hotkeys-two-col {
-    /* Keep 2 columns for the default 550px app window; collapse only on very narrow widths. */
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.hotkey-input {
+  padding: 5px 8px !important;
+  font-size: 12px !important;
 }
 
 @media (max-width: 420px) {

@@ -5,6 +5,7 @@
  */
 
 import { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import SignInForm from './SignInForm';
 import SignUpForm from './SignUpForm';
 import './AuthScreen.css';
@@ -86,11 +87,11 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
         <div className="auth-footer">
           <p>By continuing, you agree to our</p>
           <div className="auth-links">
-            <a href="https://crackinginterview.org/terms.html" target="_blank" rel="noopener">
+            <a href="#" onClick={(e) => { e.preventDefault(); invoke('open_url', { url: 'https://crackinginterview.org/terms.html' }); }}>
               Terms of Service
             </a>
             <span>•</span>
-            <a href="https://crackinginterview.org/privacy.html" target="_blank" rel="noopener">
+            <a href="#" onClick={(e) => { e.preventDefault(); invoke('open_url', { url: 'https://crackinginterview.org/privacy.html' }); }}>
               Privacy Policy
             </a>
           </div>

@@ -50,12 +50,12 @@ The primary source code is:
   - `audio_recorder.swift`: Swift helper for macOS audio recording (compiled at runtime)
 - **Supabase Edge Functions**: `supabase/functions/`
   - `ai-proxy/index.ts`: OpenRouter proxy with quota enforcement
-  - `create-checkout/index.ts`: Stripe checkout session creation (production)
-  - `create-checkout-test/index.ts`: Stripe checkout (test mode)
-  - `create-billing-portal/index.ts`: Stripe Customer Portal (production)
-  - `create-billing-portal-test/index.ts`: Stripe Customer Portal (test mode)
-  - `stripe-webhook/index.ts`: Stripe webhook handler (production)
-  - `stripe-webhook-test/index.ts`: Stripe webhook handler (test mode)
+  - `create-checkout/index.ts`: Stripe checkout session creation (**production** — app calls this)
+  - `create-checkout-test/index.ts`: Stripe checkout (test mode, kept for development)
+  - `create-billing-portal/index.ts`: Stripe Customer Portal (**production** — app calls this)
+  - `create-billing-portal-test/index.ts`: Stripe Customer Portal (test mode, kept for development)
+  - `stripe-webhook/index.ts`: Stripe webhook handler (**production** — Stripe calls this)
+  - `stripe-webhook-test/index.ts`: Stripe webhook handler (test mode, kept for development)
   - `notification/index.ts`: Announcement system (returns announcements based on user type + app version)
   - `ping/index.ts`: Network latency diagnostic
 - **Scripts** (project root):
@@ -977,6 +977,101 @@ The refresh button for input sources includes visual feedback:
 - **Tooltip**: `title="Refresh Input Sources"`
 - `isRefreshing` state controls disabled + animation
 
+#### Always on Top
+
+The app window is configured to stay on top of all other windows at all times. This is a core UX feature — the user always has the AI assistant visible while working in Chrome or other apps. Combined with stealth mode, the window floats above everything while remaining invisible to screen-sharing software.
+
+#### Hotkeys Settings UI
+
+The Settings → HotKeys tab uses a grouped, compact layout:
+
+- **3 sections**: Solve, Navigation, App — each with a section title and bordered card
+- **Two-column grid** within each section for compact display
+- **Compact inputs**: Smaller padding/font (`hotkey-input` class) so all hotkeys fit on one page without scrolling
+- Styled via `.hotkeys-panel`, `.hotkeys-section`, `.hotkeys-section-title`, `.hotkeys-two-col`, `.hotkey-field`, `.hotkey-label`, `.hotkey-input` in `App.css`
+
+#### Custom Prompt Management
+
+Custom prompts (up to 3) support full CRUD:
+
+- **Create**: `+ New Prompt` button → name dialog → automatically opens the prompt editor after creation (`onEditPrompt(newId)` called in `confirmCreateNew`)
+- **Action buttons** for custom prompts (in order): `📝 Rename`, `✏️ Edit`, `🗑️ Delete`
+- **Built-in prompts** have: `📋 Duplicate`, `✏️ Edit`, `🔄 Restore`
+- Implementation in `src/components/PromptListView.tsx`
+
+#### Chrome Tab Empty Title Fallback
+
+When a Chrome tab is selected but its title is empty (e.g., page still loading), the status message falls back to displaying the URL instead of showing an empty "Selected:" message:
+
+```javascript
+const rawTitle = source.title?.trim() || (source as any).url || 'Unknown';
+```
+
+This handles the case when "Open Chrome" launches a new Chrome window and auto-selects a tab before the page title has loaded.
+
+### Production Edge Functions
+
+The Supabase Edge Functions have been updated for production deployment (removed `-test` suffix):
+
+- `create-checkout` (was `create-checkout-test`)
+- `create-billing-portal` (was `create-billing-portal-test`)
+- `stripe-webhook` (was `stripe-webhook-test`)
+
+The Rust backend (`src-tauri/src/main.rs`) calls these production endpoints. Test-mode functions still exist as separate deployments for development.
+
+### Build Configuration
+
+- **`src-tauri/tauri.conf.json`**: `macOS.minimumSystemVersion` set to `"11.0"` (Big Sur, required for ScreenCaptureKit audio recording)
+- **`package.json`**: `author: "Cracking Interview LLC"`, `license: "UNLICENSED"`
+- **`.gitignore`**: Includes `notarize.sh` (contains Apple Developer credentials)
+
+### Code Cleanup (Release Readiness)
+
+All debug logging has been removed for the release build:
+- Removed all `console.log` statements from `App.tsx` and component files
+- Removed all `invoke('frontend_log', ...)` debug calls from frontend
+- Kept only critical error logs (`console.error`) for production debugging
+- Removed commented-out code and unused imports
+- Cleaned unused variables
+
+### macOS Code Signing & Notarization
+
+The app requires Apple Developer Program enrollment for distribution:
+
+1. **Certificate**: Developer ID Application certificate from Apple Developer portal
+2. **Build**: `npm run tauri build` produces a `.dmg` and `.app` bundle
+3. **Notarize**: `notarize.sh` script automates `xcrun notarytool submit` + `xcrun stapler staple`
+4. **Requirements**: Apple Developer Program membership ($99/year), App-Specific Password for notarytool
+
+Detailed instructions in `md/LLC_APPROVAL_GUIDE.md`.
+
+### Website (crackinginterview.org)
+
+The public website is hosted on Cloudflare and managed via a separate GitHub repository at `/Users/nsalehvaziri/Desktop/CrackingInterview-Website/`.
+
+**Pages:**
+- `index.html` — Homepage with dark theme, features, "How It Works" with app screenshots, plans comparison, download buttons (Mac/Windows)
+- `guide.html` — User guide with step-by-step instructions, app screenshots, hotkey table, Free vs Pro comparison, troubleshooting
+- `privacy.html` — Privacy Policy (privacy-first design, no analytics/telemetry, audio/screenshot data not retained)
+- `terms.html` — Terms of Service (user responsibility for compliance, no refunds, 18+ age, indemnification, class action waiver)
+- `style.css` — Shared dark theme stylesheet used by all pages
+
+**Design:**
+- Dark theme (`#0a0a0f` background) matching modern SaaS aesthetics
+- Glassmorphism navbar with app icon logo
+- App screenshots from the actual app in "How It Works" and Guide sections
+- Proper SVG icons: Apple logo (download button), Windows logo (download button), Chrome logo (requirements)
+- Responsive for mobile
+- No company name, state, or third-party service names mentioned in legal docs (redacted for privacy)
+
+**Key legal points:**
+- User is solely responsible for compliance with interview policies and applicable laws
+- All sales final, no refunds
+- Audio/screen recording consent is user's responsibility
+- AI-generated content not guaranteed accurate
+- 18+ age requirement
+- Subscription managed through the app (not website)
+
 ## Build + run
 
 Frontend:
@@ -1015,5 +1110,5 @@ Notes:
   - `useSubscription()` hook
 - **CDP commands use a constant `"id": 1`** for WebSocket requests. If you ever add concurrency, switch to incrementing IDs and matching responses.
 - **Audio sends directly to AI**: Local speech-to-text (Vosk) was removed. Audio is now sent directly to Gemini which handles transcription and understanding natively. This is simpler and more accurate.
-- **Test vs Production Edge Functions**: There are duplicate functions (`-test` suffix) for Stripe integration. Consider using environment variables to switch between test/prod instead of separate functions.
+- **Test vs Production Edge Functions**: Production functions are now active (no `-test` suffix). Test-mode copies still exist as separate deployments. Consider consolidating to a single function with environment variable switching.
 - **Corporate VPN workarounds**: Auth and some API calls go through Rust backend to bypass SSL inspection issues. This adds complexity but is necessary for some enterprise environments.
