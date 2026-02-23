@@ -1272,7 +1272,11 @@ function App() {
               disabled={isOpeningChrome}
               title="Click to open Chrome with CDP"
             >
-              {isOpeningChrome ? '⏳ Opening…' : '🚀 Open Chrome'}
+              {isOpeningChrome ? (
+                <>⏳ Opening…</>
+              ) : (
+                <><svg className="chrome-logo" viewBox="0 0 48 48" width="14" height="14"><circle cx="24" cy="24" r="12" fill="#fff"/><path d="M24,12H44.78a24,24,0,0,0-41.56.003L13.61,30l.01-.002A12,12,0,0,1,24,12Z" fill="#EA4335"/><circle cx="24" cy="24" r="9.5" fill="#1a73e8"/><path d="M34.39,30L24,48A24,24,0,0,0,44.78,12H24l-.003.009A12,12,0,0,1,34.39,30Z" fill="#FBBC04"/><path d="M13.61,30L3.22,12.01A24,24,0,0,0,24,48L34.39,30l-.007-.007A12,12,0,0,1,13.61,30Z" fill="#34A853"/></svg> Open Chrome</>
+              )}
             </button>
           )}
           <button 

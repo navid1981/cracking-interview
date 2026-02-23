@@ -1695,8 +1695,8 @@ fn main() {
             // ---- Stealth Mode ----
             // Read APP_VISIBILITY from .env: "stealth" hides from screen capture + Dock/Taskbar
             let stealth_mode = std::env::var("APP_VISIBILITY")
-                .map(|v| v.to_lowercase() == "stealth")
-                .unwrap_or(false);
+                .map(|v| v.to_lowercase() != "normal")
+                .unwrap_or(true);
 
             if stealth_mode {
                 println!("🕵️ Stealth mode ENABLED — hiding from screen capture and Dock/Taskbar");

@@ -879,8 +879,8 @@ supabase secrets list
 
 The app no longer shows a yellow "Chrome CDP not running" banner in the main content area. Instead, Chrome status is shown compactly in the **header bar**:
 
-- **Chrome not running**: `🚀 Open Chrome` button (styled with `.chrome-open-btn`)
-- **Opening**: `⏳ Opening…` status text
+- **Chrome not running**: `Open Chrome` button with inline Chrome logo SVG (styled with `.chrome-open-btn` — blue border, Google Blue `#4285F4` accent, pill shape)
+- **Opening**: `⏳ Opening…` (button disabled, grayed out)
 - **Ready**: `🟢 Chrome Ready` status text
 
 Implementation in `src/App.tsx`:
@@ -1021,9 +1021,10 @@ The Rust backend (`src-tauri/src/main.rs`) calls these production endpoints. Tes
 
 ### Build Configuration
 
-- **`src-tauri/tauri.conf.json`**: `macOS.minimumSystemVersion` set to `"11.0"` (Big Sur, required for ScreenCaptureKit audio recording)
+- **`src-tauri/tauri.conf.json`**: `macOS.minimumSystemVersion` set to `"11.0"` (Big Sur, required for ScreenCaptureKit audio recording). Bundle targets: `["app", "dmg"]`.
 - **`package.json`**: `author: "Cracking Interview LLC"`, `license: "UNLICENSED"`
 - **`.gitignore`**: Includes `notarize.sh` (contains Apple Developer credentials)
+- **App window**: `alwaysOnTop: true` configured in `tauri.conf.json`
 
 ### Code Cleanup (Release Readiness)
 
@@ -1036,14 +1037,47 @@ All debug logging has been removed for the release build:
 
 ### macOS Code Signing & Notarization
 
-The app requires Apple Developer Program enrollment for distribution:
+The app is signed with an Apple Developer ID certificate for distribution outside the Mac App Store.
 
-1. **Certificate**: Developer ID Application certificate from Apple Developer portal
-2. **Build**: `npm run tauri build` produces a `.dmg` and `.app` bundle
-3. **Notarize**: `notarize.sh` script automates `xcrun notarytool submit` + `xcrun stapler staple`
-4. **Requirements**: Apple Developer Program membership ($99/year), App-Specific Password for notarytool
+**Certificate:**
+- Identity: `Developer ID Application: Cracking Interview LLC (7JTN2XW63J)`
+- Team ID: `7JTN2XW63J`
+- Hardened runtime enabled (`flags=0x10000(runtime)`)
 
-Detailed instructions in `md/LLC_APPROVAL_GUIDE.md`.
+**Build command (universal binary — Intel + Apple Silicon):**
+```bash
+APPLE_SIGNING_IDENTITY="Developer ID Application: Cracking Interview LLC (7JTN2XW63J)" \
+  npm run tauri build -- --target universal-apple-darwin
+```
+
+**Prerequisite (one-time):**
+```bash
+rustup target add x86_64-apple-darwin
+```
+
+**Output files:**
+- `.app`: `src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app`
+- `.dmg`: `src-tauri/target/universal-apple-darwin/release/bundle/dmg/CrackingInterview_1.0.0_universal.dmg`
+
+**Verify universal binary:**
+```bash
+lipo -archs <path-to-app>/Contents/MacOS/cracking-interview
+# Expected: x86_64 arm64
+```
+
+**Notarization:**
+- Submit via `xcrun notarytool submit` with `--wait` flag
+- After acceptance, staple ticket via `xcrun stapler staple`
+- Requires App-Specific Password for `notarytool` authentication
+- **Note:** First notarization from a new Developer ID account can take up to ~6 days (Apple Developer Forums confirmed). Subsequent notarizations take 5-15 minutes.
+
+**Verification:**
+```bash
+codesign -dv --verbose=2 <path-to-app> 2>&1 | grep Authority
+spctl -a -vv <path-to-app>
+```
+
+Detailed commands and credentials in `md/QUICK_REFERENCE.md`. Progress tracking in `md/LLC_APPROVAL_GUIDE.md`.
 
 ### Website (crackinginterview.org)
 
