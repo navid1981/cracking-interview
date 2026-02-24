@@ -1031,7 +1031,7 @@ async fn query_ai_via_proxy(
         "model": model,
         "messages": messages,
         "stream": false,
-        "max_tokens": 4096,
+        "max_tokens": 16384,
         "source_url": source_url
     });
 
@@ -1159,7 +1159,7 @@ async fn query_ai_via_proxy_with_image(
         "model": model,
         "messages": messages,
         "stream": false,
-        "max_tokens": 4096,
+        "max_tokens": 16384,
         "source_url": source_url
     });
 
@@ -1306,7 +1306,7 @@ async fn query_ai_via_proxy_with_audio(
         "model": model,
         "messages": messages,
         "stream": false,
-        "max_tokens": 4096
+        "max_tokens": 16384
     });
 
     println!("[Rust AI Proxy Audio] Sending POST to {}/functions/v1/ai-proxy", SUPABASE_URL);

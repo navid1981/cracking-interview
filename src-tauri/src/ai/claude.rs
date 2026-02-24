@@ -18,7 +18,7 @@ pub async fn query_with_text(
     
     let payload = json!({
         "model": model,
-        "max_tokens": 4096,
+        "max_tokens": 16384,
         "messages": [{
             "role": "user",
             "content": prompt
@@ -79,7 +79,7 @@ pub async fn query_with_image(
     
     let payload = json!({
         "model": model,
-        "max_tokens": 4096,
+        "max_tokens": 16384,
         "messages": [{
             "role": "user",
             "content": [

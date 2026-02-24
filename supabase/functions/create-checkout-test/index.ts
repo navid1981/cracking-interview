@@ -120,7 +120,9 @@ Deno.serve(async (req) => {
           cancel_url: "https://crackinginterview.org/subscription/cancelled",
           client_reference_id: userId,
           "metadata[supabase_user_id]": userId,
-          allow_promotion_codes: "true", // Enable promo/coupon codes at checkout
+          allow_promotion_codes: "true",
+          "automatic_tax[enabled]": "true",
+          "customer_update[address]": "auto",
         }).toString(),
       }
     );

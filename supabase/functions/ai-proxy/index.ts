@@ -186,7 +186,7 @@ async function processRequest(
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
-  let { model, messages, stream = false, max_tokens = 4096, source_url } = body;
+  let { model, messages, stream = false, max_tokens = 16384, source_url } = body;
   
   console.log('[ai-proxy] Requested model:', model);
   console.log('[ai-proxy] Messages count:', messages?.length);

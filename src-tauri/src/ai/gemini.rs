@@ -134,7 +134,10 @@ pub async fn query_with_text(
     let payload = json!({
         "contents": [{
             "parts": [{"text": prompt}]
-        }]
+        }],
+        "generationConfig": {
+            "maxOutputTokens": 16384
+        }
     });
     
     let request = if is_oauth {
@@ -210,7 +213,10 @@ pub async fn query_with_image(
                     }
                 }
             ]
-        }]
+        }],
+        "generationConfig": {
+            "maxOutputTokens": 16384
+        }
     });
     
     let request = if is_oauth {
@@ -283,7 +289,10 @@ pub async fn query_with_audio(
                     }
                 }
             ]
-        }]
+        }],
+        "generationConfig": {
+            "maxOutputTokens": 16384
+        }
     });
 
     let request = if is_oauth {

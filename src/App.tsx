@@ -96,6 +96,7 @@ function App() {
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
   const [showAnnouncement, setShowAnnouncement] = useState(true);
+  const announcementDismissedRef = useRef(false);
   const [showAudioPromptWarning, setShowAudioPromptWarning] = useState(false);
 
   // ========== APP STATE ==========
@@ -467,6 +468,8 @@ function App() {
         unsubs.push(uShot);
 
         const uAudio = await listen('hotkey-audio-toggle', async () => {
+          announcementDismissedRef.current = true;
+          setShowAnnouncement(false);
           const audio = (allSourcesRef.current || []).find((s) => isAudio(s) && s.id === 'audio') as any;
           setSelectedTab(audio || ({ id: 'audio', name: 'Audio (System)', source_type: 'audio' } as any));
           // Auto-select Audio prompt when triggered via hotkey
@@ -685,7 +688,9 @@ function App() {
       
       if (data.announcement) {
         setAnnouncement(data.announcement);
-        setShowAnnouncement(true);
+        if (!announcementDismissedRef.current) {
+          setShowAnnouncement(true);
+        }
       } else {
         setAnnouncement(null);
         setShowAnnouncement(false);
@@ -745,6 +750,7 @@ function App() {
       setUsageStats(null);
       setAnnouncement(null);
       setShowAnnouncement(false);
+      announcementDismissedRef.current = false;
       setMessage('✅ Signed out successfully');
     } catch (error) {
       setMessage(`❌ Sign out failed: ${error}`);
@@ -945,10 +951,9 @@ function App() {
   };
 
   const solveWithAI = async (mode: 'auto' | 'text' | 'screenshot' = 'auto') => {
-    // Hide announcement on first AI query
-    if (showAnnouncement) {
-      setShowAnnouncement(false);
-    }
+    // Hide announcement on any AI query (unconditional to avoid stale closure issues with hotkeys)
+    announcementDismissedRef.current = true;
+    setShowAnnouncement(false);
     
     const sourceToUse = selectedTab ?? (allSources.length > 0 ? allSources[0] : null);
     if (!selectedTab && sourceToUse) {
@@ -1392,7 +1397,7 @@ function App() {
                   />
                 </div>
                 <button 
-                  onClick={() => setShowAnnouncement(false)}
+                  onClick={() => { announcementDismissedRef.current = true; setShowAnnouncement(false); }}
                   style={{
                     background: 'transparent',
                     border: 'none',
@@ -1590,7 +1595,7 @@ function App() {
                         onClick={handleSubscribe}
                         disabled={isSubscribing}
                       >
-                        {isSubscribing ? '⏳ Loading...' : '💳 Subscribe $10/month'}
+                        {isSubscribing ? '⏳ Loading...' : '💳 Subscribe to Pro'}
                       </button>
                     </div>
                   )}
@@ -1715,7 +1720,7 @@ function App() {
                         onClick={handleSubscribe}
                         disabled={isSubscribing}
                       >
-                        {isSubscribing ? '⏳ Loading...' : '🚀 Upgrade to Pro - $10/month'}
+                        {isSubscribing ? '⏳ Loading...' : '🚀 Upgrade to Pro'}
                       </button>
                     </div>
                   )}

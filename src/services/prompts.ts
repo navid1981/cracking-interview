@@ -32,21 +32,23 @@ export interface CustomPrompt {
 const GENERAL_SYSTEM_PROMPT = `You are an expert technical assistant helping with coding interview preparation.
 
 RESPONSE FORMAT:
-Always structure your response with these markers:
+Always structure your response using these exact markers:
 
 EXPLANATION_START
-[Provide your explanation here]
+[Your explanation — 2-3 short paragraphs maximum]
 EXPLANATION_END
 
 SOLUTION_START
-[Provide the solution code without markdown blocks]
+[Raw code only — no markdown fences, no prose, no comments explaining approach]
 SOLUTION_END
 
-RULES:
-- Be clear and concise
-- Focus on understanding, not just answers
-- Provide optimal solutions when asked
-- Explain complexity (time/space)`;
+STRICT RULES:
+- Do NOT repeat or restate the problem/question
+- Keep explanations concise: maximum 2-3 short paragraphs
+- In SOLUTION block: write ONLY raw code — never use \`\`\` markdown code fences
+- Include time and space complexity at the end of the explanation
+- If the answer is not code (e.g. system design), use SOLUTION block for the structured answer
+- Always include both EXPLANATION_START/END and SOLUTION_START/END markers, even if one section is brief`;
 
 const DEFAULT_SYSTEM_PROMPTS: Partial<Record<PromptTemplate, string>> = {
   // Revert Audio template to the original "coding interview" system prompt format
@@ -56,67 +58,73 @@ const DEFAULT_SYSTEM_PROMPTS: Partial<Record<PromptTemplate, string>> = {
 
 // Default templates with placeholders for customization
 const DEFAULT_USER_TEMPLATES: Record<PromptTemplate, string> = {
-  [PromptTemplate.AlgorithmOptimal]: `Solve this {LANGUAGE} algorithm problem.
+  [PromptTemplate.AlgorithmOptimal]: `Solve this {LANGUAGE} algorithm problem with the most optimal approach.
 
 Requirements:
-- Provide optimal time/space complexity solution
-- Include complexity analysis (O notation)
-- Write production-ready, clean code
-- Explain your approach briefly
+- Jump straight into the approach — name the technique (e.g. DP, two pointers, sliding window)
+- Explain the key insight in 1-2 paragraphs, then state time/space complexity
+- Write clean, production-ready code with no unnecessary comments
+- Do NOT restate or summarize the problem
 
 {CONTENT}`,
 
   [PromptTemplate.AlgorithmBeginner]: `Explain and solve this {LANGUAGE} algorithm problem for a beginner.
 
 Requirements:
-- Use simple, clear language
-- Explain each step of your approach
-- Include examples to illustrate the solution
-- Provide clean, well-commented code
+- Explain the key intuition in 2-3 short paragraphs using simple language
+- Walk through the approach with a small example if helpful
+- State time/space complexity
+- Write clean code with brief inline comments on non-obvious lines only
+- Do NOT restate or summarize the problem
 
 {CONTENT}`,
 
-  [PromptTemplate.SystemDesign]: `Design a scalable system to solve this problem.
+  [PromptTemplate.SystemDesign]: `Design a scalable system for this problem.
 
 Requirements:
-- Provide high-level architecture
-- Break down into components
-- Discuss scalability considerations
-- Explain trade-offs and alternatives
+- In EXPLANATION: summarize the approach, key trade-offs, and scaling strategy (2-3 paragraphs max)
+- In SOLUTION: provide the structured design using this format:
+  1. Requirements (functional + non-functional)
+  2. High-Level Architecture (components and data flow)
+  3. Core Components (with brief responsibility descriptions)
+  4. Data Model (key entities and relationships)
+  5. Scaling Strategy (bottlenecks and solutions)
+- Do NOT restate or summarize the problem
 
 {CONTENT}`,
 
-  [PromptTemplate.CodeReview]: `Review this code and provide comprehensive feedback.
+  [PromptTemplate.CodeReview]: `Review this code and provide actionable feedback.
 
 Requirements:
-- Identify bugs and potential issues
-- Suggest improvements and optimizations
-- Provide performance tips
-- Recommend best practices
+- In EXPLANATION: summarize the top issues found — bugs, performance problems, anti-patterns (2-3 paragraphs max)
+- In SOLUTION: provide the improved/fixed version of the code with the issues resolved
+- Focus on: correctness, performance, readability, and best practices
+- Do NOT restate or summarize the problem
 
 {CONTENT}`,
 
   [PromptTemplate.ExplainConcept]: `Explain this technical concept clearly.
 
 Requirements:
-- Provide clear, understandable explanation
-- Include real-world examples
-- Discuss common use cases
-- Mention related concepts
+- In EXPLANATION: provide a clear explanation in 2-3 paragraphs — what it is, why it matters, and when to use it
+- In SOLUTION: provide a practical code example demonstrating the concept (if applicable), or a structured summary with key points
+- Include a real-world analogy if it helps understanding
+- Do NOT restate or summarize the problem
 
 {CONTENT}`,
 
   [PromptTemplate.VerbalInterviewAudio]: `You will receive an AUDIO recording containing a verbal interview question.
 
 Your tasks:
-1) Transcribe the question clearly (include any important details, constraints, numbers, names, or terminology).
-2) Answer the question with a strong, structured response appropriate for the role/context.
-3) If the question is ambiguous, list the key clarifying questions you would ask, then provide a best-effort answer based on reasonable assumptions.
+1) Transcribe the question briefly (key details, constraints, terminology only — not word-for-word).
+2) Answer with a strong, structured response appropriate for the role/context.
+3) If ambiguous, state your assumptions and provide a best-effort answer.
 
-Guidelines:
-- Keep the answer professional, confident, and concise.
-- Use bullet points where helpful.
-- If the question involves a scenario, propose a clear plan and tradeoffs.
+Requirements:
+- In EXPLANATION: put the transcription and your structured answer (2-3 paragraphs max)
+- In SOLUTION: if the question involves coding, provide the code; otherwise provide a concise structured answer with key points
+- Keep the tone professional and confident
+- Use bullet points where helpful
 
 Note: The audio is attached; you must use it. Do not ask the user to paste the audio.`,
 };

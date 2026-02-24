@@ -13,7 +13,6 @@ function parseResponse(response: string): ParsedResponse {
   let explanation = '';
   let solution = '';
 
-
   const explanationMatch = response.match(/EXPLANATION_START\s*([\s\S]*?)\s*EXPLANATION_END/);
   const solutionMatch = response.match(/SOLUTION_START\s*([\s\S]*?)\s*SOLUTION_END/);
 
@@ -25,25 +24,60 @@ function parseResponse(response: string): ParsedResponse {
     solution = solutionMatch[1].trim();
   }
 
+  // Handle truncated responses: EXPLANATION_START present but no EXPLANATION_END
+  if (!explanation && !solutionMatch) {
+    const partialExplMatch = response.match(/EXPLANATION_START\s*([\s\S]*)/);
+    if (partialExplMatch) {
+      const afterMarker = partialExplMatch[1].trim();
+      // Check for a code block inside the partial explanation
+      const codeInPartial = afterMarker.match(/```(?:\w+)?\s*([\s\S]*?)```/);
+      if (codeInPartial) {
+        const codeIdx = afterMarker.indexOf('```');
+        explanation = afterMarker.substring(0, codeIdx).trim();
+        solution = codeInPartial[1].trim();
+      } else {
+        explanation = afterMarker;
+      }
+    }
+  }
+
+  // Handle truncated SOLUTION_START without SOLUTION_END
   if (!solution) {
-    const codeBlockMatch = response.match(/```(?:\w+)?\s*([\s\S]*?)```/);
+    const partialSolMatch = response.match(/SOLUTION_START\s*([\s\S]*)/);
+    if (partialSolMatch) {
+      solution = partialSolMatch[1].trim();
+      // Also extract explanation if not already found
+      if (!explanation) {
+        const beforeSol = response.substring(0, response.indexOf('SOLUTION_START'));
+        explanation = beforeSol.replace(/EXPLANATION_START|EXPLANATION_END/g, '').trim();
+      }
+    }
+  }
+
+  // Fallback: strip any remaining markers before generic parsing
+  if (!explanation && !solution) {
+    const cleaned = response
+      .replace(/EXPLANATION_START|EXPLANATION_END|SOLUTION_START|SOLUTION_END/g, '')
+      .trim();
+
+    const codeBlockMatch = cleaned.match(/```(?:\w+)?\s*([\s\S]*?)```/);
     if (codeBlockMatch) {
       solution = codeBlockMatch[1].trim();
-      const codeBlockIndex = response.indexOf('```');
-      explanation = response.substring(0, codeBlockIndex).trim();
+      const codeBlockIndex = cleaned.indexOf('```');
+      explanation = cleaned.substring(0, codeBlockIndex).trim();
     }
-  }
 
-  if (!solution && response.includes('class Solution')) {
-    const parts = response.split('class Solution');
-    if (parts.length > 1) {
-      explanation = parts[0].trim();
-      solution = 'class Solution' + parts[1].trim();
+    if (!solution && cleaned.includes('class Solution')) {
+      const parts = cleaned.split('class Solution');
+      if (parts.length > 1) {
+        explanation = parts[0].trim();
+        solution = 'class Solution' + parts[1].trim();
+      }
     }
-  }
 
-  if (!explanation && !solution) {
-    explanation = response;
+    if (!explanation && !solution) {
+      explanation = cleaned;
+    }
   }
 
   return { explanation, solution };
