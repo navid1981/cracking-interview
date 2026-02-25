@@ -355,49 +355,35 @@ fn reapply_stealth_after_show(win: &tauri::WebviewWindow) {
     }
 }
 
-/// Windows-only: toggle visibility via window opacity instead of hide/show.
+/// Windows-only: toggle visibility by moving window off-screen instead of hide/show.
 /// This avoids the ShowWindow(SW_HIDE/SW_SHOW) cycle which corrupts
 /// WDA_EXCLUDEFROMCAPTURE and causes a black rectangle in screen capture.
 /// The window stays "visible" to Windows at all times so the display affinity is preserved.
 #[cfg(target_os = "windows")]
-fn toggle_window_opacity_win32(win: &tauri::WebviewWindow) {
+fn toggle_window_offscreen_win32(win: &tauri::WebviewWindow) {
     use std::sync::atomic::AtomicBool;
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::*;
-    use windows::Win32::Graphics::Gdi::COLORREF;
 
     static WINDOW_HIDDEN: AtomicBool = AtomicBool::new(false);
+    static SAVED_X: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+    static SAVED_Y: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
-    let hwnd_raw = match win.hwnd() {
-        Ok(h) => h,
-        Err(e) => {
-            println!("⚠️ [toggle-win32] Could not get HWND: {}", e);
-            return;
+    if WINDOW_HIDDEN.load(Ordering::Relaxed) {
+        // Restore: move window back to saved position
+        let x = SAVED_X.load(Ordering::Relaxed);
+        let y = SAVED_Y.load(Ordering::Relaxed);
+        let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+        let _ = win.set_focus();
+        WINDOW_HIDDEN.store(false, Ordering::Relaxed);
+        println!("🕵️ [toggle-win32] Window restored to ({}, {})", x, y);
+    } else {
+        // Hide: save current position, move far off-screen
+        if let Ok(pos) = win.outer_position() {
+            SAVED_X.store(pos.x, Ordering::Relaxed);
+            SAVED_Y.store(pos.y, Ordering::Relaxed);
         }
-    };
-
-    unsafe {
-        let hwnd = HWND(hwnd_raw.0 as *mut _);
-
-        if WINDOW_HIDDEN.load(Ordering::Relaxed) {
-            // Restore: set opacity back to 255 (fully opaque)
-            let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            // Remove WS_EX_TRANSPARENT (click-through) if set
-            let new_style = ex_style & !(WS_EX_TRANSPARENT.0 as isize);
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
-            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
-            let _ = win.set_focus();
-            WINDOW_HIDDEN.store(false, Ordering::Relaxed);
-            println!("🕵️ [toggle-win32] Window restored (opacity=255)");
-        } else {
-            // Hide: make WS_EX_LAYERED if not already, set opacity to 0, add click-through
-            let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            let new_style = ex_style | WS_EX_LAYERED.0 as isize | WS_EX_TRANSPARENT.0 as isize;
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
-            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 0, LWA_ALPHA);
-            WINDOW_HIDDEN.store(true, Ordering::Relaxed);
-            println!("🕵️ [toggle-win32] Window hidden (opacity=0, click-through)");
-        }
+        let _ = win.set_position(tauri::PhysicalPosition::new(-30000, -30000));
+        WINDOW_HIDDEN.store(true, Ordering::Relaxed);
+        println!("🕵️ [toggle-win32] Window moved off-screen (hidden)");
     }
 }
 
@@ -455,7 +441,7 @@ fn register_toggle_visibility_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Re
                     // causing a black rectangle in screen capture.
                     #[cfg(target_os = "windows")]
                     if STEALTH_ENABLED.load(Ordering::Relaxed) {
-                        toggle_window_opacity_win32(&win);
+                        toggle_window_offscreen_win32(&win);
                         return;
                     }
 
@@ -1682,10 +1668,7 @@ fn restore_macos_screen_capture_visibility(win: &tauri::WebviewWindow) {
 fn apply_windows_stealth(win: &tauri::WebviewWindow) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::*;
-    use windows::Win32::Graphics::Gdi::COLORREF;
 
-    // Tauri 2 exposes the HWND through the raw-window-handle.
-    // We use the `hwnd()` helper which returns an isize.
     let hwnd_raw = match win.hwnd() {
         Ok(h) => h,
         Err(e) => {
@@ -1706,20 +1689,11 @@ fn apply_windows_stealth(win: &tauri::WebviewWindow) {
             println!("🕵️ [stealth-windows] Window excluded from screen capture");
         }
 
-        // ---- Hide from taskbar + Alt+Tab, prepare for opacity toggle ----
-        // WS_EX_LAYERED is required for SetLayeredWindowAttributes (opacity toggle).
-        // WS_EX_TOOLWINDOW hides from taskbar and Alt+Tab.
+        // ---- Hide from taskbar + Alt+Tab ----
         let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        let new_style = (ex_style
-            | WS_EX_TOOLWINDOW.0 as isize
-            | WS_EX_LAYERED.0 as isize)
-            & !(WS_EX_APPWINDOW.0 as isize);
+        let new_style = (ex_style | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
-
-        // Set initial opacity to fully opaque
-        let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
-
-        println!("🕵️ [stealth-windows] Window hidden from taskbar & Alt+Tab (layered+toolwindow)");
+        println!("🕵️ [stealth-windows] Window hidden from taskbar & Alt+Tab");
     }
 }
 
