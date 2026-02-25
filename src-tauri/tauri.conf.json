@@ -28,16 +28,11 @@
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": ""
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowElevation": true,
-      "perMachine": false,
-      "installerIcon": "icons/icon.ico",
-      "headerImage": null,
-      "sidebarImage": null,
-      "installMode": "currentUser"
+      "timestampUrl": "",
+      "nsis": {
+        "installMode": "both",
+        "installerIcon": "icons/icon.ico"
+      }
     }
   },
   "app": {

@@ -10,7 +10,10 @@ mod google_oauth;
 
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::path::PathBuf;
+
+static STEALTH_ENABLED: AtomicBool = AtomicBool::new(false);
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -327,6 +330,31 @@ fn unregister_hotkey_best_effort(app: &tauri::AppHandle, hotkey: &str) {
     let _ = app.global_shortcut().unregister(hotkey);
 }
 
+/// Reapply screen-capture exclusion after win.show() on Windows.
+/// On Windows, hiding then showing a window can reset the WDA_EXCLUDEFROMCAPTURE flag,
+/// causing a black rectangle in screen sharing instead of full invisibility.
+fn reapply_stealth_after_show(win: &tauri::WebviewWindow) {
+    if !STEALTH_ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        if let Ok(h) = win.hwnd() {
+            unsafe {
+                let hwnd = HWND(h.0 as *mut _);
+                let _ = SetWindowDisplayAffinity(hwnd, WINDOW_DISPLAY_AFFINITY(0x11));
+            }
+            println!("🕵️ [stealth-windows] Reapplied WDA_EXCLUDEFROMCAPTURE after show");
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = win;
+    }
+}
+
 fn register_hotkey(
     app: &tauri::AppHandle,
     hotkey: &str,
@@ -344,6 +372,7 @@ fn register_hotkey(
                     let _ = win.show();
                     let _ = win.unminimize();
                     let _ = win.set_focus();
+                    reapply_stealth_after_show(&win);
                 }
                 handle.emit(event_name, ()).ok();
             }
@@ -382,12 +411,14 @@ fn register_toggle_visibility_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Re
                             let _ = win.show();
                             let _ = win.unminimize();
                             let _ = win.set_focus();
+                            reapply_stealth_after_show(&win);
                         }
                         Err(_) => {
                             // Best-effort fallback
                             let _ = win.show();
                             let _ = win.unminimize();
                             let _ = win.set_focus();
+                            reapply_stealth_after_show(&win);
                         }
                     }
                 } else {
@@ -1697,6 +1728,8 @@ fn main() {
             let stealth_mode = std::env::var("APP_VISIBILITY")
                 .map(|v| v.to_lowercase() != "normal")
                 .unwrap_or(true);
+
+            STEALTH_ENABLED.store(stealth_mode, Ordering::Relaxed);
 
             if stealth_mode {
                 println!("🕵️ Stealth mode ENABLED — hiding from screen capture and Dock/Taskbar");
