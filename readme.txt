@@ -62,7 +62,7 @@ xcrun notarytool log <SUBMISSION-ID> \
   --team-id 7JTN2XW63J \
   --password yvdy-dbhj-dpmh-ajcp
 
-xcrun notarytool log 7928a4a6-f45d-4a48-8c43-0a8cbf926157 \
+xcrun notarytool log 5072adc2-464e-4766-818d-a787cf034640 \
   --apple-id navid.vaziri@outlook.com \
   --team-id 7JTN2XW63J \
   --password yvdy-dbhj-dpmh-ajcp

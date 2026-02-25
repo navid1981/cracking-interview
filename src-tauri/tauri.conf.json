@@ -11,7 +11,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": "all",
     "icon": [
       "icons/icon.ico",
       "icons/32x32.png",
@@ -29,6 +29,15 @@
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
       "timestampUrl": ""
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowElevation": true,
+      "perMachine": false,
+      "installerIcon": "icons/icon.ico",
+      "headerImage": null,
+      "sidebarImage": null,
+      "installMode": "currentUser"
     }
   },
   "app": {
