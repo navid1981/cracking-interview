@@ -312,6 +312,35 @@ button.chrome-open-btn:disabled {
   color: #4caf50;
 }
 
+.stepper-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: #64748b;
+  animation: fadeIn 0.3s ease;
+}
+
+.stepper-info-model {
+  font-weight: 600;
+  color: #475569;
+}
+
+.stepper-info-divider {
+  color: #cbd5e1;
+}
+
+.stepper-info-prompt {
+  color: #64748b;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @keyframes stepper-pulse {
   0%, 100% { box-shadow: 0 2px 8px rgba(51, 128, 230, 0.2); }
   50% { box-shadow: 0 2px 16px rgba(51, 128, 230, 0.4); }
@@ -521,6 +550,60 @@ button.chrome-open-btn:disabled {
 
 .solution-content code {
   font-size: 13px !important;
+}
+
+/* Mixed content solution (System Design with diagrams + text) */
+.solution-content-mixed {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mermaid-diagram {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  overflow-x: auto;
+}
+
+.mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-error {
+  background: #2d2d2d;
+  border-radius: 8px;
+  padding: 12px;
+  border-left: 3px solid #ff6b6b;
+}
+
+.solution-text-block {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #333;
+  padding: 0 4px;
+}
+
+.solution-text-block h2,
+.solution-text-block h3,
+.solution-text-block h4 {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.solution-text-block .inline-code {
+  background: #f0f0f0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.solution-code-block {
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .modal-overlay {

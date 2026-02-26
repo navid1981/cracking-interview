@@ -29,7 +29,7 @@ lazy_static::lazy_static! {
     static ref AI_PROXY_CLIENT: reqwest::Client = {
         reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(50))
             .pool_max_idle_per_host(5)
             .build()
             .expect("Failed to create AI proxy HTTP client")
@@ -1121,7 +1121,7 @@ async fn query_ai_via_proxy(
             println!("[Rust AI Proxy] Request FAILED after {:?}", elapsed);
             if e.is_timeout() {
                 println!("[Rust AI Proxy] Error type: TIMEOUT");
-                "❌ AI request timed out after 30 seconds. Please try again.".to_string()
+                "❌ AI request timed out after 50 seconds. Please try again.".to_string()
             } else {
                 println!("[Rust AI Proxy] Error type: {}", e);
                 format!("❌ AI Proxy request failed: {}", e)
@@ -1249,7 +1249,7 @@ async fn query_ai_via_proxy_with_image(
             println!("[Rust AI Proxy Image] Request FAILED after {:?}", elapsed);
             if e.is_timeout() {
                 println!("[Rust AI Proxy Image] Error type: TIMEOUT");
-                "❌ AI request timed out after 30 seconds. Please try again.".to_string()
+                "❌ AI request timed out after 50 seconds. Please try again.".to_string()
             } else {
                 println!("[Rust AI Proxy Image] Error type: {}", e);
                 format!("❌ AI Proxy request failed: {}", e)
@@ -1395,7 +1395,7 @@ async fn query_ai_via_proxy_with_audio(
             println!("[Rust AI Proxy Audio] Request FAILED after {:?}", elapsed);
             if e.is_timeout() {
                 println!("[Rust AI Proxy Audio] Error type: TIMEOUT");
-                "❌ AI request timed out after 30 seconds. Please try again.".to_string()
+                "❌ AI request timed out after 50 seconds. Please try again.".to_string()
             } else {
                 println!("[Rust AI Proxy Audio] Error type: {}", e);
                 format!("❌ AI Proxy request failed: {}", e)

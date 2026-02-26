@@ -13,8 +13,8 @@ dist
 
 # Credentials file
 CrackingInterview-CREDENTIALS.txt
-./src-tauri/Cargo.lock
-./package-lock.json
+**/src-tauri/Cargo.lock
+**/package-lock.json
 
 # Notarization script (contains app-specific password)
 notarize.sh

@@ -6,7 +6,7 @@ import TabDropdown from './components/TabDropdown';
 import PromptEditor from './components/PromptEditor';
 import PromptListView from './components/PromptListView';
 import AuthScreen from './components/AuthScreen';
-import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates } from './services/prompts';
+import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel } from './services/prompts';
 import { 
   onAuthStateChange, 
   getUserSubscription, 
@@ -1441,26 +1441,42 @@ function App() {
                 const phaseOrder = ['extract', 'screenshot', 'capture', 'audio', 'asking'];
                 const currentIdx = phaseOrder.indexOf(solvePhase);
 
+                const modelName = (() => {
+                  const allModels = [...PRO_MODELS, FREE_MODEL];
+                  const found = allModels.find(m => m.id === aiConfig.selected_model);
+                  return found ? found.name : aiConfig.selected_model;
+                })();
+                const promptLabel = getTemplateLabel(selectedTemplate);
+
                 return (
-                  <div className="stepper-track">
-                    {steps.map((step, i) => {
-                      const stepIdx = phaseOrder.indexOf(step.key);
-                      const isActive = step.key === solvePhase || 
-                        (step.key === 'screenshot' && (solvePhase === 'capture' || solvePhase === 'screenshot'));
-                      const isCompleted = stepIdx < currentIdx && stepIdx >= 0;
-                      return (
-                        <div key={step.key} className="stepper-item-wrapper">
-                          {i > 0 && (
-                            <div className={`stepper-connector ${isCompleted || isActive ? 'active' : ''}`} />
-                          )}
-                          <div className={`stepper-step ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''}`}>
-                            <span className="stepper-icon">{step.icon}</span>
-                            <span className="stepper-label">{step.label}</span>
+                  <>
+                    <div className="stepper-track">
+                      {steps.map((step, i) => {
+                        const stepIdx = phaseOrder.indexOf(step.key);
+                        const isActive = step.key === solvePhase || 
+                          (step.key === 'screenshot' && (solvePhase === 'capture' || solvePhase === 'screenshot'));
+                        const isCompleted = stepIdx < currentIdx && stepIdx >= 0;
+                        return (
+                          <div key={step.key} className="stepper-item-wrapper">
+                            {i > 0 && (
+                              <div className={`stepper-connector ${isCompleted || isActive ? 'active' : ''}`} />
+                            )}
+                            <div className={`stepper-step ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''}`}>
+                              <span className="stepper-icon">{step.icon}</span>
+                              <span className="stepper-label">{step.label}</span>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                    {solvePhase === 'asking' && (
+                      <div className="stepper-info">
+                        <span className="stepper-info-model">🧠 {modelName}</span>
+                        <span className="stepper-info-divider">·</span>
+                        <span className="stepper-info-prompt">📋 {promptLabel}</span>
+                      </div>
+                    )}
+                  </>
                 );
               })()}
             </div>

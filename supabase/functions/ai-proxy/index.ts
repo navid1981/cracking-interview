@@ -33,8 +33,8 @@ const FREE_MODEL_OPENROUTER = 'google/gemini-2.5-flash';
 // Pro models available for paid subscribers
 const PRO_MODELS = ['gpt-5.2-codex', 'claude-sonnet-4.5', 'gemini-3-flash', 'grok-4.1-fast'];
 
-// Timeout for OpenRouter API calls (30 seconds)
-const API_TIMEOUT_MS = 30000;
+// Timeout for OpenRouter API calls (50 seconds)
+const API_TIMEOUT_MS = 50000;
 
 // Allowed domains for free tier users
 const FREE_TIER_ALLOWED_DOMAINS = ['leetcode.com', 'codewars.com', 'codeforces.com', 'neetcode.io'];
