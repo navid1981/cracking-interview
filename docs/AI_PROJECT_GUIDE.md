@@ -30,7 +30,7 @@ The primary source code is:
   - `src/main.tsx`: React entry point (mounts `App`)
   - `src/App.tsx`: main UI + orchestration (CDP status, source list, solve flow, settings modal, hotkey listener, auth state)
   - `src/App.css`: global app styles
-  - `src/services/prompts.ts`: prompt templates + `buildPrompt(...)`
+  - `src/services/prompts.ts`: prompt templates, per-template system prompts, `buildPrompt(...)`, `getTemplateLabel(templateId)`
   - `src/services/supabase.ts`: Supabase client, auth helpers, usage stats
   - `src/components/TabDropdown.tsx`: custom dropdown for **InputSource** with thumbnails
   - `src/components/TabDropdown.css`: styles for `TabDropdown.tsx`
@@ -95,12 +95,15 @@ Component responsibilities:
   - imports its own styles from `src/components/TabDropdown.css`
 - `src/components/AIResponseDisplay.tsx`
   - Parses response using markers (EXPLANATION_START/END, SOLUTION_START/END), falls back to markdown code fences or heuristics (`class Solution`)
+  - **Handles truncated AI responses**: If EXPLANATION_START present but no EXPLANATION_END (or same for SOLUTION), gracefully extracts partial content instead of showing raw markers
   - Uses `react-syntax-highlighter` for code formatting
-  - **Markdown rendering**: `renderMarkdown()` converts `**bold**`, `*italic*`, `` `code` `` to HTML via `dangerouslySetInnerHTML`
+  - **Mermaid diagram rendering**: Detects ` ```mermaid ` code blocks in solution and renders them as interactive SVG diagrams using the `mermaid` library. Falls back to raw syntax on render error.
+  - **Mixed content mode**: When solution contains Mermaid diagrams, renders blocks sequentially (text → diagram → text → code), with header showing "🏗️ Design" instead of "⚡ Solution"
+  - **Markdown rendering**: `renderMarkdown()` converts `**bold**`, `*italic*`, `` `code` ``, `# headings` to HTML via `dangerouslySetInnerHTML`
   - **Collapsible Explanation**: Expanded by default, toggleable via clickable header with rotating chevron (`▶`)
   - **Close buttons (✕)**: Each section (Explanation, Solution) has a dismiss button in its header
   - **Auto-reappear on new solve**: `useEffect` resets `showExplanation`, `showSolution`, `explanationVisible` to `true` when `response` prop changes
-  - **Copy Code with feedback**: "📋 Copy Code" button → "✅ Copied!" for 2 seconds
+  - **Copy Code with feedback**: "📋 Copy Code" button → "✅ Copied!" for 2 seconds (copies only code blocks, not Mermaid diagram syntax)
 - `src/components/AuthScreen.tsx`
   - Container for authentication views (sign in, sign up, forgot password)
   - Light theme with app branding
@@ -431,6 +434,11 @@ The app includes a full authentication and subscription system using Supabase an
   - `grok-4.1-fast` → `x-ai/grok-4.1-fast`
   - `gemini-2.5-flash` → `google/gemini-2.5-flash` (free tier)
 
+**Model Display Names** (used in stepper info):
+- Model IDs are mapped to human-readable names via `PRO_MODELS` and `FREE_MODEL` objects in `App.tsx`
+- Example: `claude-sonnet-4.5` → "Claude Sonnet 4.5"
+- The `getTemplateLabel(templateId)` function in `prompts.ts` maps template IDs to labels (e.g., `'algorithm-optimal'` → "Algorithm - Optimal")
+
 ### AI Routing Logic
 
 The app supports two AI request paths:
@@ -631,7 +639,11 @@ A global hotkey allows quickly hiding/showing the app window (works in both stea
 | Windows | `Alt+Shift+H` |
 | Linux | `Ctrl+Shift+H` |
 
-Implementation: `register_toggle_visibility_hotkey()` in `main.rs` — checks `win.is_visible()`, calls `win.hide()` or `win.show()` + `win.unminimize()` + `win.set_focus()`.
+Implementation: `register_toggle_visibility_hotkey()` in `main.rs`:
+- **macOS / non-stealth**: Uses standard `win.hide()` / `win.show()` + `win.unminimize()` + `win.set_focus()`.
+- **Windows with stealth mode**: Uses `toggle_window_offscreen_win32()` instead of `hide()`/`show()`. This moves the window to coordinates (-30000, -30000) to "hide" and restores saved position to "show". Avoids the `ShowWindow(SW_HIDE/SW_SHOW)` cycle which corrupts `WDA_EXCLUDEFROMCAPTURE`, causing a black rectangle in screen capture instead of complete invisibility. Position is saved/restored via static `AtomicI32` variables.
+- **`STEALTH_ENABLED` global flag**: A static `AtomicBool` set during app startup, checked by the toggle handler to decide which approach to use.
+- **`reapply_stealth_after_show()`**: Called after every `win.show()` in non-toggle hotkey handlers (solve, scroll, move) to re-apply `SetWindowDisplayAffinity` as a safety measure.
 
 #### Quit App Hotkey
 
@@ -724,7 +736,7 @@ In `src/App.tsx`:
 - **Fetch trigger**: `useEffect` watches for `subscription` + `authUser` → calls `fetchAnnouncement()`
 - **Also called from**: `onAuthStateChange` callback for robust login path coverage
 - **Request headers**: `Authorization: Bearer {access_token}` + `apikey: SUPABASE_ANON_KEY` (both safe for client-side, see [Supabase API Keys](https://supabase.com/docs/guides/api/api-keys))
-- **Dismiss**: Manual ✕ button → `setShowAnnouncement(false)`, or auto-dismiss when `solveWithAI()` is called
+- **Dismiss**: Manual ✕ button or auto-dismiss when any AI call is made (Solve button, Cmd+1, Cmd+2, Cmd+3). Uses `announcementDismissedRef` to prevent `fetchAnnouncement()` from re-showing the announcement after subscription state changes (which trigger re-fetch). The ref is reset on sign-out.
 - **Link handling**: Click handler on announcement div intercepts `<a>` clicks → `invoke('open_external_url', { url })` to open in system browser (Tauri webview doesn't handle `target="_blank"`)
 - **Styling**: `.info-banner.announcement` in `src/App.css` (blue-green gradient, rounded corners)
 
@@ -898,6 +910,45 @@ Free users cannot use audio recording (it's a Pro feature). The "Verbal Intervie
 - Audio recording in `toggleAudioRecording()` checks `subscriptionRef.current` for active/cancelling status
 - **Important**: Uses `useRef` (`subscriptionRef`) instead of direct state to avoid stale closures in the global hotkey listener. A `useEffect` keeps `subscriptionRef.current` in sync with the `subscription` state.
 
+### Prompt System
+
+Each of the 6 built-in prompts has its **own tailored system prompt** (not a shared one). This ensures the AI's behavior, response format, and SOLUTION block content type are appropriate for each use case.
+
+**System Prompts** (defined in `src/services/prompts.ts`):
+
+| Template | System Prompt Constant | AI Role | SOLUTION Block Contains |
+|----------|----------------------|---------|------------------------|
+| Algorithm - Optimal | `ALGORITHM_SYSTEM_PROMPT` | Algorithm & DS engineer | Raw compilable code only |
+| Algorithm - Beginner | `ALGORITHM_SYSTEM_PROMPT` | Algorithm & DS engineer | Raw compilable code only |
+| System Design | `SYSTEM_DESIGN_SYSTEM_PROMPT` | System design architect | Structured design with Mermaid diagrams |
+| Code Review | `CODE_REVIEW_SYSTEM_PROMPT` | Senior software engineer | Improved/fixed code |
+| Explain Concept | `EXPLAIN_CONCEPT_SYSTEM_PROMPT` | Technical educator | Code example or structured summary |
+| Verbal Interview | `VERBAL_INTERVIEW_SYSTEM_PROMPT` | Interview coach | Code or bullet-point answer |
+
+**Key prompt rules enforced across all templates:**
+- Do NOT repeat or restate the problem
+- Keep explanations concise (2-3 short paragraphs max)
+- Always include both EXPLANATION_START/END and SOLUTION_START/END markers
+- In code SOLUTION blocks: raw code only, no markdown fences
+
+**System Design prompt specifics:**
+- EXPLANATION contains: functional requirements, non-functional requirements, key trade-offs
+- SOLUTION contains Mermaid diagrams in ` ```mermaid ` code fences:
+  1. `## Architecture` — `graph TD` flowchart
+  2. `## Data Model` — `erDiagram` ER diagram
+  3. `## API / Sequence Flow` — `sequenceDiagram`
+  4. `## Scaling Strategy` — bullet points
+
+**`GENERAL_SYSTEM_PROMPT`** is now only used as a fallback for custom prompts that don't override the system prompt.
+
+**Max output tokens:** All AI calls use `max_tokens: 16384` (increased from 4096) to prevent solution truncation on complex problems. This applies to:
+- Rust proxy functions (`main.rs`): 3 places
+- Direct Claude calls (`claude.rs`): 2 places
+- Direct Gemini calls (`gemini.rs`): 3 places (`generationConfig.maxOutputTokens`)
+- Edge function default (`ai-proxy/index.ts`)
+
+**AI request timeout:** 50 seconds (both Rust HTTP client and edge function `AbortController`). Increased from 30s to accommodate System Design prompts with Mermaid diagrams + screenshot input.
+
 ### Programming Languages
 
 The app supports a `{LANGUAGE}` placeholder in prompt templates. Available languages (defined in `ProgrammingLanguage` enum in `src/services/prompts.ts`):
@@ -924,7 +975,28 @@ Implementation in `src/App.tsx`:
 - Stepper renders only when `solvePhase !== 'idle' && solvePhase !== 'error' && isLoading && !isRecordingAudio`
 - Steps light up as `active` (pulsing animation) or `completed` (green)
 - **No "Done" step** — stepper disappears immediately when AI responds (`solvePhase → 'idle'`)
-- Styled via `.solve-stepper`, `.stepper-track`, `.stepper-step`, `.stepper-connector` in `App.css`
+- **Model + Prompt info**: When `solvePhase === 'asking'`, a subtitle line appears below the stepper showing the AI model name and selected prompt (e.g., "🧠 Claude Sonnet 4.5 · 📋 Algorithm - Optimal"). Fades in with animation.
+- Styled via `.solve-stepper`, `.stepper-track`, `.stepper-step`, `.stepper-connector`, `.stepper-info` in `App.css`
+
+#### Mermaid Diagram Rendering (System Design)
+
+When the AI returns Mermaid diagram syntax in the SOLUTION block (triggered by the System Design prompt), `AIResponseDisplay.tsx` renders them as interactive SVGs:
+
+**Architecture:**
+- `parseSolutionBlocks()` splits solution text into typed blocks: `'mermaid'`, `'code'`, or `'text'`
+- `MermaidDiagram` React component calls `mermaid.render()` and injects the SVG via `dangerouslySetInnerHTML`
+- Mermaid is initialized with `startOnLoad: false`, `theme: 'dark'` to match the dark app UI
+- If rendering fails (malformed syntax), the raw Mermaid source is shown in a `<pre>` error block
+
+**CSS classes:**
+- `.solution-content-mixed` — flex column layout for mixed blocks
+- `.mermaid-diagram` — overflow-x scrollable container for wide diagrams
+- `.mermaid-error` — red-bordered error fallback for bad diagram syntax
+- `.solution-text-block` — formatted text between diagrams (headings, bullets)
+- `.solution-code-block` — code blocks with syntax highlighting
+
+**Dependencies:**
+- `mermaid` npm package (imported in `AIResponseDisplay.tsx`)
 
 #### Solve Button Mode Indicator
 
@@ -1021,10 +1093,25 @@ The Rust backend (`src-tauri/src/main.rs`) calls these production endpoints. Tes
 
 ### Build Configuration
 
-- **`src-tauri/tauri.conf.json`**: `macOS.minimumSystemVersion` set to `"11.0"` (Big Sur, required for ScreenCaptureKit audio recording). Bundle targets: `["app", "dmg"]`.
+- **`src-tauri/tauri.conf.json`**:
+  - `macOS.minimumSystemVersion` set to `"11.0"` (Big Sur, required for ScreenCaptureKit audio recording)
+  - Bundle targets: `"all"` (builds all platform-appropriate bundles — DMG on macOS, NSIS `.exe` + MSI on Windows)
+  - **Windows NSIS installer**: Configured at `bundle.windows.nsis` with `installMode: "both"` (user chooses per-user or per-machine at install time). Produces `CrackingInterview_1.0.0_x64-setup.exe`. Note: Tauri v2 does not support `oneClick` or `allowElevation` NSIS properties (v1 only).
+  - **MSI installer**: Auto-generated by Tauri via WiX. Produces `CrackingInterview_1.0.0_x64_en-US.msi`. Better for enterprise/GPO deployment.
 - **`package.json`**: `author: "Cracking Interview LLC"`, `license: "UNLICENSED"`
 - **`.gitignore`**: Includes `notarize.sh` (contains Apple Developer credentials)
 - **App window**: `alwaysOnTop: true` configured in `tauri.conf.json`
+
+**Build commands:**
+```bash
+# macOS (universal binary — Intel + Apple Silicon):
+APPLE_SIGNING_IDENTITY="Developer ID Application: Cracking Interview LLC (7JTN2XW63J)" \
+  npm run tauri build -- --target universal-apple-darwin
+
+# Windows:
+npm run tauri build
+# Output: src-tauri/target/release/bundle/nsis/*.exe + msi/*.msi
+```
 
 ### Code Cleanup (Release Readiness)
 
@@ -1146,3 +1233,5 @@ Notes:
 - **Audio sends directly to AI**: Local speech-to-text (Vosk) was removed. Audio is now sent directly to Gemini which handles transcription and understanding natively. This is simpler and more accurate.
 - **Test vs Production Edge Functions**: Production functions are now active (no `-test` suffix). Test-mode copies still exist as separate deployments. Consider consolidating to a single function with environment variable switching.
 - **Corporate VPN workarounds**: Auth and some API calls go through Rust backend to bypass SSL inspection issues. This adds complexity but is necessary for some enterprise environments.
+- **Mermaid diagrams are client-side only**: If the AI returns malformed Mermaid syntax, it falls back to showing the raw text. Consider adding a retry mechanism or server-side validation.
+- **Windows stealth off-screen approach**: The off-screen window position trick (-30000, -30000) works but multi-monitor setups with unusual configurations (e.g., very large negative-coordinate monitors) could theoretically conflict. Tested and working on standard multi-monitor setups.
