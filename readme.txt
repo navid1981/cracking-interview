@@ -106,9 +106,62 @@ Build one for each architecture:
 # ARM (you already have this)npm run tauri build -- --target aarch64-apple-darwin# Intelnpm run tauri build -- --target x86_64-apple-darwin
 Then offer two download buttons on your website: "Download for Mac (Apple Silicon)" and "Download for Mac (Intel)".
 Downside: Confusing for non-technical users who don't know their chip type.
-
+#Notrize
+xcrun notarytool submit \
+  "src-tauri/target/universal-apple-darwin/release/bundle/dmg/CrackingInterview_1.0.0_universal.dmg" \
+  --apple-id navid.vaziri@outlook.com \
+  --team-id 7JTN2XW63J \
+  --password yvdy-dbhj-dpmh-ajcp \
+  --wait
 
 --------------------
 Easiest method — Call the Comptroller:
 Phone: 800-252-5555
 Say: "I need to update the NAICS code on my account from 519190 to 511210"
+
+Next step after deploying: Submit the sitemap to Google Search Console at https://search.google.com/search-console — go to Sitemaps and add https://crackinginterview.org/sitemap.xml. You already have the site verification tag in place, so this should work immediately.
+
+
+------------
+#sign the .app
+codesign --force --deep --sign "Developer ID Application: Cracking Interview LLC (7JTN2XW63J)" \
+  --options runtime \
+  --timestamp \
+  src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app
+
+#Verify the signature is correct:
+codesign -dv --verbose=2 src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app 2>&1 | grep -E "Authority|flags|Timestamp"
+
+#Recreate the DMG from the re-signed .app:
+hdiutil create -volname "CrackingInterview" \
+  -srcfolder src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app \
+  -ov -format UDZO \
+  src-tauri/target/universal-apple-darwin/release/bundle/dmg/CrackingInterview_1.0.0_universal.dmg
+
+#Sign the DMG itself:
+codesign --force --sign "Developer ID Application: Cracking Interview LLC (7JTN2XW63J)" \
+  --timestamp \
+  src-tauri/target/universal-apple-darwin/release/bundle/dmg/CrackingInterview_1.0.0_universal.dmg
+
+#notarization:
+xcrun notarytool submit \
+  "src-tauri/target/universal-apple-darwin/release/bundle/dmg/CrackingInterview_1.0.0_universal.dmg" \
+  --apple-id navid.vaziri@outlook.com \
+  --team-id 7JTN2XW63J \
+  --password yvdy-dbhj-dpmh-ajcp \
+  --wait
+
+#Notarization accepted. Now staple and verify:
+xcrun stapler staple \
+  src-tauri/target/universal-apple-darwin/release/bundle/dmg/CrackingInterview_1.0.0_universal.dmg && \
+spctl -a -vv \
+  src-tauri/target/universal-apple-darwin/release/bundle/dmg/CrackingInterview_1.0.0_universal.dmg
+
+---------------------
+How to Speed It Up
+The best thing you can do is submit your signed .exe directly to Microsoft for review:
+Go to https://www.microsoft.com/en-us/wdsi/filesubmission
+Select "Software developer" as the submitter type
+Upload your signed .exe
+Explain it's a legitimate desktop application
+This tells Microsoft your app is not malware and can significantly speed up the reputation building process. Do this right after you get your code signing certificate and sign the .exe.
