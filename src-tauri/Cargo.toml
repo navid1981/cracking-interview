@@ -30,8 +30,8 @@ tiny_http = "0.12"
 dotenv = "0.15"
 sha2 = "0.10"
 
-# WebSocket for CDP
-tokio-tungstenite = "0.21"
+# WebSocket for CDP and Deepgram
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
 
 # Thread-safe globals

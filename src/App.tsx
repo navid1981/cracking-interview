@@ -2,11 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import AIResponseDisplay from './components/AIResponseDisplay';
+import LiveTranscript from './components/LiveTranscript';
 import TabDropdown from './components/TabDropdown';
 import PromptEditor from './components/PromptEditor';
 import PromptListView from './components/PromptListView';
 import AuthScreen from './components/AuthScreen';
-import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel } from './services/prompts';
+import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, LIVE_CONVERSATION_SYSTEM_PROMPT } from './services/prompts';
 import { 
   onAuthStateChange, 
   getUserSubscription, 
@@ -173,6 +174,16 @@ function App() {
   const isRecordingAudioRef = useRef(false);
   const audioToggleInFlightRef = useRef(false);
   const lastAudioToggleAtRef = useRef(0);
+  // ========== LIVE TRANSCRIPTION STATE ==========
+  const [isLiveTranscribing, setIsLiveTranscribing] = useState(false);
+  const [liveTranscriptFinal, setLiveTranscriptFinal] = useState('');
+  const [liveTranscriptInterim, setLiveTranscriptInterim] = useState('');
+  const [conversationHistory, setConversationHistory] = useState<Array<{role: string; content: string}>>([]);
+  const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
+  const silenceTimerRef = useRef<number | null>(null);
+  const lastTranscriptTimeRef = useRef<number>(0);
+  const isLiveTranscribingRef = useRef(false);
+
   const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
   
@@ -268,6 +279,50 @@ function App() {
     };
   }, []);
 
+  // Keep live transcription ref in sync
+  useEffect(() => {
+    isLiveTranscribingRef.current = isLiveTranscribing;
+  }, [isLiveTranscribing]);
+
+  // Listen for Deepgram transcript events from Rust backend
+  useEffect(() => {
+    let cancelled = false;
+    const unsubs: Array<() => void> = [];
+
+    (async () => {
+      const u1 = await listen<{ text: string; is_final: boolean }>('live_transcript', (event) => {
+        lastTranscriptTimeRef.current = Date.now();
+        if (event.payload.is_final) {
+          setLiveTranscriptFinal(prev => prev + (prev ? ' ' : '') + event.payload.text);
+          setLiveTranscriptInterim('');
+        } else {
+          setLiveTranscriptInterim(event.payload.text);
+        }
+      });
+      if (cancelled) { u1(); return; }
+      unsubs.push(u1);
+
+      const u2 = await listen('live_transcript_utterance_end', () => {
+        // Deepgram detected end of utterance — start silence countdown
+        lastTranscriptTimeRef.current = Date.now();
+      });
+      if (cancelled) { u2(); return; }
+      unsubs.push(u2);
+
+      const u3 = await listen<string>('live_transcript_error', (event) => {
+        setMessage(`❌ Transcription error: ${event.payload}`);
+        setIsLiveTranscribing(false);
+      });
+      if (cancelled) { u3(); return; }
+      unsubs.push(u3);
+    })();
+
+    return () => {
+      cancelled = true;
+      unsubs.forEach(u => u());
+    };
+  }, []);
+
   // Keep a ref in sync so hotkey-driven toggles don't depend on render timing.
   useEffect(() => {
     isRecordingAudioRef.current = isRecordingAudio;
@@ -279,17 +334,13 @@ function App() {
   }, [subscription]);
 
   const toggleAudioRecording = async () => {
-    // Guard against duplicate hotkey events (React StrictMode/dev can double-register listeners)
-    // and against rapid double presses. Use longer debounce to prevent accidental double-clicks.
     const now = Date.now();
     if (audioToggleInFlightRef.current) return;
-    if (now - lastAudioToggleAtRef.current < 1000) return;  // 1 second debounce
-    
-    // Set in-flight flag IMMEDIATELY to prevent race conditions
+    if (now - lastAudioToggleAtRef.current < 1000) return;
+
     audioToggleInFlightRef.current = true;
     lastAudioToggleAtRef.current = now;
 
-    // Audio is only available for Pro users (active or cancelling status)
     const isPro = subscriptionRef.current?.subscription_status === 'active' || subscriptionRef.current?.subscription_status === 'cancelling';
     if (!isPro) {
       setMessage('⚠️ Audio input requires Pro subscription.');
@@ -297,110 +348,268 @@ function App() {
       return;
     }
 
-    // Start recording
-    if (!isRecordingAudioRef.current) {
+    // Start live transcription
+    if (!isRecordingAudioRef.current && !isLiveTranscribingRef.current) {
       try {
-        // Show "Starting..." message while audio initializes
-        setMessage('🔊 Starting audio capture...');
-        // Flip ref immediately to avoid races on repeated triggers.
-        isRecordingAudioRef.current = true;
-
-        // Wait for backend to actually start recording BEFORE showing UI
-        await invoke('start_audio_recording');
-        
-        // NOW recording has actually started - show the UI
-        setMessage(''); // Clear "Starting..." message
-        setIsRecordingAudio(true);
-        setAudioSeconds(0);
-        if (audioTimerRef.current) window.clearInterval(audioTimerRef.current);
-        audioTimerRef.current = window.setInterval(() => setAudioSeconds((s) => s + 1), 1000);
-        
-        // Recording started successfully - reset flag to allow STOP to be called
-        // But we need to wait a bit to prevent accidental double-clicks
-        setTimeout(() => {
-          audioToggleInFlightRef.current = false;
-        }, 500);
+        await startLiveTranscription();
+        setTimeout(() => { audioToggleInFlightRef.current = false; }, 500);
       } catch (e) {
-        // Roll back state on failure.
-        isRecordingAudioRef.current = false;
-        setIsRecordingAudio(false);
-        if (audioTimerRef.current) {
-          window.clearInterval(audioTimerRef.current);
-          audioTimerRef.current = null;
-        }
         setMessage(`❌ Error: ${String(e)}`);
         audioToggleInFlightRef.current = false;
       }
       return;
     }
 
-    // Stop recording and solve
-    setIsLoading(true);
-    setAiResponse('');
-    setMessage('⏹️ Stopping recording...');
+    // Stop live transcription and send to AI
     try {
-      // Stop recording and get the audio file path (MP3 or WAV)
-      const audioFilePath = await invoke<string>('stop_audio_recording');
+      await stopLiveTranscription(false);
+    } catch (e) {
+      setMessage(`❌ Error: ${String(e)}`);
+    } finally {
+      audioToggleInFlightRef.current = false;
+    }
+  };
 
-      isRecordingAudioRef.current = false;
+  // ========== LIVE TRANSCRIPTION ==========
+
+  const getAccessToken = (): string => {
+    const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
+    const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+    const stored = localStorage.getItem(storageKey);
+    if (!stored) return '';
+    try {
+      return JSON.parse(stored).access_token || '';
+    } catch {
+      return '';
+    }
+  };
+
+  const fetchDeepgramKey = async (): Promise<string | null> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) return null;
+      const resp = await fetch(`${EDGE_FUNCTION_URL}/deepgram-key`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_API_KEY,
+        },
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        setMessage(`❌ ${err.error || 'Failed to get transcription key'}`);
+        return null;
+      }
+      const data = await resp.json();
+      return data.key || null;
+    } catch (e) {
+      setMessage(`❌ Error fetching transcription key: ${e}`);
+      return null;
+    }
+  };
+
+  const startLiveTranscription = async () => {
+    const isPro = subscriptionRef.current?.subscription_status === 'active' || subscriptionRef.current?.subscription_status === 'cancelling';
+    if (!isPro) {
+      setMessage('⚠️ Live transcription requires Pro subscription.');
+      return;
+    }
+
+    setMessage('🎙️ Starting live transcription…');
+    const deepgramKey = await fetchDeepgramKey();
+    if (!deepgramKey) return;
+
+    try {
+      setLiveTranscriptFinal('');
+      setLiveTranscriptInterim('');
+      setSilenceCountdown(null);
+      lastTranscriptTimeRef.current = Date.now();
+
+      await invoke('start_live_transcription', {
+        deepgramKey,
+        language: 'auto',
+      });
+
+      setIsLiveTranscribing(true);
+      setIsRecordingAudio(true);
+      setAudioSeconds(0);
+      if (audioTimerRef.current) window.clearInterval(audioTimerRef.current);
+      audioTimerRef.current = window.setInterval(() => setAudioSeconds(s => s + 1), 1000);
+      isRecordingAudioRef.current = true;
+      setMessage('');
+
+      // Start silence detection polling
+      startSilenceDetection();
+    } catch (e) {
+      setMessage(`❌ Failed to start transcription: ${e}`);
+      setIsLiveTranscribing(false);
+    }
+  };
+
+  const stopLiveTranscription = async (_autoTriggered = false) => {
+    if (silenceTimerRef.current) {
+      window.clearInterval(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    setSilenceCountdown(null);
+
+    try {
+      const finalTranscript = await invoke<string>('stop_live_transcription');
+      setIsLiveTranscribing(false);
       setIsRecordingAudio(false);
+      isRecordingAudioRef.current = false;
       if (audioTimerRef.current) {
         window.clearInterval(audioTimerRef.current);
         audioTimerRef.current = null;
       }
 
-      // Get access token for proxy calls
-      const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
-      const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
-      const storedSession = localStorage.getItem(storageKey);
-      let accessToken = '';
-      
-      if (storedSession) {
-        try {
-          const session = JSON.parse(storedSession);
-          accessToken = session.access_token || '';
-        } catch {
-          setMessage('❌ Session error. Please sign in again.');
-          setIsLoading(false);
-          audioToggleInFlightRef.current = false;
-          return;
-        }
+      // Use the accumulated frontend transcript (more complete due to interim updates)
+      const transcript = liveTranscriptFinal || finalTranscript;
+      if (!transcript.trim()) {
+        setMessage('⚠️ No speech detected.');
+        return;
       }
 
-      // IMPORTANT: Audio input ALWAYS uses gemini-3-flash model (supports audio input)
-      // This overrides the user's model selection because other models don't support audio
-      const AUDIO_MODEL = 'gemini-3-flash';
+      await sendTranscriptToAI(transcript);
+    } catch (e) {
+      setIsLiveTranscribing(false);
+      setIsRecordingAudio(false);
+      isRecordingAudioRef.current = false;
+      if (audioTimerRef.current) {
+        window.clearInterval(audioTimerRef.current);
+        audioTimerRef.current = null;
+      }
+      setMessage(`❌ Error stopping transcription: ${e}`);
+    }
+  };
 
-      setSolveFlowType('audio');
-      setSolvePhase('asking');
-      setMessage('🤖 Sending audio to AI...');
-      const audioInstructions = `Listen to the interview question in the audio carefully and solve it step by step. Provide a clear Explanation and a final Solution.`;
-      // Audio ALWAYS uses the Verbal Interview (Audio) prompt
-      const prompt = buildPrompt(PromptTemplate.VerbalInterviewAudio, selectedLanguage, audioInstructions);
-      
-      // Send audio directly to Gemini via proxy (no transcription needed)
-      const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_audio', {
-        prompt,
-        audioPath: audioFilePath,
-        model: AUDIO_MODEL,
+  const SILENCE_THRESHOLD_MS = 3000;
+
+  const startSilenceDetection = () => {
+    if (silenceTimerRef.current) window.clearInterval(silenceTimerRef.current);
+
+    silenceTimerRef.current = window.setInterval(() => {
+      if (!isLiveTranscribingRef.current) {
+        if (silenceTimerRef.current) window.clearInterval(silenceTimerRef.current);
+        return;
+      }
+
+      const elapsed = Date.now() - lastTranscriptTimeRef.current;
+      if (elapsed >= SILENCE_THRESHOLD_MS && lastTranscriptTimeRef.current > 0) {
+        const remaining = Math.max(0, Math.ceil((SILENCE_THRESHOLD_MS + 2000 - elapsed) / 1000));
+        if (remaining > 0) {
+          setSilenceCountdown(remaining);
+        } else {
+          setSilenceCountdown(null);
+          if (silenceTimerRef.current) window.clearInterval(silenceTimerRef.current);
+          stopLiveTranscription(true);
+        }
+      } else {
+        setSilenceCountdown(null);
+      }
+    }, 500);
+  };
+
+  // Approximate token count (1 token ≈ 4 chars)
+  const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
+
+  const MAX_HISTORY_TOKENS = 12000;
+
+  const trimConversationHistory = (history: Array<{role: string; content: string}>): Array<{role: string; content: string}> => {
+    let totalTokens = history.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
+    if (totalTokens <= MAX_HISTORY_TOKENS) return history;
+
+    // Keep system prompt (first), summarize old exchanges, keep last 3-4 pairs
+    const keepRecent = 6; // last 3 Q&A pairs
+    if (history.length <= keepRecent + 1) return history;
+
+    const systemMsg = history[0]?.role === 'system' ? [history[0]] : [];
+    const rest = history[0]?.role === 'system' ? history.slice(1) : history;
+
+    if (rest.length <= keepRecent) return history;
+
+    const oldMessages = rest.slice(0, rest.length - keepRecent);
+    const recentMessages = rest.slice(rest.length - keepRecent);
+
+    const summaryText = oldMessages
+      .map(m => `${m.role === 'user' ? 'Q' : 'A'}: ${m.content.substring(0, 200)}${m.content.length > 200 ? '…' : ''}`)
+      .join('\n');
+
+    const summaryMsg = {
+      role: 'system' as const,
+      content: `Previous conversation summary:\n${summaryText}`,
+    };
+
+    return [...systemMsg, summaryMsg, ...recentMessages];
+  };
+
+  const sendTranscriptToAI = async (transcript: string) => {
+    setIsLoading(true);
+    setAiResponse('');
+    setSolveFlowType('audio');
+    setSolvePhase('asking');
+    setMessage('🤖 Sending to AI…');
+
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        setMessage('❌ Session error. Please sign in again.');
+        setIsLoading(false);
+        return;
+      }
+
+      const model = aiConfig.selected_model;
+
+      // Build messages array with conversation history
+      let messages: Array<{role: string; content: string}> = [];
+
+      if (conversationHistory.length === 0) {
+        // First turn — add system prompt
+        messages.push({ role: 'system', content: LIVE_CONVERSATION_SYSTEM_PROMPT });
+      } else {
+        // Continue conversation — include full history
+        messages = [...conversationHistory];
+      }
+
+      // Add the new user transcript
+      messages.push({ role: 'user', content: transcript });
+
+      // Trim if approaching token limit
+      messages = trimConversationHistory(messages);
+
+      const messagesJson = JSON.stringify(messages);
+
+      const proxyResponse = await invoke<{
+        response: string;
+        usage?: { requests_used: number; requests_limit: number; is_paid?: boolean };
+        error?: string;
+      }>('query_ai_via_proxy_conversation', {
+        messagesJson,
+        model,
         accessToken,
       });
-      
+
       if (proxyResponse.error) {
         throw new Error(proxyResponse.error);
       }
-      
+
+      // Update conversation history
+      const newHistory = [...messages, { role: 'assistant', content: proxyResponse.response }];
+      setConversationHistory(newHistory);
+
       setAiResponse(proxyResponse.response);
       setSolvePhase('idle');
       setMessage('');
-      
-      // Update usage stats if returned
+
+      // Clear live transcript for next turn
+      setLiveTranscriptFinal('');
+      setLiveTranscriptInterim('');
+
       if (proxyResponse.usage) {
         setUsageStats(prev => prev ? {
           ...prev,
           requests_used: proxyResponse.usage!.requests_used,
         } : prev);
-        // Also refresh subscription for free users (lifetime_ai_calls updated)
         if (!proxyResponse.usage.is_paid && authUser?.id) {
           const updatedSub = await getUserSubscription(authUser.id);
           if (updatedSub) setSubscription(updatedSub);
@@ -411,17 +620,15 @@ function App() {
       setMessage(`❌ Error: ${String(e)}`);
     } finally {
       setIsLoading(false);
-      audioToggleInFlightRef.current = false;
-
-      // Even if stopping failed, we likely already terminated the helper or cleared backend state.
-      // Ensure the UI doesn't remain stuck in "recording".
-      isRecordingAudioRef.current = false;
-      setIsRecordingAudio(false);
-      if (audioTimerRef.current) {
-        window.clearInterval(audioTimerRef.current);
-        audioTimerRef.current = null;
-      }
     }
+  };
+
+  const clearConversationHistory = () => {
+    setConversationHistory([]);
+    setLiveTranscriptFinal('');
+    setLiveTranscriptInterim('');
+    setAiResponse('');
+    setMessage('Conversation cleared — starting fresh.');
   };
 
   useEffect(() => {
@@ -1360,7 +1567,33 @@ function App() {
 
       {isRecordingAudio && (
         <div className="message-box" style={{ margin: '0 20px 12px 20px' }}>
-          🎙️ Recording system audio… <strong>{audioSeconds}s</strong> (press Stop / Audio hotkey to send)
+          🎙️ {isLiveTranscribing ? 'Live transcribing' : 'Recording system audio'}… <strong>{audioSeconds}s</strong> (press Stop / Audio hotkey to send)
+        </div>
+      )}
+
+      {isLiveTranscribing && (
+        <div style={{ margin: '0 20px 12px 20px' }}>
+          <LiveTranscript
+            interimText={liveTranscriptInterim}
+            finalText={liveTranscriptFinal}
+            isTranscribing={isLiveTranscribing}
+            silenceCountdown={silenceCountdown}
+          />
+        </div>
+      )}
+
+      {conversationHistory.length > 0 && !isLiveTranscribing && (
+        <div className="conversation-controls" style={{ margin: '0 20px 8px 20px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span style={{ fontSize: '12px', color: '#888' }}>
+            {Math.floor(conversationHistory.filter(m => m.role === 'user').length)} exchange{conversationHistory.filter(m => m.role === 'user').length !== 1 ? 's' : ''} in this session
+          </span>
+          <button
+            onClick={clearConversationHistory}
+            className="new-session-btn"
+            title="Clear conversation and start fresh"
+          >
+            New Session
+          </button>
         </div>
       )}
 
@@ -1489,10 +1722,29 @@ function App() {
             </div>
           )}
 
-          <AIResponseDisplay 
-            response={aiResponse}
-            language={selectedLanguage.toLowerCase()}
-          />
+          {conversationHistory.length > 1 && selectedTab && isAudio(selectedTab) ? (
+            <div className="conversation-view">
+              {conversationHistory
+                .filter(msg => msg.role !== 'system')
+                .map((msg, idx) => (
+                  <div key={idx} className={`conversation-msg conversation-msg-${msg.role}`}>
+                    <div className="conversation-msg-label">
+                      {msg.role === 'user' ? '🎤 You' : '🤖 AI'}
+                    </div>
+                    {msg.role === 'assistant' ? (
+                      <AIResponseDisplay response={msg.content} language={selectedLanguage.toLowerCase()} />
+                    ) : (
+                      <div className="conversation-msg-text">{msg.content}</div>
+                    )}
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <AIResponseDisplay 
+              response={aiResponse}
+              language={selectedLanguage.toLowerCase()}
+            />
+          )}
         </div>
       </div>
 

@@ -1046,3 +1046,132 @@ button.chrome-open-btn:disabled {
   border-top: 1px solid #e5e5e5;
   padding-top: 16px;
 }
+
+/* ========== LIVE TRANSCRIPT ========== */
+
+.live-transcript {
+  background: #fafafa;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.live-transcript-header {
+  padding: 8px 14px;
+  border-bottom: 1px solid #eee;
+  background: #f5f5f5;
+}
+
+.live-transcript-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e53935;
+  animation: pulse-glow 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.4); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 6px rgba(229, 57, 53, 0); }
+}
+
+.live-transcript-label {
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
+}
+
+.live-transcript-body {
+  padding: 12px 14px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.live-transcript-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #333;
+}
+
+.live-transcript-interim {
+  color: #999;
+  font-style: italic;
+}
+
+.live-transcript-placeholder {
+  margin: 0;
+  font-size: 13px;
+  color: #aaa;
+  font-style: italic;
+}
+
+/* ========== CONVERSATION VIEW ========== */
+
+.conversation-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.conversation-msg {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.conversation-msg-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+
+.conversation-msg-user .conversation-msg-text {
+  background: #e3f2fd;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #333;
+  border: 1px solid #bbdefb;
+}
+
+.conversation-msg-assistant {
+  /* AI response already styled by AIResponseDisplay */
+}
+
+/* ========== NEW SESSION BUTTON ========== */
+
+.new-session-btn {
+  padding: 4px 12px;
+  font-size: 11px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  background: #fff;
+  color: #666;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.new-session-btn:hover {
+  background: #f5f5f5;
+  border-color: #ccc;
+  color: #333;
+}
+
+/* ========== CONVERSATION CONTROLS ========== */
+
+.conversation-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

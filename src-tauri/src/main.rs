@@ -5,6 +5,7 @@ mod chrome;
 mod ai;
 mod screenshot;
 mod audio;
+mod transcription;
 mod oauth_server;
 mod google_oauth;
 
@@ -1455,6 +1456,104 @@ async fn query_ai_via_proxy_with_audio(
     })
 }
 
+// ============================================================================
+// LIVE TRANSCRIPTION COMMANDS
+// ============================================================================
+
+#[tauri::command]
+async fn start_live_transcription(
+    app_handle: tauri::AppHandle,
+    deepgram_key: String,
+    language: String,
+) -> Result<(), String> {
+    transcription::start_live_transcription(app_handle, deepgram_key, language).await
+}
+
+#[tauri::command]
+fn stop_live_transcription() -> Result<String, String> {
+    transcription::stop_live_transcription()
+}
+
+#[tauri::command]
+fn is_live_transcribing() -> bool {
+    transcription::is_transcribing()
+}
+
+/// Query AI via proxy with multi-turn conversation history.
+/// Accepts a full messages array instead of a single prompt string.
+#[tauri::command]
+async fn query_ai_via_proxy_conversation(
+    messages_json: String,
+    model: String,
+    access_token: String,
+) -> Result<AIProxyResponse, String> {
+    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
+
+    let messages: serde_json::Value = serde_json::from_str(&messages_json)
+        .map_err(|e| format!("Invalid messages JSON: {}", e))?;
+
+    println!("[Rust AI Proxy Conversation] Model: {}, Messages count: {}",
+        model,
+        messages.as_array().map(|a| a.len()).unwrap_or(0)
+    );
+
+    let client = &*AI_PROXY_CLIENT;
+
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+        "max_tokens": 16384
+    });
+
+    let start = std::time::Instant::now();
+
+    let response = client
+        .post(format!("{}/functions/v1/ai-proxy", SUPABASE_URL))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "❌ AI request timed out after 50 seconds. Please try again.".to_string()
+            } else {
+                format!("❌ AI Proxy request failed: {}", e)
+            }
+        })?;
+
+    println!("[Rust AI Proxy Conversation] Response in {:?}", start.elapsed());
+
+    let status = response.status();
+    let response_text = response.text().await
+        .map_err(|e| format!("❌ Failed to read response: {}", e))?;
+
+    let proxy_response: serde_json::Value = serde_json::from_str(&response_text)
+        .unwrap_or_else(|_| serde_json::json!({ "error": response_text }));
+
+    if !status.is_success() {
+        let error_msg = proxy_response["error"].as_str().unwrap_or(&response_text);
+        return Err(format!("❌ AI Proxy Error ({}): {}", status.as_u16(), error_msg));
+    }
+
+    let usage = proxy_response["usage"].as_object().map(|u| AIProxyUsage {
+        requests_used: u.get("requests_used").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        requests_limit: u.get("requests_limit").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        period_end: u.get("period_end").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        is_paid: u.get("is_paid").and_then(|v| v.as_bool()).unwrap_or(false),
+    });
+
+    let ai_response_text = proxy_response["response"].as_str().unwrap_or("").to_string();
+
+    println!("[Rust AI Proxy Conversation] Response length: {} chars", ai_response_text.len());
+
+    Ok(AIProxyResponse {
+        response: ai_response_text,
+        usage,
+        error: None,
+    })
+}
 
 // ============================================================================
 // GOOGLE OAUTH COMMANDS
@@ -1736,6 +1835,10 @@ fn main() {
             query_ai_via_proxy,
             query_ai_via_proxy_with_image,
             query_ai_via_proxy_with_audio,
+            query_ai_via_proxy_conversation,
+            start_live_transcription,
+            stop_live_transcription,
+            is_live_transcribing,
             create_checkout_session,
             create_billing_portal_session,
             open_url,

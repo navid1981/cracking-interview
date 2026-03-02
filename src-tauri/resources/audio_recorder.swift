@@ -8,15 +8,19 @@ import CoreGraphics
 //
 // Modes:
 //   --warm         : Initialize ScreenCaptureKit and wait for "start" command on stdin
-//   (no --warm)    : Start recording immediately (legacy mode)
+//   --stream-pcm   : Stream raw PCM16 mono 16kHz to stdout for real-time transcription
+//   (no flags)     : Start recording immediately (legacy mode)
 //
-// Commands (warm mode only, via stdin):
-//   start          : Begin recording
-//   stop           : Stop recording and exit
+// Commands (warm/stream modes, via stdin):
+//   start          : Begin recording/streaming
+//   stop           : Stop and exit
 //
 // Usage:
 //   # Warm mode (pre-initialize, wait for commands)
 //   cracking_interview_audio_recorder --warm --out /path/to/file.wav --timeout 180
+//
+//   # Stream mode (output raw PCM to stdout for Deepgram)
+//   cracking_interview_audio_recorder --stream-pcm --out /tmp/unused.wav --timeout 300
 //
 //   # Legacy mode (start immediately)
 //   cracking_interview_audio_recorder --out /path/to/file.wav --timeout 180
@@ -37,6 +41,11 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
   private let outputSampleRate: Double = 44100
   private let outputChannels: AVAudioChannelCount = 1
   private let volumeBoost: Float = 5.0
+  
+  // Stream mode: output raw PCM16 mono 16kHz to stdout instead of writing WAV
+  var streamPCMMode: Bool = false
+  private let streamSampleRate: Double = 16000
+  private let stdoutHandle = FileHandle.standardOutput
 
   init(outURL: URL, timeoutSeconds: Int = 180) {
     self.outURL = outURL
@@ -211,10 +220,7 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
   func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
     guard outputType == .audio else { return }
     guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
-    guard isRecording else { return }  // Don't write unless recording
-    
-    ensureFileReady()
-    guard let file = audioFile else { return }
+    guard isRecording else { return }
     
     guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
           let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else { return }
@@ -258,6 +264,57 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     let srcChannels = Int(srcFormat.channelCount)
     let srcFrames = Int(inBuffer.frameLength)
     let srcRate = srcFormat.sampleRate
+    
+    if streamPCMMode {
+      // Stream mode: resample to 16kHz mono Int16 and write raw PCM to stdout
+      let ratio = streamSampleRate / srcRate
+      let outFrameCount = Int(Double(srcFrames) * ratio)
+      guard outFrameCount > 0 else { return }
+      
+      var pcmBytes = Data(capacity: outFrameCount * 2)
+      
+      for i in 0..<outFrameCount {
+        let srcIdx = Double(i) / ratio
+        let idx0 = Int(srcIdx)
+        let frac = Float(srcIdx - Double(idx0))
+        
+        var s0: Float = 0
+        var s1: Float = 0
+        if idx0 < srcFrames {
+          for ch in 0..<srcChannels { s0 += floatData[ch][idx0] }
+          s0 /= Float(srcChannels)
+        }
+        if idx0 + 1 < srcFrames {
+          for ch in 0..<srcChannels { s1 += floatData[ch][idx0 + 1] }
+          s1 /= Float(srcChannels)
+        } else {
+          s1 = s0
+        }
+        
+        var sample = (s0 * (1 - frac) + s1 * frac) * volumeBoost
+        if sample > 0.9 { sample = 0.9 + (sample - 0.9) * 0.2 }
+        else if sample < -0.9 { sample = -0.9 + (sample + 0.9) * 0.2 }
+        sample = max(-0.95, min(0.95, sample))
+        
+        let int16Val = Int16(sample * Float(Int16.max))
+        var le = int16Val.littleEndian
+        pcmBytes.append(Data(bytes: &le, count: 2))
+      }
+      
+      stdoutHandle.write(pcmBytes)
+      totalFrames += Int64(outFrameCount)
+      
+      if !didLogFirstBuffer {
+        didLogFirstBuffer = true
+        fputs("Stream: first PCM chunk \(outFrameCount) frames (from \(srcFrames) @ \(srcRate)Hz -> 16kHz)\n", stderr)
+        fflush(stderr)
+      }
+      return
+    }
+    
+    // File mode: resample to 44.1kHz mono Float32 and write to WAV
+    ensureFileReady()
+    guard let file = audioFile else { return }
     
     let ratio = outputSampleRate / srcRate
     let outputFrameCount = Int(Double(srcFrames) * ratio)
@@ -399,6 +456,7 @@ struct AudioRecorderApp {
     var outPath = "/tmp/cracking_interview_audio.wav"
     var timeout = 180
     var warmMode = false
+    var streamPCMMode = false
     
     let args = CommandLine.arguments
     for i in 0..<args.count {
@@ -411,12 +469,16 @@ struct AudioRecorderApp {
       if args[i] == "--warm" {
         warmMode = true
       }
+      if args[i] == "--stream-pcm" {
+        streamPCMMode = true
+      }
     }
     
-    fputs("Audio Recorder starting. Output: \(outPath), Timeout: \(timeout)s, Warm: \(warmMode)\n", stderr)
+    fputs("Audio Recorder starting. Output: \(outPath), Timeout: \(timeout)s, Warm: \(warmMode), Stream: \(streamPCMMode)\n", stderr)
     fflush(stderr)
     
     let recorder = AudioRecorder(outURL: URL(fileURLWithPath: outPath), timeoutSeconds: timeout)
+    recorder.streamPCMMode = streamPCMMode
     globalRecorder = recorder
     
     // Handle SIGTERM for graceful shutdown
@@ -428,7 +490,25 @@ struct AudioRecorderApp {
     }
     
     do {
-      if warmMode {
+      if streamPCMMode {
+        // Stream mode: initialize, start immediately, output raw PCM to stdout
+        try await recorder.warmUp()
+        recorder.startRecording()
+        
+        // Read stdin for stop command
+        while let line = readLine() {
+          let cmd = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+          fputs("Stream received command: \(cmd)\n", stderr)
+          fflush(stderr)
+          if cmd == "stop" || cmd == "exit" || cmd == "quit" {
+            recorder.stopRecording()
+            exit(0)
+          }
+        }
+        // stdin closed — stop gracefully
+        recorder.stopRecording()
+        exit(0)
+      } else if warmMode {
         // Warm mode: initialize and wait for commands
         try await recorder.warmUp()
         
