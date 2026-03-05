@@ -1634,9 +1634,9 @@ function App() {
         </button>
       </div>
 
-      {isRecordingAudio && (
+      {isRecordingAudio && !isLiveTranscribing && (
         <div className="message-box" style={{ margin: '0 20px 12px 20px' }}>
-          🎙️ {isLiveTranscribing ? 'Live transcribing' : 'Recording system audio'}… <strong>{audioSeconds}s</strong> (press Stop / Audio hotkey to send)
+          🎙️ Recording system audio… <strong>{audioSeconds}s</strong> (press Stop / Audio hotkey to send)
         </div>
       )}
 
@@ -1810,7 +1810,7 @@ function App() {
                     {pair.messages.map((msg, msgIdx) => (
                       <div key={msgIdx} className={`conversation-msg conversation-msg-${msg.role}`}>
                         <div className="conversation-msg-label">
-                          {msg.role === 'user' ? '🎤 You' : '🤖 AI'}
+                          {msg.role === 'user' ? '🎤 Interviewer' : '🤖 AI'}
                         </div>
                         {msg.role === 'assistant' ? (
                           <AIResponseDisplay response={msg.content} language={selectedLanguage.toLowerCase()} />
