@@ -179,6 +179,7 @@ function App() {
   const [liveTranscriptFinal, setLiveTranscriptFinal] = useState('');
   const [liveTranscriptInterim, setLiveTranscriptInterim] = useState('');
   const [conversationHistory, setConversationHistory] = useState<Array<{role: string; content: string}>>([]);
+  const conversationHistoryRef = useRef<Array<{role: string; content: string}>>([]);
   const [displayTranscripts, setDisplayTranscripts] = useState<string[]>([]);
   const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
   const [interviewLanguage, setInterviewLanguage] = useState(() => localStorage.getItem('interview_language') || 'multi');
@@ -514,8 +515,11 @@ function App() {
     setLiveTranscriptInterim('');
     lastTranscriptTimeRef.current = 0;
 
-    await sendTranscriptToAI(transcript);
-    isSendingRef.current = false;
+    try {
+      await sendTranscriptToAI(transcript);
+    } finally {
+      isSendingRef.current = false;
+    }
   };
 
   const startSilenceDetection = () => {
@@ -618,10 +622,11 @@ function App() {
 
       const model = aiConfig.selected_model;
 
-      // Build messages array with conversation history
+      // Build messages array with conversation history (use ref to avoid stale closure)
+      const currentHistory = conversationHistoryRef.current;
       let messages: Array<{role: string; content: string}> = [];
 
-      if (conversationHistory.length === 0) {
+      if (currentHistory.length === 0) {
         // First turn — use the editable Verbal Interview system + user prompts
         const { systemPrompt, userMessage } = getConversationPrompts(
           selectedTemplate,
@@ -632,7 +637,7 @@ function App() {
         messages.push({ role: 'user', content: userMessage });
       } else {
         // Follow-up turns — reuse history, add raw transcript
-        messages = [...conversationHistory];
+        messages = [...currentHistory];
         messages.push({ role: 'user', content: transcript });
       }
 
@@ -658,6 +663,7 @@ function App() {
       // Update conversation history + display transcripts
       const newHistory = [...messages, { role: 'assistant', content: proxyResponse.response }];
       setConversationHistory(newHistory);
+      conversationHistoryRef.current = newHistory;
       setDisplayTranscripts(prev => [...prev, transcript]);
 
       setAiResponse(proxyResponse.response);
@@ -684,6 +690,7 @@ function App() {
 
   const clearConversationHistory = () => {
     setConversationHistory([]);
+    conversationHistoryRef.current = [];
     setDisplayTranscripts([]);
     setLiveTranscriptFinal('');
     liveTranscriptFinalRef.current = '';
