@@ -179,11 +179,13 @@ function App() {
   const [liveTranscriptFinal, setLiveTranscriptFinal] = useState('');
   const [liveTranscriptInterim, setLiveTranscriptInterim] = useState('');
   const [conversationHistory, setConversationHistory] = useState<Array<{role: string; content: string}>>([]);
+  const [displayTranscripts, setDisplayTranscripts] = useState<string[]>([]);
   const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
   const [interviewLanguage, setInterviewLanguage] = useState(() => localStorage.getItem('interview_language') || 'multi');
   const silenceTimerRef = useRef<number | null>(null);
   const lastTranscriptTimeRef = useRef<number>(0);
   const isLiveTranscribingRef = useRef(false);
+  const liveTranscriptFinalRef = useRef('');
 
   const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
@@ -294,7 +296,11 @@ function App() {
       const u1 = await listen<{ text: string; is_final: boolean }>('live_transcript', (event) => {
         lastTranscriptTimeRef.current = Date.now();
         if (event.payload.is_final) {
-          setLiveTranscriptFinal(prev => prev + (prev ? ' ' : '') + event.payload.text);
+          setLiveTranscriptFinal(prev => {
+            const updated = prev + (prev ? ' ' : '') + event.payload.text;
+            liveTranscriptFinalRef.current = updated;
+            return updated;
+          });
           setLiveTranscriptInterim('');
         } else {
           setLiveTranscriptInterim(event.payload.text);
@@ -422,6 +428,7 @@ function App() {
 
     try {
       setLiveTranscriptFinal('');
+      liveTranscriptFinalRef.current = '';
       setLiveTranscriptInterim('');
       setSilenceCountdown(null);
       lastTranscriptTimeRef.current = Date.now();
@@ -466,9 +473,10 @@ function App() {
       }
 
       // Send any remaining unsent transcript
-      const transcript = liveTranscriptFinal || finalTranscript;
+      const transcript = liveTranscriptFinalRef.current || finalTranscript;
       if (transcript.trim()) {
         setLiveTranscriptFinal('');
+        liveTranscriptFinalRef.current = '';
         setLiveTranscriptInterim('');
         await sendTranscriptToAI(transcript);
       }
@@ -490,7 +498,7 @@ function App() {
   // Auto-send: silence detected — send transcript to AI but keep recording
   const autoSendTranscript = async () => {
     if (isSendingRef.current) return;
-    const transcript = liveTranscriptFinal;
+    const transcript = liveTranscriptFinalRef.current;
     if (!transcript.trim()) {
       lastTranscriptTimeRef.current = 0;
       setSilenceCountdown(null);
@@ -502,6 +510,7 @@ function App() {
 
     // Snapshot and clear transcript before async send, so new speech accumulates cleanly
     setLiveTranscriptFinal('');
+    liveTranscriptFinalRef.current = '';
     setLiveTranscriptInterim('');
     lastTranscriptTimeRef.current = 0;
 
@@ -646,9 +655,10 @@ function App() {
         throw new Error(proxyResponse.error);
       }
 
-      // Update conversation history
+      // Update conversation history + display transcripts
       const newHistory = [...messages, { role: 'assistant', content: proxyResponse.response }];
       setConversationHistory(newHistory);
+      setDisplayTranscripts(prev => [...prev, transcript]);
 
       setAiResponse(proxyResponse.response);
       setSolvePhase('idle');
@@ -674,7 +684,9 @@ function App() {
 
   const clearConversationHistory = () => {
     setConversationHistory([]);
+    setDisplayTranscripts([]);
     setLiveTranscriptFinal('');
+    liveTranscriptFinalRef.current = '';
     setLiveTranscriptInterim('');
     setAiResponse('');
     setMessage('Conversation cleared — starting fresh.');
@@ -1776,15 +1788,18 @@ function App() {
               {(() => {
                 const visible = conversationHistory.filter(msg => msg.role !== 'system');
                 // Group into Q&A pairs (user + assistant), reverse so newest is on top
-                const pairs: Array<typeof visible> = [];
+                // pairIndex maps to displayTranscripts index (0-based)
+                const pairs: Array<{ messages: typeof visible; transcriptIdx: number }> = [];
+                let userCount = 0;
                 for (let i = 0; i < visible.length; i += 2) {
-                  pairs.push(visible.slice(i, i + 2));
+                  pairs.push({ messages: visible.slice(i, i + 2), transcriptIdx: userCount });
+                  userCount++;
                 }
                 pairs.reverse();
                 return pairs.map((pair, pairIdx) => (
                   <div key={pairIdx} className="conversation-pair">
                     {pairIdx === 0 && <div className="conversation-latest-badge">Latest</div>}
-                    {pair.map((msg, msgIdx) => (
+                    {pair.messages.map((msg, msgIdx) => (
                       <div key={msgIdx} className={`conversation-msg conversation-msg-${msg.role}`}>
                         <div className="conversation-msg-label">
                           {msg.role === 'user' ? '🎤 You' : '🤖 AI'}
@@ -1792,7 +1807,9 @@ function App() {
                         {msg.role === 'assistant' ? (
                           <AIResponseDisplay response={msg.content} language={selectedLanguage.toLowerCase()} />
                         ) : (
-                          <div className="conversation-msg-text">{msg.content}</div>
+                          <div className="conversation-msg-text">
+                            {displayTranscripts[pair.transcriptIdx] || msg.content}
+                          </div>
                         )}
                       </div>
                     ))}
