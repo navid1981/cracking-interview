@@ -495,9 +495,11 @@ function App() {
 
   const SILENCE_THRESHOLD_MS = 3000;
   const isSendingRef = useRef(false);
+  const autoSendRef = useRef<() => Promise<void>>();
 
   // Auto-send: silence detected — send transcript to AI but keep recording
-  const autoSendTranscript = async () => {
+  // Updated every render so it always has fresh closures
+  autoSendRef.current = async () => {
     if (isSendingRef.current) return;
     const transcript = liveTranscriptFinalRef.current;
     if (!transcript.trim()) {
@@ -509,7 +511,6 @@ function App() {
     isSendingRef.current = true;
     setSilenceCountdown(null);
 
-    // Snapshot and clear transcript before async send, so new speech accumulates cleanly
     setLiveTranscriptFinal('');
     liveTranscriptFinalRef.current = '';
     setLiveTranscriptInterim('');
@@ -540,7 +541,7 @@ function App() {
           setSilenceCountdown(remaining);
         } else {
           setSilenceCountdown(null);
-          autoSendTranscript();
+          autoSendRef.current?.();
         }
       } else {
         setSilenceCountdown(null);
