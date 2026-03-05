@@ -155,18 +155,34 @@ async fn run_transcription_session(
         }
     });
 
-    // Forward audio chunks to Deepgram WebSocket
+    // Forward audio chunks to Deepgram WebSocket + periodic KeepAlive
     let stop_send = stop_signal.clone();
     let send_handle = tokio::spawn(async move {
-        while let Some(chunk) = audio_rx.recv().await {
+        let mut keepalive_interval = tokio::time::interval(tokio::time::Duration::from_secs(8));
+        keepalive_interval.tick().await; // consume the immediate first tick
+
+        loop {
             if stop_send.load(Ordering::Relaxed) {
                 break;
             }
-            if ws_sender.send(Message::Binary(chunk)).await.is_err() {
-                break;
+            tokio::select! {
+                chunk = audio_rx.recv() => {
+                    match chunk {
+                        Some(data) => {
+                            if ws_sender.send(Message::Binary(data)).await.is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                _ = keepalive_interval.tick() => {
+                    if ws_sender.send(Message::Text(r#"{"type":"KeepAlive"}"#.to_string())).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
-        // Send close message to Deepgram
         let _ = ws_sender.send(Message::Text(r#"{"type":"CloseStream"}"#.to_string())).await;
     });
 

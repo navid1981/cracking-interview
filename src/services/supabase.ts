@@ -57,6 +57,8 @@ export interface UserSubscription {
 export interface UsageStats {
   requests_used: number;
   requests_limit: number;
+  audio_seconds_used: number;
+  audio_seconds_limit: number;
   period_start: Date;
   period_end: Date;
 }
@@ -109,14 +111,13 @@ export async function getUsageStats(userId: string, subscription?: UserSubscript
   const defaultStats: UsageStats = {
     requests_used: 0,
     requests_limit: 150,
+    audio_seconds_used: 0,
+    audio_seconds_limit: 36000,
     period_start: periodStart,
     period_end: periodEnd,
   };
 
   const fetchStats = async (): Promise<UsageStats> => {
-    // Note: Session should already be set by auth flow, no need to call setSession here
-    // (calling setSession triggers onAuthStateChange which creates a loop!)
-    
     const { count, error } = await supabase
       .from('api_usage')
       .select('*', { count: 'exact', head: true })
@@ -129,10 +130,24 @@ export async function getUsageStats(userId: string, subscription?: UserSubscript
       return defaultStats;
     }
 
+    // Audio usage: sum duration_seconds for the billing period
+    let audioSecondsUsed = 0;
+    const { data: audioRows, error: audioError } = await supabase
+      .from('audio_usage')
+      .select('duration_seconds')
+      .eq('user_id', userId)
+      .gte('created_at', periodStart.toISOString())
+      .lt('created_at', periodEnd.toISOString());
+
+    if (!audioError && audioRows) {
+      audioSecondsUsed = audioRows.reduce((sum, r) => sum + (r.duration_seconds || 0), 0);
+    }
 
     return {
       requests_used: count || 0,
       requests_limit: 150,
+      audio_seconds_used: audioSecondsUsed,
+      audio_seconds_limit: 36000,
       period_start: periodStart,
       period_end: periodEnd,
     };
@@ -399,6 +414,38 @@ export async function checkAIQuota(userId: string): Promise<{
       remainingCalls: remaining,
       isPaid: false,
     };
+  }
+}
+
+/**
+ * Log audio recording duration after a session ends.
+ * Returns updated audio usage totals from the server.
+ */
+export async function logAudioUsage(
+  durationSeconds: number,
+  accessToken: string
+): Promise<{ audio_seconds_used: number; audio_seconds_limit: number } | null> {
+  try {
+    const resp = await fetch(`${EDGE_FUNCTION_URL}/log-audio-usage`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ duration_seconds: durationSeconds }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      console.error('[AudioUsage] Log failed:', err.error || resp.status);
+      return null;
+    }
+
+    return await resp.json();
+  } catch (e) {
+    console.error('[AudioUsage] Error logging usage:', e);
+    return null;
   }
 }
 

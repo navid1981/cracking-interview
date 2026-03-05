@@ -1,12 +1,9 @@
 /**
- * deepgram-key Edge Function
+ * log-audio-usage Edge Function
  *
- * Generates a temporary Deepgram JWT (30s TTL) for authenticated Pro users.
- * The permanent API key never leaves the server — only a short-lived token
- * is returned. The token expires after 30 seconds but an already-opened
- * WebSocket connection stays alive beyond the TTL.
- *
- * @see https://developers.deepgram.com/guides/fundamentals/token-based-authentication
+ * Logs the duration of a completed audio recording session for the
+ * authenticated Pro user.  Returns the updated cumulative total so the
+ * frontend can refresh its usage display without an extra round-trip.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -15,6 +12,9 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const MONTHLY_AUDIO_LIMIT = 36000; // 10 hours in seconds
+const MAX_SESSION_SECONDS = 5400;  // 90 minutes cap per session
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -44,6 +44,21 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Parse request body
+    const body = await req.json().catch(() => null);
+    const durationSeconds = body?.duration_seconds;
+
+    if (typeof durationSeconds !== 'number' || durationSeconds <= 0) {
+      return new Response(
+        JSON.stringify({ error: 'duration_seconds must be a positive number' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Server-side cap: never log more than 90 minutes per session
+    const cappedDuration = Math.min(Math.round(durationSeconds), MAX_SESSION_SECONDS);
+
+    // Verify Pro subscription
     const { data: subscription } = await supabase
       .from('users')
       .select('subscription_status, subscription_start_date, subscription_end_date')
@@ -55,14 +70,28 @@ Deno.serve(async (req) => {
 
     if (!isPro) {
       return new Response(
-        JSON.stringify({ error: 'Pro subscription required for live transcription' }),
+        JSON.stringify({ error: 'Pro subscription required' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Check audio usage quota (10 hours = 36000 seconds per billing period)
-    const MONTHLY_AUDIO_LIMIT = 36000;
+    // Insert usage record
+    const { error: insertError } = await supabase
+      .from('audio_usage')
+      .insert({
+        user_id: user.id,
+        duration_seconds: cappedDuration,
+      });
 
+    if (insertError) {
+      console.error('[log-audio-usage] Insert error:', insertError);
+      return new Response(
+        JSON.stringify({ error: 'Failed to log audio usage' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Compute updated total for current billing period
     const periodStart = subscription.subscription_start_date
       ? new Date(subscription.subscription_start_date)
       : new Date('2020-01-01');
@@ -70,7 +99,6 @@ Deno.serve(async (req) => {
       ? new Date(subscription.subscription_end_date)
       : new Date('2099-12-31');
 
-    let audioSecondsUsed = 0;
     const { data: sumData, error: sumError } = await supabase
       .rpc('sum_audio_seconds', {
         p_user_id: user.id,
@@ -78,8 +106,9 @@ Deno.serve(async (req) => {
         p_end: periodEnd.toISOString(),
       });
 
+    let audioSecondsUsed = cappedDuration; // fallback
     if (!sumError && sumData !== null) {
-      audioSecondsUsed = Number(sumData);
+      audioSecondsUsed = sumData;
     } else {
       // Fallback: manual query
       const { data: rows } = await supabase
@@ -88,60 +117,14 @@ Deno.serve(async (req) => {
         .eq('user_id', user.id)
         .gte('created_at', periodStart.toISOString())
         .lt('created_at', periodEnd.toISOString());
+
       if (rows) {
         audioSecondsUsed = rows.reduce((sum: number, r: { duration_seconds: number }) => sum + r.duration_seconds, 0);
       }
     }
 
-    if (audioSecondsUsed >= MONTHLY_AUDIO_LIMIT) {
-      return new Response(
-        JSON.stringify({
-          error: `Monthly audio limit reached (${Math.round(MONTHLY_AUDIO_LIMIT / 3600)}h). Resets ${periodEnd.toLocaleDateString()}.`,
-          audio_seconds_used: audioSecondsUsed,
-          audio_seconds_limit: MONTHLY_AUDIO_LIMIT,
-        }),
-        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const remainingAudioSeconds = MONTHLY_AUDIO_LIMIT - audioSecondsUsed;
-
-    const deepgramKey = Deno.env.get('DEEPGRAM_API_KEY');
-    if (!deepgramKey) {
-      console.error('[deepgram-key] DEEPGRAM_API_KEY secret not configured');
-      return new Response(
-        JSON.stringify({ error: 'Transcription service not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Request a temporary JWT from Deepgram (default 30s TTL).
-    // The WebSocket only needs the token to be valid during the handshake;
-    // the connection stays open beyond the TTL.
-    const grantResp = await fetch('https://api.deepgram.com/v1/auth/grant', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Token ${deepgramKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ ttl_seconds: 3600 }),
-    });
-
-    if (!grantResp.ok) {
-      const errText = await grantResp.text();
-      console.error('[deepgram-key] Deepgram /auth/grant failed:', grantResp.status, errText);
-      return new Response(
-        JSON.stringify({ error: 'Failed to generate transcription token' }),
-        { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const grantData = await grantResp.json();
-
     return new Response(
       JSON.stringify({
-        key: grantData.access_token,
-        remaining_seconds: remainingAudioSeconds,
         audio_seconds_used: audioSecondsUsed,
         audio_seconds_limit: MONTHLY_AUDIO_LIMIT,
       }),
@@ -149,7 +132,7 @@ Deno.serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('[deepgram-key] Error:', error);
+    console.error('[log-audio-usage] Error:', error);
     return new Response(
       JSON.stringify({ error: 'Internal server error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

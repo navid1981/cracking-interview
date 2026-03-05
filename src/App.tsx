@@ -13,6 +13,7 @@ import {
   getUserSubscription, 
   getUsageStats,
   createCheckoutSession,
+  logAudioUsage,
   signOut as supabaseSignOut,
   UserSubscription,
   UsageStats,
@@ -187,6 +188,9 @@ function App() {
   const lastTranscriptTimeRef = useRef<number>(0);
   const isLiveTranscribingRef = useRef(false);
   const liveTranscriptFinalRef = useRef('');
+  const MAX_SESSION_SECONDS = 5400; // 90 minutes per session
+  const sessionMaxSecondsRef = useRef(MAX_SESSION_SECONDS);
+  const audioSecondsRef = useRef(0);
 
   const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
@@ -341,6 +345,17 @@ function App() {
     subscriptionRef.current = subscription;
   }, [subscription]);
 
+  // Auto-stop recording when session time limit is reached (90 min or remaining quota)
+  const sessionStopTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (isLiveTranscribing && audioSeconds >= sessionMaxSecondsRef.current && !sessionStopTriggeredRef.current) {
+      sessionStopTriggeredRef.current = true;
+      const minutes = Math.round(sessionMaxSecondsRef.current / 60);
+      setMessage(`⏱️ Session limit reached (${minutes} min). Stopping recording…`);
+      stopLiveTranscription();
+    }
+  }, [audioSeconds, isLiveTranscribing]);
+
   const toggleAudioRecording = async () => {
     const now = Date.now();
     if (audioToggleInFlightRef.current) return;
@@ -392,7 +407,7 @@ function App() {
     }
   };
 
-  const fetchDeepgramKey = async (): Promise<string | null> => {
+  const fetchDeepgramKey = async (): Promise<{ key: string; remaining_seconds: number } | null> => {
     try {
       const accessToken = getAccessToken();
       if (!accessToken) return null;
@@ -405,11 +420,25 @@ function App() {
       });
       if (!resp.ok) {
         const err = await resp.json();
+        if (resp.status === 429 && err.audio_seconds_used !== undefined) {
+          setUsageStats(prev => prev ? {
+            ...prev,
+            audio_seconds_used: err.audio_seconds_used,
+            audio_seconds_limit: err.audio_seconds_limit,
+          } : prev);
+        }
         setMessage(`❌ ${err.error || 'Failed to get transcription key'}`);
         return null;
       }
       const data = await resp.json();
-      return data.key || null;
+      if (data.audio_seconds_used !== undefined) {
+        setUsageStats(prev => prev ? {
+          ...prev,
+          audio_seconds_used: data.audio_seconds_used,
+          audio_seconds_limit: data.audio_seconds_limit,
+        } : prev);
+      }
+      return { key: data.key, remaining_seconds: data.remaining_seconds ?? MAX_SESSION_SECONDS };
     } catch (e) {
       setMessage(`❌ Error fetching transcription key: ${e}`);
       return null;
@@ -424,8 +453,16 @@ function App() {
     }
 
     setMessage('🎙️ Starting live transcription…');
-    const deepgramKey = await fetchDeepgramKey();
-    if (!deepgramKey) return;
+    const dgResult = await fetchDeepgramKey();
+    if (!dgResult) return;
+
+    const effectiveMax = Math.min(MAX_SESSION_SECONDS, dgResult.remaining_seconds);
+    if (effectiveMax <= 0) {
+      setMessage('❌ Monthly audio limit reached. Check your usage in Settings.');
+      return;
+    }
+    sessionMaxSecondsRef.current = effectiveMax;
+    sessionStopTriggeredRef.current = false;
 
     try {
       setLiveTranscriptFinal('');
@@ -435,19 +472,25 @@ function App() {
       lastTranscriptTimeRef.current = Date.now();
 
       await invoke('start_live_transcription', {
-        deepgramKey,
+        deepgramKey: dgResult.key,
         language: interviewLanguage,
       });
 
       setIsLiveTranscribing(true);
       setIsRecordingAudio(true);
       setAudioSeconds(0);
+      audioSecondsRef.current = 0;
       if (audioTimerRef.current) window.clearInterval(audioTimerRef.current);
-      audioTimerRef.current = window.setInterval(() => setAudioSeconds(s => s + 1), 1000);
+      audioTimerRef.current = window.setInterval(() => {
+        setAudioSeconds(s => {
+          const next = s + 1;
+          audioSecondsRef.current = next;
+          return next;
+        });
+      }, 1000);
       isRecordingAudioRef.current = true;
       setMessage('');
 
-      // Start silence detection polling
       startSilenceDetection();
     } catch (e) {
       setMessage(`❌ Failed to start transcription: ${e}`);
@@ -463,6 +506,9 @@ function App() {
     }
     setSilenceCountdown(null);
 
+    // Capture session duration before clearing timer
+    const sessionDuration = audioSecondsRef.current;
+
     try {
       const finalTranscript = await invoke<string>('stop_live_transcription');
       setIsLiveTranscribing(false);
@@ -471,6 +517,21 @@ function App() {
       if (audioTimerRef.current) {
         window.clearInterval(audioTimerRef.current);
         audioTimerRef.current = null;
+      }
+
+      // Log audio usage to backend
+      if (sessionDuration > 0) {
+        const accessToken = getAccessToken();
+        if (accessToken) {
+          const audioResult = await logAudioUsage(sessionDuration, accessToken);
+          if (audioResult) {
+            setUsageStats(prev => prev ? {
+              ...prev,
+              audio_seconds_used: audioResult.audio_seconds_used,
+              audio_seconds_limit: audioResult.audio_seconds_limit,
+            } : prev);
+          }
+        }
       }
 
       // Send any remaining unsent transcript
@@ -488,6 +549,21 @@ function App() {
       if (audioTimerRef.current) {
         window.clearInterval(audioTimerRef.current);
         audioTimerRef.current = null;
+      }
+      // Still log usage even on error
+      if (sessionDuration > 0) {
+        const accessToken = getAccessToken();
+        if (accessToken) {
+          logAudioUsage(sessionDuration, accessToken).then(audioResult => {
+            if (audioResult) {
+              setUsageStats(prev => prev ? {
+                ...prev,
+                audio_seconds_used: audioResult.audio_seconds_used,
+                audio_seconds_limit: audioResult.audio_seconds_limit,
+              } : prev);
+            }
+          });
+        }
       }
       setMessage(`❌ Error stopping transcription: ${e}`);
     }
@@ -1523,7 +1599,6 @@ function App() {
       <header className="app-header">
         <div className="header-left">
           <img src="/icon.png" alt="CrackingInterview" className="app-icon-img" />
-          <h1>CrackingInterview</h1>
         </div>
         <div className="header-right">
           {/* Quota Display */}
@@ -1542,6 +1617,11 @@ function App() {
               ) : (
                 <>🎁 {subscription.lifetime_ai_calls || 0}/3 calls</>
               )}
+            </span>
+          )}
+          {isPaidUser && usageStats && (
+            <span className="quota-badge" title={`${(usageStats.audio_seconds_used / 3600).toFixed(1)} of ${usageStats.audio_seconds_limit / 3600} audio hours used this month`}>
+              🎙️ {(usageStats.audio_seconds_used / 3600).toFixed(1)}/{usageStats.audio_seconds_limit / 3600}h
             </span>
           )}
           {cdpReady ? (
@@ -1901,13 +1981,12 @@ function App() {
                   </div>
 
                   <div className="form-group">
-                    <label>Usage {isPaidUser ? 'This Month' : '(Lifetime)'}:</label>
+                    <label>AI Calls {isPaidUser ? 'This Month' : '(Lifetime)'}:</label>
                     <div className="usage-bar-container">
                       {(() => {
                         const pct = isPaidUser && usageStats
                           ? Math.min(100, (usageStats.requests_used / usageStats.requests_limit) * 100)
                           : Math.min(100, ((subscription?.lifetime_ai_calls || 0) / 3) * 100);
-                        // Green → Yellow → Red gradient based on usage percentage
                         const barColor = pct < 50
                           ? `linear-gradient(90deg, #4caf50, #66bb6a)`
                           : pct < 80
@@ -1935,11 +2014,38 @@ function App() {
                     </div>
                   </div>
 
+                  {isPaidUser && usageStats && (
+                    <div className="form-group">
+                      <label>Audio Recording This Month:</label>
+                      <div className="usage-bar-container">
+                        {(() => {
+                          const pct = Math.min(100, (usageStats.audio_seconds_used / usageStats.audio_seconds_limit) * 100);
+                          const barColor = pct < 50
+                            ? `linear-gradient(90deg, #4caf50, #66bb6a)`
+                            : pct < 80
+                              ? `linear-gradient(90deg, #66bb6a, #ffc107)`
+                              : `linear-gradient(90deg, #ff9800, #f44336)`;
+                          return (
+                            <div
+                              className="usage-bar"
+                              style={{ width: `${pct}%`, background: barColor }}
+                            />
+                          );
+                        })()}
+                      </div>
+                      <div className="usage-text">
+                        <span>{(usageStats.audio_seconds_used / 3600).toFixed(1)} / {usageStats.audio_seconds_limit / 3600} hours</span>
+                        <span className="usage-reset">Resets {usageStats.period_end?.toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  )}
+
                   {!isPaidUser && (
                     <div className="upgrade-section">
                       <h4>🚀 Upgrade to Pro</h4>
                       <ul className="upgrade-benefits">
                         <li>✓ 150 AI requests per month</li>
+                        <li>✓ 10 hours audio recording per month</li>
                         <li>✓ GPT-5.2 Codex, Claude 4.5, Gemini 3, Grok 4.1</li>
                         <li>✓ Any website + screen capture</li>
                         <li>✓ Audio input with transcription</li>
