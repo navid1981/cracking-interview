@@ -165,3 +165,17 @@ Select "Software developer" as the submitter type
 Upload your signed .exe
 Explain it's a legitimate desktop application
 This tells Microsoft your app is not malware and can significantly speed up the reputation building process. Do this right after you get your code signing certificate and sign the .exe.
+
+-----------------
+0-How many previous question/response should be added to new prompt
+1-message priority in audio
+2-no timeout for audio recording
+3-3 second silence detection for sending transcription to ai
+4-supporting langugaes
+5-geting llm models from edge functions
+
+User clicks Record — live transcription starts, audio streams to Deepgram
+Interviewer is talking — Deepgram sends transcript events, the app keeps resetting a "last speech" timestamp
+Interviewer stops talking — no more transcript events arrive
+After 3 seconds of silence — the app shows a countdown: "Silence detected — sending in 2s..."
+After 5 seconds total silence (3s threshold + 2s countdown) — the app automatically stops recording and sends the transcript to the AI

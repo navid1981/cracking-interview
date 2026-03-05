@@ -7,7 +7,7 @@ import TabDropdown from './components/TabDropdown';
 import PromptEditor from './components/PromptEditor';
 import PromptListView from './components/PromptListView';
 import AuthScreen from './components/AuthScreen';
-import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, LIVE_CONVERSATION_SYSTEM_PROMPT } from './services/prompts';
+import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts } from './services/prompts';
 import { 
   onAuthStateChange, 
   getUserSubscription, 
@@ -180,6 +180,7 @@ function App() {
   const [liveTranscriptInterim, setLiveTranscriptInterim] = useState('');
   const [conversationHistory, setConversationHistory] = useState<Array<{role: string; content: string}>>([]);
   const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
+  const [interviewLanguage, setInterviewLanguage] = useState(() => localStorage.getItem('interview_language') || 'multi');
   const silenceTimerRef = useRef<number | null>(null);
   const lastTranscriptTimeRef = useRef<number>(0);
   const isLiveTranscribingRef = useRef(false);
@@ -362,7 +363,7 @@ function App() {
 
     // Stop live transcription and send to AI
     try {
-      await stopLiveTranscription(false);
+      await stopLiveTranscription();
     } catch (e) {
       setMessage(`❌ Error: ${String(e)}`);
     } finally {
@@ -427,7 +428,7 @@ function App() {
 
       await invoke('start_live_transcription', {
         deepgramKey,
-        language: 'auto',
+        language: interviewLanguage,
       });
 
       setIsLiveTranscribing(true);
@@ -446,7 +447,8 @@ function App() {
     }
   };
 
-  const stopLiveTranscription = async (_autoTriggered = false) => {
+  // Manual stop: user clicks Stop or presses hotkey — closes WebSocket
+  const stopLiveTranscription = async () => {
     if (silenceTimerRef.current) {
       window.clearInterval(silenceTimerRef.current);
       silenceTimerRef.current = null;
@@ -463,14 +465,13 @@ function App() {
         audioTimerRef.current = null;
       }
 
-      // Use the accumulated frontend transcript (more complete due to interim updates)
+      // Send any remaining unsent transcript
       const transcript = liveTranscriptFinal || finalTranscript;
-      if (!transcript.trim()) {
-        setMessage('⚠️ No speech detected.');
-        return;
+      if (transcript.trim()) {
+        setLiveTranscriptFinal('');
+        setLiveTranscriptInterim('');
+        await sendTranscriptToAI(transcript);
       }
-
-      await sendTranscriptToAI(transcript);
     } catch (e) {
       setIsLiveTranscribing(false);
       setIsRecordingAudio(false);
@@ -484,6 +485,29 @@ function App() {
   };
 
   const SILENCE_THRESHOLD_MS = 3000;
+  const isSendingRef = useRef(false);
+
+  // Auto-send: silence detected — send transcript to AI but keep recording
+  const autoSendTranscript = async () => {
+    if (isSendingRef.current) return;
+    const transcript = liveTranscriptFinal;
+    if (!transcript.trim()) {
+      lastTranscriptTimeRef.current = 0;
+      setSilenceCountdown(null);
+      return;
+    }
+
+    isSendingRef.current = true;
+    setSilenceCountdown(null);
+
+    // Snapshot and clear transcript before async send, so new speech accumulates cleanly
+    setLiveTranscriptFinal('');
+    setLiveTranscriptInterim('');
+    lastTranscriptTimeRef.current = 0;
+
+    await sendTranscriptToAI(transcript);
+    isSendingRef.current = false;
+  };
 
   const startSilenceDetection = () => {
     if (silenceTimerRef.current) window.clearInterval(silenceTimerRef.current);
@@ -494,6 +518,8 @@ function App() {
         return;
       }
 
+      if (isSendingRef.current) return;
+
       const elapsed = Date.now() - lastTranscriptTimeRef.current;
       if (elapsed >= SILENCE_THRESHOLD_MS && lastTranscriptTimeRef.current > 0) {
         const remaining = Math.max(0, Math.ceil((SILENCE_THRESHOLD_MS + 2000 - elapsed) / 1000));
@@ -501,8 +527,7 @@ function App() {
           setSilenceCountdown(remaining);
         } else {
           setSilenceCountdown(null);
-          if (silenceTimerRef.current) window.clearInterval(silenceTimerRef.current);
-          stopLiveTranscription(true);
+          autoSendTranscript();
         }
       } else {
         setSilenceCountdown(null);
@@ -510,37 +535,61 @@ function App() {
     }, 500);
   };
 
-  // Approximate token count (1 token ≈ 4 chars)
   const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
 
-  const MAX_HISTORY_TOKENS = 12000;
+  const MAX_HISTORY_TOKENS = 100_000;
+  const KEEP_RECENT_MESSAGES = 20; // last 10 Q&A pairs kept in full
+  const SUMMARY_CHAR_LIMIT = 500;  // chars kept per old message in summary
 
   const trimConversationHistory = (history: Array<{role: string; content: string}>): Array<{role: string; content: string}> => {
-    let totalTokens = history.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
-    if (totalTokens <= MAX_HISTORY_TOKENS) return history;
+    const totalTokens = history.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
 
-    // Keep system prompt (first), summarize old exchanges, keep last 3-4 pairs
-    const keepRecent = 6; // last 3 Q&A pairs
-    if (history.length <= keepRecent + 1) return history;
+    // Preserve: system prompt (index 0) + first user template message (index 1)
+    const preserved: Array<{role: string; content: string}> = [];
+    let trimStart = 0;
+    if (history[0]?.role === 'system') {
+      preserved.push(history[0]);
+      trimStart = 1;
+    }
+    if (history[trimStart]?.role === 'user') {
+      preserved.push(history[trimStart]);
+      trimStart++;
+    }
 
-    const systemMsg = history[0]?.role === 'system' ? [history[0]] : [];
-    const rest = history[0]?.role === 'system' ? history.slice(1) : history;
+    const rest = history.slice(trimStart);
 
-    if (rest.length <= keepRecent) return history;
+    if (totalTokens <= MAX_HISTORY_TOKENS && rest.length <= KEEP_RECENT_MESSAGES) return history;
+    if (rest.length <= KEEP_RECENT_MESSAGES) return history;
 
-    const oldMessages = rest.slice(0, rest.length - keepRecent);
-    const recentMessages = rest.slice(rest.length - keepRecent);
+    const oldMessages = rest.slice(0, rest.length - KEEP_RECENT_MESSAGES);
+    const recentMessages = rest.slice(rest.length - KEEP_RECENT_MESSAGES);
 
     const summaryText = oldMessages
-      .map(m => `${m.role === 'user' ? 'Q' : 'A'}: ${m.content.substring(0, 200)}${m.content.length > 200 ? '…' : ''}`)
+      .map(m => {
+        const prefix = m.role === 'user' ? 'Q' : 'A';
+        const truncated = m.content.length > SUMMARY_CHAR_LIMIT
+          ? m.content.substring(0, SUMMARY_CHAR_LIMIT) + '…'
+          : m.content;
+        return `${prefix}: ${truncated}`;
+      })
       .join('\n');
 
     const summaryMsg = {
       role: 'system' as const,
-      content: `Previous conversation summary:\n${summaryText}`,
+      content: `Previous conversation summary (earlier exchanges):\n${summaryText}`,
     };
 
-    return [...systemMsg, summaryMsg, ...recentMessages];
+    let result = [...preserved, summaryMsg, ...recentMessages];
+
+    // Safety: if still over token limit, progressively drop oldest summaries
+    let resultTokens = result.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
+    while (resultTokens > MAX_HISTORY_TOKENS && result.length > KEEP_RECENT_MESSAGES + preserved.length) {
+      const dropIdx = preserved.length;
+      result.splice(dropIdx, 1);
+      resultTokens = result.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
+    }
+
+    return result;
   };
 
   const sendTranscriptToAI = async (transcript: string) => {
@@ -564,15 +613,19 @@ function App() {
       let messages: Array<{role: string; content: string}> = [];
 
       if (conversationHistory.length === 0) {
-        // First turn — add system prompt
-        messages.push({ role: 'system', content: LIVE_CONVERSATION_SYSTEM_PROMPT });
+        // First turn — use the editable Verbal Interview system + user prompts
+        const { systemPrompt, userMessage } = getConversationPrompts(
+          selectedTemplate,
+          interviewLanguage,
+          transcript,
+        );
+        messages.push({ role: 'system', content: systemPrompt });
+        messages.push({ role: 'user', content: userMessage });
       } else {
-        // Continue conversation — include full history
+        // Follow-up turns — reuse history, add raw transcript
         messages = [...conversationHistory];
+        messages.push({ role: 'user', content: transcript });
       }
-
-      // Add the new user transcript
-      messages.push({ role: 'user', content: transcript });
 
       // Trim if approaching token limit
       messages = trimConversationHistory(messages);
@@ -600,10 +653,6 @@ function App() {
       setAiResponse(proxyResponse.response);
       setSolvePhase('idle');
       setMessage('');
-
-      // Clear live transcript for next turn
-      setLiveTranscriptFinal('');
-      setLiveTranscriptInterim('');
 
       if (proxyResponse.usage) {
         setUsageStats(prev => prev ? {
@@ -1582,7 +1631,7 @@ function App() {
         </div>
       )}
 
-      {conversationHistory.length > 0 && !isLiveTranscribing && (
+      {conversationHistory.length > 0 && (
         <div className="conversation-controls" style={{ margin: '0 20px 8px 20px', display: 'flex', gap: '8px', alignItems: 'center' }}>
           <span style={{ fontSize: '12px', color: '#888' }}>
             {Math.floor(conversationHistory.filter(m => m.role === 'user').length)} exchange{conversationHistory.filter(m => m.role === 'user').length !== 1 ? 's' : ''} in this session
@@ -1724,20 +1773,32 @@ function App() {
 
           {conversationHistory.length > 1 && selectedTab && isAudio(selectedTab) ? (
             <div className="conversation-view">
-              {conversationHistory
-                .filter(msg => msg.role !== 'system')
-                .map((msg, idx) => (
-                  <div key={idx} className={`conversation-msg conversation-msg-${msg.role}`}>
-                    <div className="conversation-msg-label">
-                      {msg.role === 'user' ? '🎤 You' : '🤖 AI'}
-                    </div>
-                    {msg.role === 'assistant' ? (
-                      <AIResponseDisplay response={msg.content} language={selectedLanguage.toLowerCase()} />
-                    ) : (
-                      <div className="conversation-msg-text">{msg.content}</div>
-                    )}
+              {(() => {
+                const visible = conversationHistory.filter(msg => msg.role !== 'system');
+                // Group into Q&A pairs (user + assistant), reverse so newest is on top
+                const pairs: Array<typeof visible> = [];
+                for (let i = 0; i < visible.length; i += 2) {
+                  pairs.push(visible.slice(i, i + 2));
+                }
+                pairs.reverse();
+                return pairs.map((pair, pairIdx) => (
+                  <div key={pairIdx} className="conversation-pair">
+                    {pairIdx === 0 && <div className="conversation-latest-badge">Latest</div>}
+                    {pair.map((msg, msgIdx) => (
+                      <div key={msgIdx} className={`conversation-msg conversation-msg-${msg.role}`}>
+                        <div className="conversation-msg-label">
+                          {msg.role === 'user' ? '🎤 You' : '🤖 AI'}
+                        </div>
+                        {msg.role === 'assistant' ? (
+                          <AIResponseDisplay response={msg.content} language={selectedLanguage.toLowerCase()} />
+                        ) : (
+                          <div className="conversation-msg-text">{msg.content}</div>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
+                ));
+              })()}
             </div>
           ) : (
             <AIResponseDisplay 
@@ -2063,6 +2124,11 @@ function App() {
                         localStorage.setItem('language', lang);
                       }}
                       isPro={subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling'}
+                      interviewLanguage={interviewLanguage}
+                      onInterviewLanguageChange={(langCode: string) => {
+                        setInterviewLanguage(langCode);
+                        localStorage.setItem('interview_language', langCode);
+                      }}
                     />
                   ) : (
                     <>

@@ -124,7 +124,7 @@ async fn run_transcription_session(
 
     let request = tokio_tungstenite::tungstenite::http::Request::builder()
         .uri(&url)
-        .header("Authorization", format!("Token {}", deepgram_key))
+        .header("Authorization", format!("Bearer {}", deepgram_key))
         .header("Host", "api.deepgram.com")
         .header("Connection", "Upgrade")
         .header("Upgrade", "websocket")

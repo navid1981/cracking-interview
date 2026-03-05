@@ -1,9 +1,12 @@
 /**
  * deepgram-key Edge Function
  *
- * Securely provides the Deepgram API key to authenticated Pro users.
- * The key is stored as a Supabase secret (DEEPGRAM_API_KEY) and never
- * embedded in the app binary.
+ * Generates a temporary Deepgram JWT (30s TTL) for authenticated Pro users.
+ * The permanent API key never leaves the server — only a short-lived token
+ * is returned. The token expires after 30 seconds but an already-opened
+ * WebSocket connection stays alive beyond the TTL.
+ *
+ * @see https://developers.deepgram.com/guides/fundamentals/token-based-authentication
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -41,7 +44,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Check subscription — only Pro users (active or cancelling) get the key
     const { data: subscription } = await supabase
       .from('users')
       .select('subscription_status')
@@ -67,8 +69,31 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Request a temporary JWT from Deepgram (default 30s TTL).
+    // The WebSocket only needs the token to be valid during the handshake;
+    // the connection stays open beyond the TTL.
+    const grantResp = await fetch('https://api.deepgram.com/v1/auth/grant', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Token ${deepgramKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ttl_seconds: 3600 }),
+    });
+
+    if (!grantResp.ok) {
+      const errText = await grantResp.text();
+      console.error('[deepgram-key] Deepgram /auth/grant failed:', grantResp.status, errText);
+      return new Response(
+        JSON.stringify({ error: 'Failed to generate transcription token' }),
+        { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const grantData = await grantResp.json();
+
     return new Response(
-      JSON.stringify({ key: deepgramKey }),
+      JSON.stringify({ key: grantData.access_token }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 

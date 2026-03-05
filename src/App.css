@@ -1118,7 +1118,33 @@ button.chrome-open-btn:disabled {
 .conversation-view {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
+}
+
+.conversation-pair {
+  position: relative;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+}
+
+.conversation-pair:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+
+.conversation-latest-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #64b5f6;
+  margin-bottom: 6px;
+  padding: 2px 8px;
+  background: rgba(100, 181, 246, 0.1);
+  border-radius: 4px;
+  display: inline-block;
 }
 
 .conversation-msg {
@@ -1135,17 +1161,21 @@ button.chrome-open-btn:disabled {
 }
 
 .conversation-msg-user .conversation-msg-text {
-  background: #e3f2fd;
+  background: rgba(100, 181, 246, 0.08);
   border-radius: 12px;
   padding: 12px 16px;
   font-size: 14px;
   line-height: 1.5;
-  color: #333;
-  border: 1px solid #bbdefb;
+  color: #ccc;
+  border: 1px solid rgba(100, 181, 246, 0.15);
+}
+
+.conversation-msg-user {
+  margin-bottom: 8px;
 }
 
 .conversation-msg-assistant {
-  /* AI response already styled by AIResponseDisplay */
+  margin-bottom: 4px;
 }
 
 /* ========== NEW SESSION BUTTON ========== */

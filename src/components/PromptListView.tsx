@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getAllTemplates, CustomPromptsManager, PromptTemplate, ProgrammingLanguage, supportsLanguageSelection, getDefaultSystemPromptForTemplate, getDefaultUserTemplate } from '../services/prompts';
+import { getAllTemplates, CustomPromptsManager, PromptTemplate, ProgrammingLanguage, supportsLanguageSelection, getDefaultSystemPromptForTemplate, getDefaultUserTemplate, DEEPGRAM_LANGUAGES } from '../services/prompts';
 import './PromptListView.css';
 
 interface PromptListViewProps {
@@ -9,6 +9,8 @@ interface PromptListViewProps {
   selectedLanguage: ProgrammingLanguage;
   onLanguageChange: (language: ProgrammingLanguage) => void;
   isPro: boolean;
+  interviewLanguage: string;
+  onInterviewLanguageChange: (langCode: string) => void;
 }
 
 export default function PromptListView({
@@ -17,7 +19,9 @@ export default function PromptListView({
   onEditPrompt,
   selectedLanguage,
   onLanguageChange,
-  isPro
+  isPro,
+  interviewLanguage,
+  onInterviewLanguageChange,
 }: PromptListViewProps) {
   const [templates, setTemplates] = useState(getAllTemplates());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -482,6 +486,21 @@ export default function PromptListView({
           <div className="dialog-box" onClick={(e) => e.stopPropagation()}>
             <h3>🎤 Audio Prompt</h3>
             <p>This is the only editable Prompt for Audio input source</p>
+            <div className="interview-lang-selector">
+              <label className="interview-lang-label">Interview Language:</label>
+              <select
+                value={interviewLanguage}
+                onChange={(e) => onInterviewLanguageChange(e.target.value)}
+                className="input-field"
+              >
+                {DEEPGRAM_LANGUAGES.map(lang => (
+                  <option key={lang.code} value={lang.code}>{lang.label}</option>
+                ))}
+              </select>
+              <p className="interview-lang-hint">
+                Select the spoken language of your interview. AI will respond in the same language.
+              </p>
+            </div>
             <div className="dialog-actions">
               <button onClick={() => setShowAudioBadgeInfo(false)} className="dialog-btn confirm">
                 OK
