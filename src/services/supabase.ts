@@ -38,6 +38,19 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: 
 }
 
 /**
+ * Ensure a database timestamp string is interpreted as UTC.
+ * Supabase returns `timestamp` (without timezone) as "2026-03-05T09:29:28"
+ * or "2026-03-05 09:29:28". JavaScript's `new Date()` treats strings without
+ * explicit timezone as local time, causing wrong offsets on non-UTC machines.
+ */
+function parseAsUTC(dateStr: string): string {
+  if (dateStr.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(dateStr)) {
+    return dateStr;
+  }
+  return dateStr.replace(' ', 'T') + 'Z';
+}
+
+/**
  * User subscription data from the users table
  */
 export interface UserSubscription {
@@ -98,15 +111,16 @@ export async function getUsageStats(userId: string, subscription?: UserSubscript
   let periodEnd: Date;
   
   if (subscription?.subscription_start_date) {
-    periodStart = new Date(subscription.subscription_start_date);
+    periodStart = new Date(parseAsUTC(subscription.subscription_start_date));
     periodEnd = subscription.subscription_end_date 
-      ? new Date(subscription.subscription_end_date) 
+      ? new Date(parseAsUTC(subscription.subscription_end_date)) 
       : new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // +30 days if no end date
   } else {
     // No subscription - count all time (for display purposes)
-    periodStart = new Date('2020-01-01');
-    periodEnd = new Date('2099-12-31');
+    periodStart = new Date('2020-01-01T00:00:00Z');
+    periodEnd = new Date('2099-12-31T23:59:59Z');
   }
+
 
   const defaultStats: UsageStats = {
     requests_used: 0,
@@ -118,6 +132,27 @@ export async function getUsageStats(userId: string, subscription?: UserSubscript
   };
 
   const fetchStats = async (): Promise<UsageStats> => {
+    // Ensure supabase client has a valid session for RLS queries
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+    if (!currentSession) {
+      // Try to restore session from localStorage
+      const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed.access_token) {
+            await supabase.auth.setSession({
+              access_token: parsed.access_token,
+              refresh_token: parsed.refresh_token || '',
+            });
+          }
+        } catch {
+          // Failed to restore session
+        }
+      }
+    }
+
     const { count, error } = await supabase
       .from('api_usage')
       .select('*', { count: 'exact', head: true })

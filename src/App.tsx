@@ -510,7 +510,7 @@ function App() {
     const sessionDuration = audioSecondsRef.current;
 
     try {
-      const finalTranscript = await invoke<string>('stop_live_transcription');
+      await invoke<string>('stop_live_transcription');
       setIsLiveTranscribing(false);
       setIsRecordingAudio(false);
       isRecordingAudioRef.current = false;
@@ -534,13 +534,17 @@ function App() {
         }
       }
 
-      // Send any remaining unsent transcript
-      const transcript = liveTranscriptFinalRef.current || finalTranscript;
-      if (transcript.trim()) {
+      // Only send transcript that hasn't been auto-sent yet
+      const unsent = liveTranscriptFinalRef.current;
+      if (unsent.trim()) {
         setLiveTranscriptFinal('');
         liveTranscriptFinalRef.current = '';
         setLiveTranscriptInterim('');
-        await sendTranscriptToAI(transcript);
+        await sendTranscriptToAI(unsent);
+      } else {
+        setLiveTranscriptFinal('');
+        liveTranscriptFinalRef.current = '';
+        setLiveTranscriptInterim('');
       }
     } catch (e) {
       setIsLiveTranscribing(false);
