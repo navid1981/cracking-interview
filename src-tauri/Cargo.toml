@@ -31,7 +31,7 @@ dotenv = "0.15"
 sha2 = "0.10"
 
 # WebSocket for CDP and Deepgram
-tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 futures-util = "0.3"
 
 # Thread-safe globals
