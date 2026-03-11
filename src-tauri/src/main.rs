@@ -1072,6 +1072,32 @@ async fn supabase_sign_in(
     Ok(data)
 }
 
+#[tauri::command]
+async fn fetch_models(access_token: String) -> Result<serde_json::Value, String> {
+    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
+    const SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1ZHdwY2p4Ynd0c3poaGNneWJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ5MTAzMDksImV4cCI6MjA4MDQ4NjMwOX0.wKsiXAAK3q2pQdR8UGT7gXeBsXUDki-YAuB0CtJ9ZUI";
+
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let response = client
+        .post(format!("{}/functions/v1/get-models", SUPABASE_URL))
+        .header("Content-Type", "application/json")
+        .header("apikey", SUPABASE_ANON_KEY)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch models: {}", e))?;
+
+    let body = response.text().await
+        .map_err(|e| format!("Failed to read models response: {}", e))?;
+
+    serde_json::from_str(&body)
+        .map_err(|e| format!("Failed to parse models response: {}", e))
+}
+
 /// Query AI via the Supabase Edge Function proxy
 /// This enforces quotas and uses OpenRouter as the backend
 #[tauri::command]
@@ -1844,6 +1870,7 @@ fn main() {
             open_url,
             supabase_sign_up,
             supabase_sign_in,
+            fetch_models,
             open_external_url,
             start_google_oauth,
             get_google_token_status,

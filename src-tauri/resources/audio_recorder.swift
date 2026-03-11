@@ -447,6 +447,7 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
 
 // MARK: - Main
 
+@available(macOS 13.0, *)
 var globalRecorder: AudioRecorder?
 
 @available(macOS 13.0, *)

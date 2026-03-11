@@ -63,15 +63,39 @@ interface AIConfig {
   gemini_api_key?: string;  // BYO API key for free users who exhausted tries
 }
 
-// Available AI models
-const PRO_MODELS = [
-  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', provider: 'OpenAI' },
-  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic' },
-  { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google' },
-  { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
-];
+interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+}
 
-const FREE_MODEL = { id: 'gemini-2.5-flash', name: 'Gemini 2.5 flash', provider: 'Google' };
+interface ModelConfig {
+  pro_models: ModelInfo[];
+  free_model: ModelInfo;
+  default_pro_model: string;
+}
+
+const DEFAULT_MODEL_CONFIG: ModelConfig = {
+  pro_models: [
+    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', provider: 'OpenAI' },
+    { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic' },
+    { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google' },
+    { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
+  ],
+  free_model: { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google' },
+  default_pro_model: 'gpt-5.2-codex',
+};
+
+function loadCachedModels(): ModelConfig {
+  try {
+    const cached = localStorage.getItem('cached_models');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed.pro_models?.length && parsed.free_model?.id) return parsed;
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_MODEL_CONFIG;
+}
 
 // Allowed domains for free users
 const FREE_TIER_ALLOWED_DOMAINS = [
@@ -100,6 +124,7 @@ function App() {
   const [showAnnouncement, setShowAnnouncement] = useState(true);
   const announcementDismissedRef = useRef(false);
   const [showAudioPromptWarning, setShowAudioPromptWarning] = useState(false);
+  const [modelConfig, setModelConfig] = useState<ModelConfig>(loadCachedModels);
 
   // ========== APP STATE ==========
   const [cdpStatus, setCdpStatus] = useState('🔴 Chrome Not Running');
@@ -124,17 +149,17 @@ function App() {
   );
   
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
-    // Migrate old model selections to new default
     const storedModel = localStorage.getItem('ai_model');
-    const oldModels = ['gemini-2.0-flash-exp', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-2.5-flash', 
-                       'claude-sonnet-4-20250514', 'claude-3-5-haiku-20241022'];
-    if (!storedModel || oldModels.includes(storedModel)) {
-      // Reset to default model (will be set based on subscription status)
+    const cached = loadCachedModels();
+    const validIds = [...cached.pro_models.map(m => m.id), cached.free_model.id];
+    
+    // Reset if stored model is no longer in the available list
+    if (storedModel && !validIds.includes(storedModel)) {
       localStorage.removeItem('ai_model');
     }
     
     return {
-      selected_model: localStorage.getItem('ai_model') || 'gpt-5.2-codex',
+      selected_model: localStorage.getItem('ai_model') || cached.default_pro_model,
       gemini_api_key: localStorage.getItem('gemini_api_key') || undefined,
     };
   });
@@ -1085,6 +1110,23 @@ function App() {
           const stats = await getUsageStats(session.user.id, sub);
           setUsageStats(stats);
           
+          // Fetch available models from server (fire-and-forget, don't block login)
+          invoke<ModelConfig>('fetch_models', { accessToken: session.access_token })
+            .then((config) => {
+              if (config?.pro_models?.length && config?.free_model?.id) {
+                setModelConfig(config);
+                localStorage.setItem('cached_models', JSON.stringify(config));
+                // If current model is no longer available, reset to default
+                const validIds = [...config.pro_models.map((m: ModelInfo) => m.id), config.free_model.id];
+                const currentModel = localStorage.getItem('ai_model') || config.default_pro_model;
+                if (!validIds.includes(currentModel)) {
+                  setAiConfig(prev => ({ ...prev, selected_model: config.default_pro_model }));
+                  localStorage.setItem('ai_model', config.default_pro_model);
+                }
+              }
+            })
+            .catch(() => { /* use cached/default models */ });
+
           // Fetch announcement
           await fetchAnnouncement(session.user.email, sub);
         }
@@ -1400,7 +1442,7 @@ function App() {
     }
 
     // Determine which model to use
-    const modelToUse = useBYOKey ? 'gemini-2.5-flash' : (isPro ? aiConfig.selected_model : FREE_MODEL.id);
+    const modelToUse = useBYOKey ? modelConfig.free_model.id : (isPro ? aiConfig.selected_model : modelConfig.free_model.id);
 
     setIsLoading(true);
     setAiResponse('');
@@ -1828,7 +1870,7 @@ function App() {
                 const currentIdx = phaseOrder.indexOf(solvePhase);
 
                 const modelName = (() => {
-                  const allModels = [...PRO_MODELS, FREE_MODEL];
+                  const allModels = [...modelConfig.pro_models, modelConfig.free_model];
                   const found = allModels.find(m => m.id === aiConfig.selected_model);
                   return found ? found.name : aiConfig.selected_model;
                 })();
@@ -2110,7 +2152,7 @@ function App() {
                         onChange={(e) => setAiConfig({...aiConfig, selected_model: e.target.value})}
                         className="input-field"
                       >
-                        {PRO_MODELS.map(model => (
+                        {modelConfig.pro_models.map(model => (
                           <option key={model.id} value={model.id}>
                             {model.name} ({model.provider})
                           </option>
@@ -2120,7 +2162,7 @@ function App() {
                       <div className="input-field" style={{ backgroundColor: '#f5f5f5', cursor: 'not-allowed' }}>
                         {(subscription?.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key 
                           ? 'Gemini 2.5 Flash (Google) - Your API Key'
-                          : `${FREE_MODEL.name} (${FREE_MODEL.provider}) - Free Tier`}
+                          : `${modelConfig.free_model.name} (${modelConfig.free_model.provider}) - Free Tier`}
                       </div>
                     )}
                   </div>

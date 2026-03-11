@@ -15,6 +15,7 @@
 
 // Direct import for Supabase Dashboard deployment
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { PRO_MODEL_IDS, MODEL_MAP, FREE_MODEL as FREE_MODEL_INFO, DEFAULT_PRO_MODEL } from "../_shared/models.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -26,12 +27,9 @@ const MONTHLY_REQUEST_LIMIT = 150;
 // Lifetime limit for free users
 const FREE_LIFETIME_LIMIT = 3;
 
-// Free tier model - using Grok Code Fast for better latency
-const FREE_MODEL = 'gemini-2.5-flash';
-const FREE_MODEL_OPENROUTER = 'google/gemini-2.5-flash';
-
-// Pro models available for paid subscribers
-const PRO_MODELS = ['gpt-5.2-codex', 'claude-sonnet-4.5', 'gemini-3-flash', 'grok-4.1-fast'];
+// Model constants from shared config
+const FREE_MODEL = FREE_MODEL_INFO.id;
+const PRO_MODELS = PRO_MODEL_IDS;
 
 // Timeout for OpenRouter API calls (50 seconds)
 const API_TIMEOUT_MS = 50000;
@@ -218,8 +216,8 @@ async function processRequest(
   } else {
     // Pro users can only use pro models
     if (!PRO_MODELS.includes(model)) {
-      console.log(`[ai-proxy] Unknown model ${model}, defaulting to gpt-5.2-codex`);
-      model = 'gpt-5.2-codex';
+      console.log(`[ai-proxy] Unknown model ${model}, defaulting to ${DEFAULT_PRO_MODEL}`);
+      model = DEFAULT_PRO_MODEL;
     }
   }
 
@@ -292,18 +290,7 @@ async function processRequest(
     );
   }
 
-  // Map model names to OpenRouter format
-  const modelMap: Record<string, string> = {
-    // Pro models
-    'gpt-5.2-codex': 'openai/gpt-5.2-codex',
-    'claude-sonnet-4.5': 'anthropic/claude-sonnet-4.5',
-    'gemini-3-flash': 'google/gemini-3-flash-preview',
-    'grok-4.1-fast': 'x-ai/grok-4.1-fast',
-    // Free model
-    'gemini-2.5-flash': FREE_MODEL_OPENROUTER,
-  };
-
-  const openrouterModel = modelMap[model] || model;
+  const openrouterModel = MODEL_MAP[model] || model;
   console.log(`[ai-proxy] Using model: ${model} -> ${openrouterModel}`);
 
   // Call OpenRouter API with timeout
