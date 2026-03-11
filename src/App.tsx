@@ -179,7 +179,7 @@ function App() {
   }, [aiConfig.selected_model, aiConfig.gemini_api_key]);
   
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'account' | 'models' | 'prompts' | 'input' | 'hotkeys'>('models');
+  const [settingsTab, setSettingsTab] = useState<'account' | 'models' | 'prompts' | 'hotkeys' | 'app'>('models');
   const [runtimePlatform, setRuntimePlatform] = useState<'macos' | 'windows' | 'linux' | 'unknown'>('unknown');
   const [useScreenshot, setUseScreenshot] = useState(
     localStorage.getItem('use_screenshot') === 'true'
@@ -193,6 +193,30 @@ function App() {
       // Silent fail - non-critical
     }
   }, [useScreenshot]);
+
+  // ========== APP SETTINGS STATE ==========
+  const [windowOpacity, setWindowOpacity] = useState<number>(() => {
+    const saved = localStorage.getItem('window_opacity');
+    return saved ? parseFloat(saved) : 1.0;
+  });
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('app_theme') as 'light' | 'dark') || 'light';
+  });
+  const [stealthMode, setStealthMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('stealth_mode');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  // Apply saved app preferences on startup
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    invoke('set_window_opacity', { opacity: windowOpacity }).catch(() => {});
+    // Stealth mode is applied by Rust at startup from stealth.json config file.
+    // No need to call set_stealth_mode here — it would conflict with the startup
+    // activation policy on macOS.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [previousWindowSize, setPreviousWindowSize] = useState<{width: number, height: number} | null>(null);
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [audioSeconds, setAudioSeconds] = useState(0);
@@ -1870,9 +1894,10 @@ function App() {
                 const currentIdx = phaseOrder.indexOf(solvePhase);
 
                 const modelName = (() => {
+                  const actualModelId = isPaidUser ? aiConfig.selected_model : modelConfig.free_model.id;
                   const allModels = [...modelConfig.pro_models, modelConfig.free_model];
-                  const found = allModels.find(m => m.id === aiConfig.selected_model);
-                  return found ? found.name : aiConfig.selected_model;
+                  const found = allModels.find(m => m.id === actualModelId);
+                  return found ? found.name : actualModelId;
                 })();
                 const promptLabel = getTemplateLabel(selectedTemplate);
 
@@ -1983,12 +2008,6 @@ function App() {
                 🤖 AI Models
               </button>
               <button 
-                className={`tab-btn ${settingsTab === 'input' ? 'active' : ''}`}
-                onClick={() => setSettingsTab('input')}
-              >
-                📥 Input Mode
-              </button>
-              <button 
                 className={`tab-btn ${settingsTab === 'prompts' ? 'active' : ''}`}
                 onClick={() => {
                   setSettingsTab('prompts');
@@ -2002,6 +2021,12 @@ function App() {
                 onClick={() => setSettingsTab('hotkeys')}
               >
                 ⌨️ HotKeys
+              </button>
+              <button 
+                className={`tab-btn ${settingsTab === 'app' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('app')}
+              >
+                🖥️ App
               </button>
             </div>
             
@@ -2159,7 +2184,7 @@ function App() {
                         ))}
                       </select>
                     ) : (
-                      <div className="input-field" style={{ backgroundColor: '#f5f5f5', cursor: 'not-allowed' }}>
+                      <div className="input-field" style={{ backgroundColor: 'var(--input-disabled-bg)', cursor: 'not-allowed' }}>
                         {(subscription?.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key 
                           ? 'Gemini 2.5 Flash (Google) - Your API Key'
                           : `${modelConfig.free_model.name} (${modelConfig.free_model.provider}) - Free Tier`}
@@ -2243,12 +2268,9 @@ function App() {
                       </ul>
                     </div>
                   )}
-                </>
-              )}
 
-              {settingsTab === 'input' && (
-                <>
-                  <div className="form-group">
+                  {/* Input Mode (merged from old tab) */}
+                  <div className="form-group" style={{ marginTop: '20px', paddingTop: '16px', borderTop: `1px solid var(--border)` }}>
                     <label>Input Mode:</label>
                     <div className="toggle-group">
                       <button
@@ -2257,7 +2279,7 @@ function App() {
                       >
                         <span className="mode-icon">📝</span>
                         <span className="mode-label">Text Extraction</span>
-                        <span className="mode-desc">Fast · Text only</span>
+                        <span className="mode-desc">Chrome tabs only</span>
                       </button>
                       <button
                         onClick={() => setUseScreenshot(true)}
@@ -2273,10 +2295,10 @@ function App() {
                   <div className="info-note">
                     <h4 style={{marginBottom: '8px'}}>Mode Comparison:</h4>
                     <p className="small" style={{marginBottom: '12px'}}>
-                      <strong>📝 Text:</strong> Extracts text content only. Fast and efficient. Best for text-based problems.
+                      <strong>📝 Text:</strong> Extracts text from Chrome tabs only. Fast and efficient for text-based problems.
                     </p>
                     <p className="small">
-                      <strong>📸 Screenshot:</strong> Captures visual content including diagrams, tables, and formatting. Best for problems with images or complex layouts. If you chose Displays, the app will automatically use the Screenshot approach even when you press the Extract hotkey.
+                      <strong>📸 Screenshot:</strong> Captures visual content including diagrams, tables, and formatting. Works with any source. Display source always uses screenshot mode.
                     </p>
                   </div>
                 </>
@@ -2463,6 +2485,89 @@ function App() {
                     Display Input Source auto-uses Screenshot even with the Extract hotkey. Avoid Shift-only shortcuts (e.g. Shift+L).
                   </p>
                 </div>
+              )}
+
+              {settingsTab === 'app' && (
+                <>
+                  {/* Transparency */}
+                  <div className="app-settings-group">
+                    <div className="app-settings-label">Transparency</div>
+                    <div className="app-settings-desc">Adjust the window opacity from fully visible to semi-transparent.</div>
+                    <div className="opacity-slider-row">
+                      <input
+                        type="range"
+                        min="10"
+                        max="100"
+                        value={Math.round(windowOpacity * 100)}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value) / 100;
+                          setWindowOpacity(val);
+                          localStorage.setItem('window_opacity', val.toString());
+                          invoke('set_window_opacity', { opacity: val }).catch(console.error);
+                        }}
+                        className="opacity-slider"
+                      />
+                      <span className="opacity-value">{Math.round(windowOpacity * 100)}%</span>
+                    </div>
+                  </div>
+
+                  {/* Theme */}
+                  <div className="app-settings-group">
+                    <div className="app-settings-label">Theme</div>
+                    <div className="app-settings-desc">Switch between light and dark appearance.</div>
+                    <div className="theme-toggle-group">
+                      <button
+                        className={`theme-toggle-btn ${theme === 'light' ? 'active' : ''}`}
+                        onClick={() => {
+                          setTheme('light');
+                          localStorage.setItem('app_theme', 'light');
+                          document.documentElement.setAttribute('data-theme', 'light');
+                        }}
+                      >
+                        ☀️ Light
+                      </button>
+                      <button
+                        className={`theme-toggle-btn ${theme === 'dark' ? 'active' : ''}`}
+                        onClick={() => {
+                          setTheme('dark');
+                          localStorage.setItem('app_theme', 'dark');
+                          document.documentElement.setAttribute('data-theme', 'dark');
+                        }}
+                      >
+                        🌙 Dark
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Stealth Mode */}
+                  <div className="app-settings-group">
+                    <div className="app-settings-label">Stealth Mode</div>
+                    <div className="app-settings-desc">
+                      Hidden from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows).
+                    </div>
+                    <div className="stealth-toggle-row">
+                      <label className="toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={stealthMode}
+                          onChange={(e) => {
+                            const enabled = e.target.checked;
+                            setStealthMode(enabled);
+                            localStorage.setItem('stealth_mode', enabled.toString());
+                            invoke('set_stealth_mode', { enabled }).catch(console.error);
+                          }}
+                        />
+                        <span className="toggle-switch-slider" />
+                      </label>
+                      <span className="stealth-label">{stealthMode ? 'Enabled' : 'Disabled'}</span>
+                    </div>
+                    {runtimePlatform === 'macos' && (
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+                        On macOS, stealth changes take effect after restarting the app.
+                      </p>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </div>

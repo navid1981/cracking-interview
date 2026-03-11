@@ -59,9 +59,12 @@ The primary source code is:
   - `stripe-webhook/index.ts`: Stripe webhook handler (**production** — Stripe calls this)
   - `stripe-webhook-test/index.ts`: Stripe webhook handler (test mode, kept for development)
   - `notification/index.ts`: Announcement system (returns announcements based on user type + app version)
+  - `get-models/index.ts`: Returns LLM model configuration (pro models, free model, default) from shared constants
+  - `log-audio-usage/index.ts`: Logs audio recording duration for usage tracking
+  - `_shared/models.ts`: Shared LLM model constants (IDs, names, providers, OpenRouter mapping) used by `ai-proxy` and `get-models`
   - `ping/index.ts`: Network latency diagnostic
 - **Scripts** (project root):
-  - `toggle-visibility.sh`: Toggle stealth/normal mode in `.env`
+  - `toggle-visibility.sh`: (Legacy) Toggle stealth/normal mode — stealth is now controlled from App Settings
   - `restart-app.sh`: Kill and restart the Tauri dev app
 
 ### "Is this file used?" — how to verify quickly
@@ -368,6 +371,12 @@ Utility:
 - `open_external_url(url: String) -> ()` (opens URL in default browser, used by announcement link handler)
 - `resize_window(window: Window, width: f64, height: f64) -> ()`
 
+App Settings:
+
+- `set_window_opacity(opacity: f64) -> ()` (sets window transparency, 0.1–1.0)
+- `set_stealth_mode(enabled: bool) -> ()` (toggles stealth protections + saves preference to stealth.json)
+- `fetch_models(access_token: String) -> Value` (fetches LLM model config from get-models edge function)
+
 Hotkeys:
 
 - `get_hotkeys() -> HotkeyConfig`
@@ -416,9 +425,10 @@ The app includes a full authentication and subscription system using Supabase an
 ├─────────────────────────────────────────────────────────────────────────┤
 │  AuthScreen (sign up/in)  →  MainApp (CDP, prompts, AI)                 │
 │                                                                          │
-│  Settings → Account Tab → Subscription status, quota display, upgrade    │
-│  Settings → AI Models Tab → Model selection, BYO API key (free users)    │
+│  Settings → Account Tab → Subscription, quota, audio usage, upgrade      │
+│  Settings → AI Models Tab → Model selection, Input Mode, BYO API key     │
 │  Settings → HotKeys Tab → Customize keyboard shortcuts                   │
+│  Settings → App Tab → Transparency, Theme, Stealth Mode                  │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -479,9 +489,76 @@ The app includes a full authentication and subscription system using Supabase an
   - `gemini-2.5-flash` → `google/gemini-2.5-flash` (free tier)
 
 **Model Display Names** (used in stepper info):
-- Model IDs are mapped to human-readable names via `PRO_MODELS` and `FREE_MODEL` objects in `App.tsx`
+- Model IDs are mapped to human-readable names via `modelConfig` state (fetched from `get-models` edge function, cached in localStorage)
 - Example: `claude-sonnet-4.5` → "Claude Sonnet 4.5"
 - The `getTemplateLabel(templateId)` function in `prompts.ts` maps template IDs to labels (e.g., `'algorithm-optimal'` → "Algorithm - Optimal")
+
+### Centralized LLM Model Definitions
+
+LLM model configurations are defined server-side in a single shared file and fetched dynamically by the app. This allows updating available models without releasing a new app version.
+
+#### Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│  supabase/functions/_shared/models.ts                │
+│  (Single source of truth for all model definitions)  │
+├──────────────────────────────────────────────────────┤
+│  PRO_MODELS[]    — Array of { id, name, provider }   │
+│  FREE_MODEL      — Single { id, name, provider }     │
+│  DEFAULT_PRO_MODEL — Default model ID for Pro users  │
+│  MODEL_MAP       — Maps app model IDs → OpenRouter   │
+│  PRO_MODEL_IDS   — Quick lookup array                │
+└──────────────────────────────────────────────────────┘
+         │                          │
+         ▼                          ▼
+┌─────────────────┐     ┌─────────────────────┐
+│  get-models      │     │  ai-proxy            │
+│  Edge Function   │     │  Edge Function       │
+│  Returns models  │     │  Validates model IDs │
+│  to frontend     │     │  Maps to OpenRouter  │
+└─────────────────┘     └─────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│  Tauri Command: fetch_models            │
+│  (Rust HTTP call bypasses VPN/proxy)    │
+├─────────────────────────────────────────┤
+│  App.tsx: called on login               │
+│  → Updates modelConfig state            │
+│  → Cached in localStorage               │
+│  → Falls back to cache if fetch fails   │
+└─────────────────────────────────────────┘
+```
+
+#### Shared Constants (`_shared/models.ts`)
+
+```typescript
+PRO_MODELS: ModelInfo[] = [
+  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', provider: 'OpenAI' },
+  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic' },
+  { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google' },
+  { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
+];
+FREE_MODEL: { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google' }
+DEFAULT_PRO_MODEL: 'gpt-5.2-codex'
+MODEL_MAP: Maps each ID → OpenRouter format (e.g., 'gpt-5.2-codex' → 'openai/gpt-5.2-codex')
+```
+
+#### Frontend Flow
+
+1. User logs in → `handleAuthSuccess` calls `invoke('fetch_models', { accessToken })`
+2. `fetch_models` Tauri command makes an authenticated POST to `get-models` edge function (through Rust to bypass VPN/proxy SSL issues)
+3. Response cached in `localStorage('cached_model_config')`
+4. On next startup, `loadCachedModels()` initializes state from cache before the network call completes
+5. `modelConfig` state used for: model selector dropdown, free tier display, stepper info, validation
+
+#### Updating Models
+
+To add, remove, or rename models:
+1. Edit `supabase/functions/_shared/models.ts`
+2. Deploy both `get-models` and `ai-proxy` edge functions
+3. Users get the new model list on their next sign-in — no app update needed
 
 ### AI Routing Logic
 
@@ -871,6 +948,55 @@ Users can select the interview language via the "🎙️ Audio" button popup in 
 
 **Note:** The original audio recording mode (record → MP3 → Gemini) still exists in the codebase but the `toggleAudioRecording` function now routes to the live transcription flow. The old flow could be restored by modifying `toggleAudioRecording`.
 
+#### Audio Recording Usage Limits
+
+Pro users have a **10-hour/month** audio recording limit and a **90-minute per-session** timeout.
+
+**Tracking Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   Audio Usage Tracking Flow                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  fetchDeepgramKey()                                                     │
+│    ├── deepgram-key edge function checks monthly audio usage           │
+│    ├── Returns: { key, remaining_seconds, audio_seconds_used,          │
+│    │             audio_seconds_limit }                                  │
+│    └── Returns 429 if limit exceeded                                   │
+│                                                                         │
+│  During recording:                                                      │
+│    ├── Frontend tracks elapsed seconds (audioSeconds state)            │
+│    ├── 90-minute session timeout → auto-stops recording                │
+│    └── Header shows: "🎙️ Xh Ym / 10h 0m"                             │
+│                                                                         │
+│  On stop (stopLiveTranscription):                                      │
+│    └── logAudioUsage(durationSeconds, accessToken)                     │
+│         └── POST /functions/v1/log-audio-usage                         │
+│              └── Inserts into audio_usage table                        │
+│                                                                         │
+│  Settings → Account tab:                                               │
+│    └── Shows audio usage bar alongside AI call usage bar               │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Database:**
+- `audio_usage` table: `id`, `user_id`, `duration_seconds`, `recorded_at`
+- `sum_audio_seconds(p_user_id, p_start, p_end)` — RPC function for efficient usage queries
+- `cleanup_old_audio_usage()` — pg_cron job runs daily, removes records older than 3 months
+- Migration: `supabase/migrations/003_audio_usage.sql`
+
+**Edge Functions:**
+- `deepgram-key/index.ts` — Checks monthly quota before issuing Deepgram JWT; returns remaining seconds
+- `log-audio-usage/index.ts` — Authenticated endpoint to record usage after each session
+
+**Constants:**
+- `MONTHLY_AUDIO_LIMIT = 36000` (10 hours in seconds)
+- `MAX_SESSION_SECONDS = 5400` (90 minutes)
+
+**Monthly Reset:** Audio usage resets automatically each billing period because queries filter by `subscription_start_date` to `subscription_end_date`, which are updated by the Stripe webhook on renewal.
+
 #### CSS Classes (in `src/App.css`)
 
 | Class | Purpose |
@@ -920,21 +1046,20 @@ The app includes a "stealth mode" that makes it invisible to screen capture soft
 
 #### Configuration
 
-Controlled via environment variable in `.env`:
+Stealth mode preference is persisted in a `stealth.json` config file in the app's config directory (alongside `hotkeys.json`). On first launch, it defaults to `true` (stealth enabled).
 
-```
-APP_VISIBILITY=stealth   # Enable stealth mode
-APP_VISIBILITY=normal    # Disable stealth mode (default)
-```
+Users toggle stealth mode in **Settings → App → Stealth Mode**. On macOS, changes take effect after restarting the app (due to macOS activation policy constraints). On Windows, changes take effect immediately.
 
-A convenience script `toggle-visibility.sh` toggles between the two modes and reminds you to restart the app.
+**Config file functions** (`src-tauri/src/main.rs`):
+- `load_stealth_preference(app)` — reads `stealth.json`, returns `Option<bool>`
+- `save_stealth_preference(app, enabled)` — writes `stealth.json`
 
 #### How It Works
 
 Stealth mode is applied at app startup in `src-tauri/src/main.rs` → `setup()`:
 
-1. Read `APP_VISIBILITY` from `.env`
-2. If `"stealth"`, apply platform-specific protections:
+1. Read preference from `stealth.json` (defaults to `true` if no file exists)
+2. If enabled, apply platform-specific protections:
 
 **macOS:**
 - `apply_macos_dock_hiding()` — Sets `NSApp.activationPolicy` to `.accessory` (1) via raw ObjC runtime. Hides from Dock and Cmd+Tab.
@@ -982,10 +1107,8 @@ Both hotkeys are customizable in Settings → HotKeys tab.
 
 #### Key Files
 
-- `src-tauri/src/main.rs`: Stealth mode helpers (`apply_macos_dock_hiding`, `apply_macos_screen_capture_protection`, `apply_windows_stealth`, `restore_macos_screen_capture_visibility`) and startup logic
-- `.env`: `APP_VISIBILITY=stealth|normal`
-- `toggle-visibility.sh`: Toggle script
-- `restart-app.sh`: Restart after changing visibility mode
+- `src-tauri/src/main.rs`: Stealth mode helpers, `set_stealth_mode` Tauri command, `load_stealth_preference`/`save_stealth_preference` config file I/O, and startup logic
+- `stealth.json` (in app config dir): Persisted user preference `{"enabled": true/false}`
 
 ### Notification / Announcement System
 
@@ -1122,6 +1245,16 @@ The webhook handler (`stripe-webhook` / `stripe-webhook-test`) processes:
 - `tokens_used` (int)
 - `request_count` (int, default 1)
 - `created_at` (timestamp)
+
+**audio_usage table**:
+- `id` (UUID)
+- `user_id` (UUID, FK to users.id)
+- `duration_seconds` (numeric)
+- `recorded_at` (timestamptz, default now())
+
+**Automatic audio usage cleanup** (pg_cron):
+- Runs daily at 4:00 AM UTC
+- Deletes audio_usage records older than 3 months
 
 **Automatic user creation**:
 - Database trigger `on_auth_user_created` automatically creates a `public.users` entry when a new user signs up via `auth.users`
@@ -1349,11 +1482,13 @@ The usage bar in the Account settings tab uses a dynamic gradient:
 - 51–80%: Yellow (`#FFEB3B` → `#FFC107`)
 - >80%: Orange to Red (`#FF9800` → `#F44336`)
 
-#### Input Mode Visual Buttons (Settings → Input Mode)
+#### Input Mode (Merged into AI Models Tab)
 
-The "Text Extraction" / "Screenshot Capture" toggle buttons include icons and descriptions:
-- 📝 Text Extraction — "Fast · Text only"
+The Input Mode controls (text extraction vs screenshot) have been merged into the "AI Models" tab, below the model selector. This removes the standalone "Input Mode" tab.
+
+- 📝 Text Extraction — "Chrome tabs only"
 - 📸 Screenshot Capture — "Visual · Images & diagrams"
+- Note: Text extraction only works with Chrome tabs. Display source always uses screenshot mode.
 
 Styled via `.toggle-btn .mode-icon`, `.mode-label`, `.mode-description` in `App.css`.
 
@@ -1388,6 +1523,46 @@ The Settings → HotKeys tab uses a grouped, compact layout:
 - **Two-column grid** within each section for compact display
 - **Compact inputs**: Smaller padding/font (`hotkey-input` class) so all hotkeys fit on one page without scrolling
 - Styled via `.hotkeys-panel`, `.hotkeys-section`, `.hotkeys-section-title`, `.hotkeys-two-col`, `.hotkey-field`, `.hotkey-label`, `.hotkey-input` in `App.css`
+
+#### App Settings Tab (Settings → App)
+
+The "App" tab in the Settings modal provides three app-level preferences that persist across restarts:
+
+**Transparency Slider:**
+- Range: 10% to 100% opacity
+- Calls `invoke('set_window_opacity', { opacity })` on each slider change
+- macOS: Sets `NSWindow.setAlphaValue()` via raw ObjC runtime
+- Windows: Sets `WS_EX_LAYERED` + `SetLayeredWindowAttributes(LWA_ALPHA)` via Win32 API
+- Persisted in `localStorage('window_opacity')`, applied on startup via `useEffect`
+
+**Theme Toggle (Light / Dark):**
+- Two buttons: ☀️ Light / 🌙 Dark
+- Sets `data-theme` attribute on `document.documentElement`
+- CSS uses `:root` variables for light theme, `[data-theme="dark"]` overrides for dark theme
+- Dark palette: `#0a0a0f` background, `#1a1a2e` surface, `#d1d5db` text (matches website theme)
+- ~20+ CSS variables extracted from hardcoded colors: `--surface`, `--border`, `--shadow`, `--input-bg`, `--stepper-bg`, `--transcript-bg`, etc.
+- Persisted in `localStorage('app_theme')`, applied on startup
+
+**Stealth Mode Toggle:**
+- Switch control with "Enabled" / "Disabled" label
+- Calls `invoke('set_stealth_mode', { enabled })` which saves to `stealth.json` config file
+- On Windows: applies/removes stealth protections immediately
+- On macOS: saves preference for next app launch (shows note: "On macOS, stealth changes take effect after restarting the app.")
+- Persisted in both `localStorage('stealth_mode')` (for UI state) and `stealth.json` (for Rust startup)
+
+**Tauri Commands:**
+
+| Command | Signature | Description |
+|---------|-----------|-------------|
+| `set_window_opacity` | `(opacity: f64) → ()` | Set window transparency (0.1–1.0) |
+| `set_stealth_mode` | `(enabled: bool) → ()` | Toggle stealth protections + save preference |
+
+**CSS Classes:**
+- `.app-settings-group` — Setting group with bottom border separator
+- `.app-settings-label` / `.app-settings-desc` — Setting name and description
+- `.opacity-slider-row` / `.opacity-slider` / `.opacity-value` — Transparency slider layout
+- `.theme-toggle-group` / `.theme-toggle-btn` — Light/Dark toggle buttons
+- `.stealth-toggle-row` / `.toggle-switch` / `.toggle-switch-slider` — Stealth on/off switch
 
 #### Custom Prompt Management
 
