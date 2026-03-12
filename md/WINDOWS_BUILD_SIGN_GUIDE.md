@@ -34,9 +34,14 @@ CodeSignTool.bat get_credential_ids -username=your@email.com -password="YourPass
 
 ### Getting Your TOTP Secret
 
-When you enroll your certificate in eSigner and scan the QR code with an authenticator app, SSL.com also displays a **secret code value**. Copy and save this string — it allows CodeSignTool to generate OTPs automatically without manual entry.
+There are two different secrets — make sure you use the right one:
 
-If you've already enrolled but didn't save the secret, you can re-enroll or contact SSL.com support.
+- **QR code secret (base32)**: Used by Google Authenticator and other TOTP apps. Looks like `GNVWTLHO...`. This is **NOT** what CodeSignTool needs.
+- **eSigner secret code (base64)**: Found in the SSL.com dashboard under your certificate's eSigner settings (click "SHOW MY SIGNING CREDENTIALS" or look for "secret code"). Looks like `M2tprO6EA15T...=`. This is what CodeSignTool's `-totp_secret` parameter expects.
+
+To find the base64 secret: Go to SSL.com > Certificates > your code signing certificate > eSigner cloud signing section > look for the secret code value.
+
+If you've already enrolled but didn't save the secret, check the eSigner settings page or contact SSL.com support.
 
 ---
 

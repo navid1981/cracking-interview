@@ -123,19 +123,13 @@ $CodeSignToolExe  = Split-Path $CodeSignToolFull -Leaf
 function Invoke-CodeSignTool($filePath) {
     $absFile = (Resolve-Path $filePath).Path
     Write-Host "  Signing: $absFile"
-    Push-Location $CodeSignToolDir
-    try {
-        & ".\$CodeSignToolExe" sign `
-            "-username=$SslUsername" `
-            "-password=$SslPassword" `
-            "-credential_id=$SslCredentialId" `
-            "-totp_secret=$SslTotpSecret" `
-            "-input_file_path=$absFile" `
-            "-override=true"
-        return $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
+    $origDir = Get-Location
+    Set-Location $CodeSignToolDir
+    $output = cmd /v:off /c "CodeSignTool.bat sign -username=""$SslUsername"" -password=""$SslPassword"" -credential_id=""$SslCredentialId"" -totp_secret=""$SslTotpSecret"" -input_file_path=""$absFile"" -override=""true""" 2>&1
+    $exitCode = $LASTEXITCODE
+    Set-Location $origDir
+    $output | ForEach-Object { Write-Host "  $_" }
+    return $exitCode
 }
 
 # ── Step 2: Sign the application binary ──────────────────────────────────────
