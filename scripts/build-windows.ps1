@@ -118,26 +118,19 @@ Ok "Built $InstallerPath"
 # ── Step 2: Sign the application binary ──────────────────────────────────────
 Step 2 "Sign application binary ($ExePath)"
 
-& $CodeSignTool sign `
-    -username="$SslUsername" `
-    -password="$SslPassword" `
-    -credential_id="$SslCredentialId" `
-    -totp_secret="$SslTotpSecret" `
-    -input_file_path="$ExePath" `
-    -override="true"
+$ExeFullPath = (Resolve-Path $ExePath).Path
+$CodeSignToolFull = (Resolve-Path $CodeSignTool).Path
+
+cmd /c "`"$CodeSignToolFull`" sign -username=`"$SslUsername`" -password=`"$SslPassword`" -credential_id=`"$SslCredentialId`" -totp_secret=`"$SslTotpSecret`" -input_file_path=`"$ExeFullPath`" -override=`"true`""
 if ($LASTEXITCODE -ne 0) { Fail "Failed to sign $ExePath" }
 Ok "Application binary signed"
 
 # ── Step 3: Sign the NSIS installer ──────────────────────────────────────────
 Step 3 "Sign NSIS installer ($InstallerPath)"
 
-& $CodeSignTool sign `
-    -username="$SslUsername" `
-    -password="$SslPassword" `
-    -credential_id="$SslCredentialId" `
-    -totp_secret="$SslTotpSecret" `
-    -input_file_path="$InstallerPath" `
-    -override="true"
+$InstallerFullPath = (Resolve-Path $InstallerPath).Path
+
+cmd /c "`"$CodeSignToolFull`" sign -username=`"$SslUsername`" -password=`"$SslPassword`" -credential_id=`"$SslCredentialId`" -totp_secret=`"$SslTotpSecret`" -input_file_path=`"$InstallerFullPath`" -override=`"true`""
 if ($LASTEXITCODE -ne 0) { Fail "Failed to sign $InstallerPath" }
 Ok "NSIS installer signed"
 
