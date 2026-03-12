@@ -115,23 +115,34 @@ if (-not (Test-Path $ExePath)) { Fail "Build failed - $ExePath not found" }
 if (-not (Test-Path $InstallerPath)) { Fail "Build failed - $InstallerPath not found" }
 Ok "Built $InstallerPath"
 
+# ── Helper: run CodeSignTool from its own directory ──────────────────────────
+$CodeSignToolFull = (Resolve-Path $CodeSignTool).Path
+$CodeSignToolDir  = Split-Path $CodeSignToolFull -Parent
+$CodeSignToolExe  = Split-Path $CodeSignToolFull -Leaf
+
+function Invoke-CodeSignTool($filePath) {
+    $absFile = (Resolve-Path $filePath).Path
+    Push-Location $CodeSignToolDir
+    try {
+        cmd /c "$CodeSignToolExe sign -username=`"$SslUsername`" -password=`"$SslPassword`" -credential_id=`"$SslCredentialId`" -totp_secret=`"$SslTotpSecret`" -input_file_path=`"$absFile`" -override=`"true`""
+        return $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+}
+
 # ── Step 2: Sign the application binary ──────────────────────────────────────
 Step 2 "Sign application binary ($ExePath)"
 
-$ExeFullPath = (Resolve-Path $ExePath).Path
-$CodeSignToolFull = (Resolve-Path $CodeSignTool).Path
-
-cmd /c "`"$CodeSignToolFull`" sign -username=`"$SslUsername`" -password=`"$SslPassword`" -credential_id=`"$SslCredentialId`" -totp_secret=`"$SslTotpSecret`" -input_file_path=`"$ExeFullPath`" -override=`"true`""
-if ($LASTEXITCODE -ne 0) { Fail "Failed to sign $ExePath" }
+$rc = Invoke-CodeSignTool $ExePath
+if ($rc -ne 0) { Fail "Failed to sign $ExePath" }
 Ok "Application binary signed"
 
 # ── Step 3: Sign the NSIS installer ──────────────────────────────────────────
 Step 3 "Sign NSIS installer ($InstallerPath)"
 
-$InstallerFullPath = (Resolve-Path $InstallerPath).Path
-
-cmd /c "`"$CodeSignToolFull`" sign -username=`"$SslUsername`" -password=`"$SslPassword`" -credential_id=`"$SslCredentialId`" -totp_secret=`"$SslTotpSecret`" -input_file_path=`"$InstallerFullPath`" -override=`"true`""
-if ($LASTEXITCODE -ne 0) { Fail "Failed to sign $InstallerPath" }
+$rc = Invoke-CodeSignTool $InstallerPath
+if ($rc -ne 0) { Fail "Failed to sign $InstallerPath" }
 Ok "NSIS installer signed"
 
 # ── Step 4: Verify signatures ────────────────────────────────────────────────
