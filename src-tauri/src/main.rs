@@ -1683,8 +1683,7 @@ async fn set_window_opacity(app: tauri::AppHandle, opacity: f64) -> Result<(), S
 
     #[cfg(target_os = "windows")]
     {
-        use windows::Win32::Foundation::HWND;
-        use windows::Win32::Graphics::Gdi::COLORREF;
+        use windows::Win32::Foundation::{HWND, COLORREF};
         use windows::Win32::UI::WindowsAndMessaging::*;
         let hwnd_raw = win.hwnd().map_err(|e| format!("HWND error: {}", e))?;
         unsafe {
