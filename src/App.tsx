@@ -2563,7 +2563,7 @@ function App() {
                     </div>
                     {runtimePlatform === 'macos' && (
                       <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px' }}>
-                        On macOS, stealth changes take effect after restarting the app.
+                        Stealth changes take effect after restarting the app.
                       </p>
                     )}
                   </div>
