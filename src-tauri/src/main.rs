@@ -5,6 +5,7 @@ mod chrome;
 mod ai;
 mod screenshot;
 mod audio;
+mod transcription;
 mod oauth_server;
 mod google_oauth;
 
@@ -153,13 +154,32 @@ const DEFAULT_QUIT_APP_HOTKEY: &str = "Alt+Shift+Q";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const DEFAULT_QUIT_APP_HOTKEY: &str = "Ctrl+Shift+Q";
 
-fn hotkeys_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn app_config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_config_dir()
         .map_err(|e| format!("Failed to resolve app config dir: {}", e))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create config dir: {}", e))?;
-    Ok(dir.join("hotkeys.json"))
+    Ok(dir)
+}
+
+fn hotkeys_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app_config_dir(app)?.join("hotkeys.json"))
+}
+
+fn load_stealth_preference(app: &tauri::AppHandle) -> Option<bool> {
+    let path = app_config_dir(app).ok()?.join("stealth.json");
+    let data = std::fs::read_to_string(&path).ok()?;
+    let val: serde_json::Value = serde_json::from_str(&data).ok()?;
+    val.get("enabled").and_then(|v| v.as_bool())
+}
+
+fn save_stealth_preference(app: &tauri::AppHandle, enabled: bool) {
+    if let Ok(dir) = app_config_dir(app) {
+        let path = dir.join("stealth.json");
+        let json = format!("{{\"enabled\":{}}}", enabled);
+        let _ = std::fs::write(path, json);
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1071,6 +1091,32 @@ async fn supabase_sign_in(
     Ok(data)
 }
 
+#[tauri::command]
+async fn fetch_models(access_token: String) -> Result<serde_json::Value, String> {
+    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
+    const SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV1ZHdwY2p4Ynd0c3poaGNneWJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ5MTAzMDksImV4cCI6MjA4MDQ4NjMwOX0.wKsiXAAK3q2pQdR8UGT7gXeBsXUDki-YAuB0CtJ9ZUI";
+
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let response = client
+        .post(format!("{}/functions/v1/get-models", SUPABASE_URL))
+        .header("Content-Type", "application/json")
+        .header("apikey", SUPABASE_ANON_KEY)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch models: {}", e))?;
+
+    let body = response.text().await
+        .map_err(|e| format!("Failed to read models response: {}", e))?;
+
+    serde_json::from_str(&body)
+        .map_err(|e| format!("Failed to parse models response: {}", e))
+}
+
 /// Query AI via the Supabase Edge Function proxy
 /// This enforces quotas and uses OpenRouter as the backend
 #[tauri::command]
@@ -1455,6 +1501,104 @@ async fn query_ai_via_proxy_with_audio(
     })
 }
 
+// ============================================================================
+// LIVE TRANSCRIPTION COMMANDS
+// ============================================================================
+
+#[tauri::command]
+async fn start_live_transcription(
+    app_handle: tauri::AppHandle,
+    deepgram_key: String,
+    language: String,
+) -> Result<(), String> {
+    transcription::start_live_transcription(app_handle, deepgram_key, language).await
+}
+
+#[tauri::command]
+fn stop_live_transcription() -> Result<String, String> {
+    transcription::stop_live_transcription()
+}
+
+#[tauri::command]
+fn is_live_transcribing() -> bool {
+    transcription::is_transcribing()
+}
+
+/// Query AI via proxy with multi-turn conversation history.
+/// Accepts a full messages array instead of a single prompt string.
+#[tauri::command]
+async fn query_ai_via_proxy_conversation(
+    messages_json: String,
+    model: String,
+    access_token: String,
+) -> Result<AIProxyResponse, String> {
+    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
+
+    let messages: serde_json::Value = serde_json::from_str(&messages_json)
+        .map_err(|e| format!("Invalid messages JSON: {}", e))?;
+
+    println!("[Rust AI Proxy Conversation] Model: {}, Messages count: {}",
+        model,
+        messages.as_array().map(|a| a.len()).unwrap_or(0)
+    );
+
+    let client = &*AI_PROXY_CLIENT;
+
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+        "max_tokens": 16384
+    });
+
+    let start = std::time::Instant::now();
+
+    let response = client
+        .post(format!("{}/functions/v1/ai-proxy", SUPABASE_URL))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "❌ AI request timed out after 50 seconds. Please try again.".to_string()
+            } else {
+                format!("❌ AI Proxy request failed: {}", e)
+            }
+        })?;
+
+    println!("[Rust AI Proxy Conversation] Response in {:?}", start.elapsed());
+
+    let status = response.status();
+    let response_text = response.text().await
+        .map_err(|e| format!("❌ Failed to read response: {}", e))?;
+
+    let proxy_response: serde_json::Value = serde_json::from_str(&response_text)
+        .unwrap_or_else(|_| serde_json::json!({ "error": response_text }));
+
+    if !status.is_success() {
+        let error_msg = proxy_response["error"].as_str().unwrap_or(&response_text);
+        return Err(format!("❌ AI Proxy Error ({}): {}", status.as_u16(), error_msg));
+    }
+
+    let usage = proxy_response["usage"].as_object().map(|u| AIProxyUsage {
+        requests_used: u.get("requests_used").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        requests_limit: u.get("requests_limit").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        period_end: u.get("period_end").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        is_paid: u.get("is_paid").and_then(|v| v.as_bool()).unwrap_or(false),
+    });
+
+    let ai_response_text = proxy_response["response"].as_str().unwrap_or("").to_string();
+
+    println!("[Rust AI Proxy Conversation] Response length: {} chars", ai_response_text.len());
+
+    Ok(AIProxyResponse {
+        response: ai_response_text,
+        usage,
+        error: None,
+    })
+}
 
 // ============================================================================
 // GOOGLE OAUTH COMMANDS
@@ -1509,6 +1653,91 @@ fn get_google_token_status() -> Result<bool, String> {
     Ok(token_path.exists())
 }
 
+
+// ============================================================================
+// APP SETTINGS – Window opacity & stealth toggle
+// ============================================================================
+
+#[tauri::command]
+async fn set_window_opacity(app: tauri::AppHandle, opacity: f64) -> Result<(), String> {
+    let clamped = opacity.clamp(0.1, 1.0);
+
+    let win = app.get_webview_window("main")
+        .ok_or("Could not find main window")?;
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::c_void;
+        extern "C" {
+            fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
+            fn objc_msgSend();
+        }
+        type SendF64 = unsafe extern "C" fn(*mut c_void, *mut c_void, f64);
+        unsafe {
+            let ns_window_ptr = win.ns_window().map_err(|e| format!("NSWindow error: {}", e))? as *mut c_void;
+            let sel = sel_registerName(b"setAlphaValue:\0".as_ptr() as *const _);
+            let send: SendF64 = std::mem::transmute(objc_msgSend as *const ());
+            send(ns_window_ptr, sel, clamped);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::{HWND, COLORREF};
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        let hwnd_raw = win.hwnd().map_err(|e| format!("HWND error: {}", e))?;
+        unsafe {
+            let hwnd = HWND(hwnd_raw.0 as *mut _);
+            let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED.0 as isize);
+            let alpha = (clamped * 255.0) as u8;
+            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA);
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = &win;
+
+    println!("[AppSettings] Window opacity set to {:.0}%", clamped * 100.0);
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_stealth_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    STEALTH_ENABLED.store(enabled, Ordering::Relaxed);
+    save_stealth_preference(&app, enabled);
+    println!("[AppSettings] Stealth preference saved: {}", enabled);
+
+    // On macOS, stealth protections (dock hiding, activation policy, content
+    // protection) can only be applied safely at startup. Changing them at
+    // runtime terminates the process. We save the preference to disk and
+    // it takes effect on the next app launch.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = &app;
+        println!("[AppSettings] macOS: stealth change will take effect on next launch");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let win = app.get_webview_window("main")
+            .ok_or("Could not find main window")?;
+
+        if enabled {
+            println!("[AppSettings] Stealth mode ENABLED");
+            apply_windows_stealth(&win);
+            let _ = win.set_content_protected(true);
+            let _ = win.set_skip_taskbar(true);
+        } else {
+            println!("[AppSettings] Stealth mode DISABLED");
+            remove_windows_stealth(&win);
+            let _ = win.set_content_protected(false);
+            let _ = win.set_skip_taskbar(false);
+        }
+    }
+
+    Ok(())
+}
 
 // ============================================================================
 // STEALTH MODE – Platform-specific helpers
@@ -1697,6 +1926,28 @@ fn apply_windows_stealth(win: &tauri::WebviewWindow) {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn remove_windows_stealth(win: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    let hwnd_raw = match win.hwnd() {
+        Ok(h) => h,
+        Err(_) => return,
+    };
+
+    unsafe {
+        let hwnd = HWND(hwnd_raw.0 as *mut _);
+        // WDA_NONE = 0 — re-enable screen capture
+        let _ = SetWindowDisplayAffinity(hwnd, WINDOW_DISPLAY_AFFINITY(0));
+        // Remove WS_EX_TOOLWINDOW, add WS_EX_APPWINDOW
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let new_style = (ex_style & !(WS_EX_TOOLWINDOW.0 as isize)) | (WS_EX_APPWINDOW.0 as isize);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
+        println!("[AppSettings] Windows stealth protections removed");
+    }
+}
+
 // ============================================================================
 // MAIN
 // ============================================================================
@@ -1736,11 +1987,18 @@ fn main() {
             query_ai_via_proxy,
             query_ai_via_proxy_with_image,
             query_ai_via_proxy_with_audio,
+            query_ai_via_proxy_conversation,
+            start_live_transcription,
+            stop_live_transcription,
+            is_live_transcribing,
             create_checkout_session,
             create_billing_portal_session,
             open_url,
             supabase_sign_up,
             supabase_sign_in,
+            fetch_models,
+            set_window_opacity,
+            set_stealth_mode,
             open_external_url,
             start_google_oauth,
             get_google_token_status,
@@ -1762,23 +2020,19 @@ fn main() {
             audio::prewarm_audio_recorder();
 
             // ---- Stealth Mode ----
-            // Read APP_VISIBILITY from .env: "stealth" hides from screen capture + Dock/Taskbar
-            let stealth_mode = std::env::var("APP_VISIBILITY")
-                .map(|v| v.to_lowercase() != "normal")
-                .unwrap_or(true);
+            // Read from stealth.json config file; default to true (stealth) on first launch
+            let stealth_mode = load_stealth_preference(app.handle()).unwrap_or(true);
 
             STEALTH_ENABLED.store(stealth_mode, Ordering::Relaxed);
 
             if stealth_mode {
                 println!("🕵️ Stealth mode ENABLED — hiding from screen capture and Dock/Taskbar");
                 
-                // macOS: Hide Dock icon immediately (app-level setting)
                 #[cfg(target_os = "macos")]
                 {
                     apply_macos_dock_hiding();
                 }
                 
-                // Apply window stealth settings immediately (no delay needed with tokio spawn)
                 if let Some(win) = app.get_webview_window("main") {
                     #[cfg(target_os = "macos")]
                     {
@@ -1790,7 +2044,6 @@ fn main() {
                         apply_windows_stealth(&win);
                     }
 
-                    // Cross-platform Tauri methods (backup/fallback)
                     if let Err(e) = win.set_content_protected(true) {
                         println!("⚠️ set_content_protected failed: {}", e);
                     }
@@ -1801,23 +2054,7 @@ fn main() {
                     println!("⚠️ Could not find main window for stealth mode");
                 }
             } else {
-                println!("👁️ Normal visibility mode (APP_VISIBILITY != stealth)");
-                
-                // Restore normal window visibility for screen capture
-                if let Some(win) = app.get_webview_window("main") {
-                    #[cfg(target_os = "macos")]
-                    {
-                        restore_macos_screen_capture_visibility(&win);
-                    }
-
-                    // Ensure window is NOT skipped in taskbar
-                    if let Err(e) = win.set_content_protected(false) {
-                        println!("⚠️ set_content_protected(false) failed: {}", e);
-                    }
-                    if let Err(e) = win.set_skip_taskbar(false) {
-                        println!("⚠️ set_skip_taskbar(false) failed: {}", e);
-                    }
-                }
+                println!("👁️ Normal visibility mode");
             }
 
             // Load configured hotkeys, store in state, and register them.

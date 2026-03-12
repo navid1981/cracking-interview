@@ -38,6 +38,19 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: 
 }
 
 /**
+ * Ensure a database timestamp string is interpreted as UTC.
+ * Supabase returns `timestamp` (without timezone) as "2026-03-05T09:29:28"
+ * or "2026-03-05 09:29:28". JavaScript's `new Date()` treats strings without
+ * explicit timezone as local time, causing wrong offsets on non-UTC machines.
+ */
+function parseAsUTC(dateStr: string): string {
+  if (dateStr.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(dateStr)) {
+    return dateStr;
+  }
+  return dateStr.replace(' ', 'T') + 'Z';
+}
+
+/**
  * User subscription data from the users table
  */
 export interface UserSubscription {
@@ -57,6 +70,8 @@ export interface UserSubscription {
 export interface UsageStats {
   requests_used: number;
   requests_limit: number;
+  audio_seconds_used: number;
+  audio_seconds_limit: number;
   period_start: Date;
   period_end: Date;
 }
@@ -96,27 +111,48 @@ export async function getUsageStats(userId: string, subscription?: UserSubscript
   let periodEnd: Date;
   
   if (subscription?.subscription_start_date) {
-    periodStart = new Date(subscription.subscription_start_date);
+    periodStart = new Date(parseAsUTC(subscription.subscription_start_date));
     periodEnd = subscription.subscription_end_date 
-      ? new Date(subscription.subscription_end_date) 
+      ? new Date(parseAsUTC(subscription.subscription_end_date)) 
       : new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // +30 days if no end date
   } else {
     // No subscription - count all time (for display purposes)
-    periodStart = new Date('2020-01-01');
-    periodEnd = new Date('2099-12-31');
+    periodStart = new Date('2020-01-01T00:00:00Z');
+    periodEnd = new Date('2099-12-31T23:59:59Z');
   }
+
 
   const defaultStats: UsageStats = {
     requests_used: 0,
     requests_limit: 150,
+    audio_seconds_used: 0,
+    audio_seconds_limit: 36000,
     period_start: periodStart,
     period_end: periodEnd,
   };
 
   const fetchStats = async (): Promise<UsageStats> => {
-    // Note: Session should already be set by auth flow, no need to call setSession here
-    // (calling setSession triggers onAuthStateChange which creates a loop!)
-    
+    // Ensure supabase client has a valid session for RLS queries
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+    if (!currentSession) {
+      // Try to restore session from localStorage
+      const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed.access_token) {
+            await supabase.auth.setSession({
+              access_token: parsed.access_token,
+              refresh_token: parsed.refresh_token || '',
+            });
+          }
+        } catch {
+          // Failed to restore session
+        }
+      }
+    }
+
     const { count, error } = await supabase
       .from('api_usage')
       .select('*', { count: 'exact', head: true })
@@ -129,10 +165,24 @@ export async function getUsageStats(userId: string, subscription?: UserSubscript
       return defaultStats;
     }
 
+    // Audio usage: sum duration_seconds for the billing period
+    let audioSecondsUsed = 0;
+    const { data: audioRows, error: audioError } = await supabase
+      .from('audio_usage')
+      .select('duration_seconds')
+      .eq('user_id', userId)
+      .gte('created_at', periodStart.toISOString())
+      .lt('created_at', periodEnd.toISOString());
+
+    if (!audioError && audioRows) {
+      audioSecondsUsed = audioRows.reduce((sum, r) => sum + (r.duration_seconds || 0), 0);
+    }
 
     return {
       requests_used: count || 0,
       requests_limit: 150,
+      audio_seconds_used: audioSecondsUsed,
+      audio_seconds_limit: 36000,
       period_start: periodStart,
       period_end: periodEnd,
     };
@@ -399,6 +449,38 @@ export async function checkAIQuota(userId: string): Promise<{
       remainingCalls: remaining,
       isPaid: false,
     };
+  }
+}
+
+/**
+ * Log audio recording duration after a session ends.
+ * Returns updated audio usage totals from the server.
+ */
+export async function logAudioUsage(
+  durationSeconds: number,
+  accessToken: string
+): Promise<{ audio_seconds_used: number; audio_seconds_limit: number } | null> {
+  try {
+    const resp = await fetch(`${EDGE_FUNCTION_URL}/log-audio-usage`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ duration_seconds: durationSeconds }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      console.error('[AudioUsage] Log failed:', err.error || resp.status);
+      return null;
+    }
+
+    return await resp.json();
+  } catch (e) {
+    console.error('[AudioUsage] Error logging usage:', e);
+    return null;
   }
 }
 

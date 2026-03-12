@@ -2,16 +2,18 @@ import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import AIResponseDisplay from './components/AIResponseDisplay';
+import LiveTranscript from './components/LiveTranscript';
 import TabDropdown from './components/TabDropdown';
 import PromptEditor from './components/PromptEditor';
 import PromptListView from './components/PromptListView';
 import AuthScreen from './components/AuthScreen';
-import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel } from './services/prompts';
+import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts } from './services/prompts';
 import { 
   onAuthStateChange, 
   getUserSubscription, 
   getUsageStats,
   createCheckoutSession,
+  logAudioUsage,
   signOut as supabaseSignOut,
   UserSubscription,
   UsageStats,
@@ -61,15 +63,39 @@ interface AIConfig {
   gemini_api_key?: string;  // BYO API key for free users who exhausted tries
 }
 
-// Available AI models
-const PRO_MODELS = [
-  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', provider: 'OpenAI' },
-  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic' },
-  { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google' },
-  { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
-];
+interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+}
 
-const FREE_MODEL = { id: 'gemini-2.5-flash', name: 'Gemini 2.5 flash', provider: 'Google' };
+interface ModelConfig {
+  pro_models: ModelInfo[];
+  free_model: ModelInfo;
+  default_pro_model: string;
+}
+
+const DEFAULT_MODEL_CONFIG: ModelConfig = {
+  pro_models: [
+    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', provider: 'OpenAI' },
+    { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic' },
+    { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google' },
+    { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
+  ],
+  free_model: { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google' },
+  default_pro_model: 'gpt-5.2-codex',
+};
+
+function loadCachedModels(): ModelConfig {
+  try {
+    const cached = localStorage.getItem('cached_models');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed.pro_models?.length && parsed.free_model?.id) return parsed;
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_MODEL_CONFIG;
+}
 
 // Allowed domains for free users
 const FREE_TIER_ALLOWED_DOMAINS = [
@@ -98,6 +124,7 @@ function App() {
   const [showAnnouncement, setShowAnnouncement] = useState(true);
   const announcementDismissedRef = useRef(false);
   const [showAudioPromptWarning, setShowAudioPromptWarning] = useState(false);
+  const [modelConfig, setModelConfig] = useState<ModelConfig>(loadCachedModels);
 
   // ========== APP STATE ==========
   const [cdpStatus, setCdpStatus] = useState('🔴 Chrome Not Running');
@@ -122,17 +149,17 @@ function App() {
   );
   
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
-    // Migrate old model selections to new default
     const storedModel = localStorage.getItem('ai_model');
-    const oldModels = ['gemini-2.0-flash-exp', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-2.5-flash', 
-                       'claude-sonnet-4-20250514', 'claude-3-5-haiku-20241022'];
-    if (!storedModel || oldModels.includes(storedModel)) {
-      // Reset to default model (will be set based on subscription status)
+    const cached = loadCachedModels();
+    const validIds = [...cached.pro_models.map(m => m.id), cached.free_model.id];
+    
+    // Reset if stored model is no longer in the available list
+    if (storedModel && !validIds.includes(storedModel)) {
       localStorage.removeItem('ai_model');
     }
     
     return {
-      selected_model: localStorage.getItem('ai_model') || 'gpt-5.2-codex',
+      selected_model: localStorage.getItem('ai_model') || cached.default_pro_model,
       gemini_api_key: localStorage.getItem('gemini_api_key') || undefined,
     };
   });
@@ -152,7 +179,7 @@ function App() {
   }, [aiConfig.selected_model, aiConfig.gemini_api_key]);
   
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'account' | 'models' | 'prompts' | 'input' | 'hotkeys'>('models');
+  const [settingsTab, setSettingsTab] = useState<'account' | 'models' | 'prompts' | 'hotkeys' | 'app'>('models');
   const [runtimePlatform, setRuntimePlatform] = useState<'macos' | 'windows' | 'linux' | 'unknown'>('unknown');
   const [useScreenshot, setUseScreenshot] = useState(
     localStorage.getItem('use_screenshot') === 'true'
@@ -166,6 +193,30 @@ function App() {
       // Silent fail - non-critical
     }
   }, [useScreenshot]);
+
+  // ========== APP SETTINGS STATE ==========
+  const [windowOpacity, setWindowOpacity] = useState<number>(() => {
+    const saved = localStorage.getItem('window_opacity');
+    return saved ? parseFloat(saved) : 1.0;
+  });
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('app_theme') as 'light' | 'dark') || 'light';
+  });
+  const [stealthMode, setStealthMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('stealth_mode');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  // Apply saved app preferences on startup
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    invoke('set_window_opacity', { opacity: windowOpacity }).catch(() => {});
+    // Stealth mode is applied by Rust at startup from stealth.json config file.
+    // No need to call set_stealth_mode here — it would conflict with the startup
+    // activation policy on macOS.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [previousWindowSize, setPreviousWindowSize] = useState<{width: number, height: number} | null>(null);
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [audioSeconds, setAudioSeconds] = useState(0);
@@ -173,6 +224,23 @@ function App() {
   const isRecordingAudioRef = useRef(false);
   const audioToggleInFlightRef = useRef(false);
   const lastAudioToggleAtRef = useRef(0);
+  // ========== LIVE TRANSCRIPTION STATE ==========
+  const [isLiveTranscribing, setIsLiveTranscribing] = useState(false);
+  const [liveTranscriptFinal, setLiveTranscriptFinal] = useState('');
+  const [liveTranscriptInterim, setLiveTranscriptInterim] = useState('');
+  const [conversationHistory, setConversationHistory] = useState<Array<{role: string; content: string}>>([]);
+  const conversationHistoryRef = useRef<Array<{role: string; content: string}>>([]);
+  const [displayTranscripts, setDisplayTranscripts] = useState<string[]>([]);
+  const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
+  const [interviewLanguage, setInterviewLanguage] = useState(() => localStorage.getItem('interview_language') || 'multi');
+  const silenceTimerRef = useRef<number | null>(null);
+  const lastTranscriptTimeRef = useRef<number>(0);
+  const isLiveTranscribingRef = useRef(false);
+  const liveTranscriptFinalRef = useRef('');
+  const MAX_SESSION_SECONDS = 5400; // 90 minutes per session
+  const sessionMaxSecondsRef = useRef(MAX_SESSION_SECONDS);
+  const audioSecondsRef = useRef(0);
+
   const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
   
@@ -268,6 +336,54 @@ function App() {
     };
   }, []);
 
+  // Keep live transcription ref in sync
+  useEffect(() => {
+    isLiveTranscribingRef.current = isLiveTranscribing;
+  }, [isLiveTranscribing]);
+
+  // Listen for Deepgram transcript events from Rust backend
+  useEffect(() => {
+    let cancelled = false;
+    const unsubs: Array<() => void> = [];
+
+    (async () => {
+      const u1 = await listen<{ text: string; is_final: boolean }>('live_transcript', (event) => {
+        lastTranscriptTimeRef.current = Date.now();
+        if (event.payload.is_final) {
+          setLiveTranscriptFinal(prev => {
+            const updated = prev + (prev ? ' ' : '') + event.payload.text;
+            liveTranscriptFinalRef.current = updated;
+            return updated;
+          });
+          setLiveTranscriptInterim('');
+        } else {
+          setLiveTranscriptInterim(event.payload.text);
+        }
+      });
+      if (cancelled) { u1(); return; }
+      unsubs.push(u1);
+
+      const u2 = await listen('live_transcript_utterance_end', () => {
+        // Deepgram detected end of utterance — start silence countdown
+        lastTranscriptTimeRef.current = Date.now();
+      });
+      if (cancelled) { u2(); return; }
+      unsubs.push(u2);
+
+      const u3 = await listen<string>('live_transcript_error', (event) => {
+        setMessage(`❌ Transcription error: ${event.payload}`);
+        setIsLiveTranscribing(false);
+      });
+      if (cancelled) { u3(); return; }
+      unsubs.push(u3);
+    })();
+
+    return () => {
+      cancelled = true;
+      unsubs.forEach(u => u());
+    };
+  }, []);
+
   // Keep a ref in sync so hotkey-driven toggles don't depend on render timing.
   useEffect(() => {
     isRecordingAudioRef.current = isRecordingAudio;
@@ -278,18 +394,25 @@ function App() {
     subscriptionRef.current = subscription;
   }, [subscription]);
 
+  // Auto-stop recording when session time limit is reached (90 min or remaining quota)
+  const sessionStopTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (isLiveTranscribing && audioSeconds >= sessionMaxSecondsRef.current && !sessionStopTriggeredRef.current) {
+      sessionStopTriggeredRef.current = true;
+      const minutes = Math.round(sessionMaxSecondsRef.current / 60);
+      setMessage(`⏱️ Session limit reached (${minutes} min). Stopping recording…`);
+      stopLiveTranscription();
+    }
+  }, [audioSeconds, isLiveTranscribing]);
+
   const toggleAudioRecording = async () => {
-    // Guard against duplicate hotkey events (React StrictMode/dev can double-register listeners)
-    // and against rapid double presses. Use longer debounce to prevent accidental double-clicks.
     const now = Date.now();
     if (audioToggleInFlightRef.current) return;
-    if (now - lastAudioToggleAtRef.current < 1000) return;  // 1 second debounce
-    
-    // Set in-flight flag IMMEDIATELY to prevent race conditions
+    if (now - lastAudioToggleAtRef.current < 1000) return;
+
     audioToggleInFlightRef.current = true;
     lastAudioToggleAtRef.current = now;
 
-    // Audio is only available for Pro users (active or cancelling status)
     const isPro = subscriptionRef.current?.subscription_status === 'active' || subscriptionRef.current?.subscription_status === 'cancelling';
     if (!isPro) {
       setMessage('⚠️ Audio input requires Pro subscription.');
@@ -297,110 +420,391 @@ function App() {
       return;
     }
 
-    // Start recording
-    if (!isRecordingAudioRef.current) {
+    // Start live transcription
+    if (!isRecordingAudioRef.current && !isLiveTranscribingRef.current) {
       try {
-        // Show "Starting..." message while audio initializes
-        setMessage('🔊 Starting audio capture...');
-        // Flip ref immediately to avoid races on repeated triggers.
-        isRecordingAudioRef.current = true;
-
-        // Wait for backend to actually start recording BEFORE showing UI
-        await invoke('start_audio_recording');
-        
-        // NOW recording has actually started - show the UI
-        setMessage(''); // Clear "Starting..." message
-        setIsRecordingAudio(true);
-        setAudioSeconds(0);
-        if (audioTimerRef.current) window.clearInterval(audioTimerRef.current);
-        audioTimerRef.current = window.setInterval(() => setAudioSeconds((s) => s + 1), 1000);
-        
-        // Recording started successfully - reset flag to allow STOP to be called
-        // But we need to wait a bit to prevent accidental double-clicks
-        setTimeout(() => {
-          audioToggleInFlightRef.current = false;
-        }, 500);
+        await startLiveTranscription();
+        setTimeout(() => { audioToggleInFlightRef.current = false; }, 500);
       } catch (e) {
-        // Roll back state on failure.
-        isRecordingAudioRef.current = false;
-        setIsRecordingAudio(false);
-        if (audioTimerRef.current) {
-          window.clearInterval(audioTimerRef.current);
-          audioTimerRef.current = null;
-        }
         setMessage(`❌ Error: ${String(e)}`);
         audioToggleInFlightRef.current = false;
       }
       return;
     }
 
-    // Stop recording and solve
-    setIsLoading(true);
-    setAiResponse('');
-    setMessage('⏹️ Stopping recording...');
+    // Stop live transcription and send to AI
     try {
-      // Stop recording and get the audio file path (MP3 or WAV)
-      const audioFilePath = await invoke<string>('stop_audio_recording');
+      await stopLiveTranscription();
+    } catch (e) {
+      setMessage(`❌ Error: ${String(e)}`);
+    } finally {
+      audioToggleInFlightRef.current = false;
+    }
+  };
 
-      isRecordingAudioRef.current = false;
+  // ========== LIVE TRANSCRIPTION ==========
+
+  const getAccessToken = (): string => {
+    const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
+    const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+    const stored = localStorage.getItem(storageKey);
+    if (!stored) return '';
+    try {
+      return JSON.parse(stored).access_token || '';
+    } catch {
+      return '';
+    }
+  };
+
+  const fetchDeepgramKey = async (): Promise<{ key: string; remaining_seconds: number } | null> => {
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) return null;
+      const resp = await fetch(`${EDGE_FUNCTION_URL}/deepgram-key`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_API_KEY,
+        },
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        if (resp.status === 429 && err.audio_seconds_used !== undefined) {
+          setUsageStats(prev => prev ? {
+            ...prev,
+            audio_seconds_used: err.audio_seconds_used,
+            audio_seconds_limit: err.audio_seconds_limit,
+          } : prev);
+        }
+        setMessage(`❌ ${err.error || 'Failed to get transcription key'}`);
+        return null;
+      }
+      const data = await resp.json();
+      if (data.audio_seconds_used !== undefined) {
+        setUsageStats(prev => prev ? {
+          ...prev,
+          audio_seconds_used: data.audio_seconds_used,
+          audio_seconds_limit: data.audio_seconds_limit,
+        } : prev);
+      }
+      return { key: data.key, remaining_seconds: data.remaining_seconds ?? MAX_SESSION_SECONDS };
+    } catch (e) {
+      setMessage(`❌ Error fetching transcription key: ${e}`);
+      return null;
+    }
+  };
+
+  const startLiveTranscription = async () => {
+    const isPro = subscriptionRef.current?.subscription_status === 'active' || subscriptionRef.current?.subscription_status === 'cancelling';
+    if (!isPro) {
+      setMessage('⚠️ Live transcription requires Pro subscription.');
+      return;
+    }
+
+    setMessage('🎙️ Starting live transcription…');
+    const dgResult = await fetchDeepgramKey();
+    if (!dgResult) return;
+
+    const effectiveMax = Math.min(MAX_SESSION_SECONDS, dgResult.remaining_seconds);
+    if (effectiveMax <= 0) {
+      setMessage('❌ Monthly audio limit reached. Check your usage in Settings.');
+      return;
+    }
+    sessionMaxSecondsRef.current = effectiveMax;
+    sessionStopTriggeredRef.current = false;
+
+    try {
+      setLiveTranscriptFinal('');
+      liveTranscriptFinalRef.current = '';
+      setLiveTranscriptInterim('');
+      setSilenceCountdown(null);
+      lastTranscriptTimeRef.current = Date.now();
+
+      await invoke('start_live_transcription', {
+        deepgramKey: dgResult.key,
+        language: interviewLanguage,
+      });
+
+      setIsLiveTranscribing(true);
+      setIsRecordingAudio(true);
+      setAudioSeconds(0);
+      audioSecondsRef.current = 0;
+      if (audioTimerRef.current) window.clearInterval(audioTimerRef.current);
+      audioTimerRef.current = window.setInterval(() => {
+        setAudioSeconds(s => {
+          const next = s + 1;
+          audioSecondsRef.current = next;
+          return next;
+        });
+      }, 1000);
+      isRecordingAudioRef.current = true;
+      setMessage('');
+
+      startSilenceDetection();
+    } catch (e) {
+      setMessage(`❌ Failed to start transcription: ${e}`);
+      setIsLiveTranscribing(false);
+    }
+  };
+
+  // Manual stop: user clicks Stop or presses hotkey — closes WebSocket
+  const stopLiveTranscription = async () => {
+    if (silenceTimerRef.current) {
+      window.clearInterval(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    setSilenceCountdown(null);
+
+    // Capture session duration before clearing timer
+    const sessionDuration = audioSecondsRef.current;
+
+    try {
+      await invoke<string>('stop_live_transcription');
+      setIsLiveTranscribing(false);
       setIsRecordingAudio(false);
+      isRecordingAudioRef.current = false;
       if (audioTimerRef.current) {
         window.clearInterval(audioTimerRef.current);
         audioTimerRef.current = null;
       }
 
-      // Get access token for proxy calls
-      const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
-      const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
-      const storedSession = localStorage.getItem(storageKey);
-      let accessToken = '';
-      
-      if (storedSession) {
-        try {
-          const session = JSON.parse(storedSession);
-          accessToken = session.access_token || '';
-        } catch {
-          setMessage('❌ Session error. Please sign in again.');
-          setIsLoading(false);
-          audioToggleInFlightRef.current = false;
-          return;
+      // Log audio usage to backend
+      if (sessionDuration > 0) {
+        const accessToken = getAccessToken();
+        if (accessToken) {
+          const audioResult = await logAudioUsage(sessionDuration, accessToken);
+          if (audioResult) {
+            setUsageStats(prev => prev ? {
+              ...prev,
+              audio_seconds_used: audioResult.audio_seconds_used,
+              audio_seconds_limit: audioResult.audio_seconds_limit,
+            } : prev);
+          }
         }
       }
 
-      // IMPORTANT: Audio input ALWAYS uses gemini-3-flash model (supports audio input)
-      // This overrides the user's model selection because other models don't support audio
-      const AUDIO_MODEL = 'gemini-3-flash';
+      // Only send transcript that hasn't been auto-sent yet
+      const unsent = liveTranscriptFinalRef.current;
+      if (unsent.trim()) {
+        setLiveTranscriptFinal('');
+        liveTranscriptFinalRef.current = '';
+        setLiveTranscriptInterim('');
+        await sendTranscriptToAI(unsent);
+      } else {
+        setLiveTranscriptFinal('');
+        liveTranscriptFinalRef.current = '';
+        setLiveTranscriptInterim('');
+      }
+    } catch (e) {
+      setIsLiveTranscribing(false);
+      setIsRecordingAudio(false);
+      isRecordingAudioRef.current = false;
+      if (audioTimerRef.current) {
+        window.clearInterval(audioTimerRef.current);
+        audioTimerRef.current = null;
+      }
+      // Still log usage even on error
+      if (sessionDuration > 0) {
+        const accessToken = getAccessToken();
+        if (accessToken) {
+          logAudioUsage(sessionDuration, accessToken).then(audioResult => {
+            if (audioResult) {
+              setUsageStats(prev => prev ? {
+                ...prev,
+                audio_seconds_used: audioResult.audio_seconds_used,
+                audio_seconds_limit: audioResult.audio_seconds_limit,
+              } : prev);
+            }
+          });
+        }
+      }
+      setMessage(`❌ Error stopping transcription: ${e}`);
+    }
+  };
 
-      setSolveFlowType('audio');
-      setSolvePhase('asking');
-      setMessage('🤖 Sending audio to AI...');
-      const audioInstructions = `Listen to the interview question in the audio carefully and solve it step by step. Provide a clear Explanation and a final Solution.`;
-      // Audio ALWAYS uses the Verbal Interview (Audio) prompt
-      const prompt = buildPrompt(PromptTemplate.VerbalInterviewAudio, selectedLanguage, audioInstructions);
-      
-      // Send audio directly to Gemini via proxy (no transcription needed)
-      const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_audio', {
-        prompt,
-        audioPath: audioFilePath,
-        model: AUDIO_MODEL,
+  const SILENCE_THRESHOLD_MS = 3000;
+  const isSendingRef = useRef(false);
+  const autoSendRef = useRef<() => Promise<void>>();
+
+  // Auto-send: silence detected — send transcript to AI but keep recording
+  // Updated every render so it always has fresh closures
+  autoSendRef.current = async () => {
+    if (isSendingRef.current) return;
+    const transcript = liveTranscriptFinalRef.current;
+    if (!transcript.trim()) {
+      lastTranscriptTimeRef.current = 0;
+      setSilenceCountdown(null);
+      return;
+    }
+
+    isSendingRef.current = true;
+    setSilenceCountdown(null);
+
+    setLiveTranscriptFinal('');
+    liveTranscriptFinalRef.current = '';
+    setLiveTranscriptInterim('');
+    lastTranscriptTimeRef.current = 0;
+
+    try {
+      await sendTranscriptToAI(transcript);
+    } finally {
+      isSendingRef.current = false;
+    }
+  };
+
+  const startSilenceDetection = () => {
+    if (silenceTimerRef.current) window.clearInterval(silenceTimerRef.current);
+
+    silenceTimerRef.current = window.setInterval(() => {
+      if (!isLiveTranscribingRef.current) {
+        if (silenceTimerRef.current) window.clearInterval(silenceTimerRef.current);
+        return;
+      }
+
+      if (isSendingRef.current) return;
+
+      const elapsed = Date.now() - lastTranscriptTimeRef.current;
+      if (elapsed >= SILENCE_THRESHOLD_MS && lastTranscriptTimeRef.current > 0) {
+        const remaining = Math.max(0, Math.ceil((SILENCE_THRESHOLD_MS + 2000 - elapsed) / 1000));
+        if (remaining > 0) {
+          setSilenceCountdown(remaining);
+        } else {
+          setSilenceCountdown(null);
+          autoSendRef.current?.();
+        }
+      } else {
+        setSilenceCountdown(null);
+      }
+    }, 500);
+  };
+
+  const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
+
+  const MAX_HISTORY_TOKENS = 100_000;
+  const KEEP_RECENT_MESSAGES = 20; // last 10 Q&A pairs kept in full
+  const SUMMARY_CHAR_LIMIT = 500;  // chars kept per old message in summary
+
+  const trimConversationHistory = (history: Array<{role: string; content: string}>): Array<{role: string; content: string}> => {
+    const totalTokens = history.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
+
+    // Preserve: system prompt (index 0) + first user template message (index 1)
+    const preserved: Array<{role: string; content: string}> = [];
+    let trimStart = 0;
+    if (history[0]?.role === 'system') {
+      preserved.push(history[0]);
+      trimStart = 1;
+    }
+    if (history[trimStart]?.role === 'user') {
+      preserved.push(history[trimStart]);
+      trimStart++;
+    }
+
+    const rest = history.slice(trimStart);
+
+    if (totalTokens <= MAX_HISTORY_TOKENS && rest.length <= KEEP_RECENT_MESSAGES) return history;
+    if (rest.length <= KEEP_RECENT_MESSAGES) return history;
+
+    const oldMessages = rest.slice(0, rest.length - KEEP_RECENT_MESSAGES);
+    const recentMessages = rest.slice(rest.length - KEEP_RECENT_MESSAGES);
+
+    const summaryText = oldMessages
+      .map(m => {
+        const prefix = m.role === 'user' ? 'Q' : 'A';
+        const truncated = m.content.length > SUMMARY_CHAR_LIMIT
+          ? m.content.substring(0, SUMMARY_CHAR_LIMIT) + '…'
+          : m.content;
+        return `${prefix}: ${truncated}`;
+      })
+      .join('\n');
+
+    const summaryMsg = {
+      role: 'system' as const,
+      content: `Previous conversation summary (earlier exchanges):\n${summaryText}`,
+    };
+
+    let result = [...preserved, summaryMsg, ...recentMessages];
+
+    // Safety: if still over token limit, progressively drop oldest summaries
+    let resultTokens = result.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
+    while (resultTokens > MAX_HISTORY_TOKENS && result.length > KEEP_RECENT_MESSAGES + preserved.length) {
+      const dropIdx = preserved.length;
+      result.splice(dropIdx, 1);
+      resultTokens = result.reduce((sum, msg) => sum + estimateTokens(msg.content), 0);
+    }
+
+    return result;
+  };
+
+  const sendTranscriptToAI = async (transcript: string) => {
+    setIsLoading(true);
+    setAiResponse('');
+    setSolveFlowType('audio');
+    setSolvePhase('asking');
+    setMessage('🤖 Sending to AI…');
+
+    try {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        setMessage('❌ Session error. Please sign in again.');
+        setIsLoading(false);
+        return;
+      }
+
+      const model = aiConfig.selected_model;
+
+      // Build messages array with conversation history (use ref to avoid stale closure)
+      const currentHistory = conversationHistoryRef.current;
+      let messages: Array<{role: string; content: string}> = [];
+
+      if (currentHistory.length === 0) {
+        // First turn — use the editable Verbal Interview system + user prompts
+        const { systemPrompt, userMessage } = getConversationPrompts(
+          selectedTemplate,
+          interviewLanguage,
+          transcript,
+        );
+        messages.push({ role: 'system', content: systemPrompt });
+        messages.push({ role: 'user', content: userMessage });
+      } else {
+        // Follow-up turns — reuse history, add raw transcript
+        messages = [...currentHistory];
+        messages.push({ role: 'user', content: transcript });
+      }
+
+      // Trim if approaching token limit
+      messages = trimConversationHistory(messages);
+
+      const messagesJson = JSON.stringify(messages);
+
+      const proxyResponse = await invoke<{
+        response: string;
+        usage?: { requests_used: number; requests_limit: number; is_paid?: boolean };
+        error?: string;
+      }>('query_ai_via_proxy_conversation', {
+        messagesJson,
+        model,
         accessToken,
       });
-      
+
       if (proxyResponse.error) {
         throw new Error(proxyResponse.error);
       }
-      
+
+      // Update conversation history + display transcripts
+      const newHistory = [...messages, { role: 'assistant', content: proxyResponse.response }];
+      setConversationHistory(newHistory);
+      conversationHistoryRef.current = newHistory;
+      setDisplayTranscripts(prev => [...prev, transcript]);
+
       setAiResponse(proxyResponse.response);
       setSolvePhase('idle');
       setMessage('');
-      
-      // Update usage stats if returned
+
       if (proxyResponse.usage) {
         setUsageStats(prev => prev ? {
           ...prev,
           requests_used: proxyResponse.usage!.requests_used,
         } : prev);
-        // Also refresh subscription for free users (lifetime_ai_calls updated)
         if (!proxyResponse.usage.is_paid && authUser?.id) {
           const updatedSub = await getUserSubscription(authUser.id);
           if (updatedSub) setSubscription(updatedSub);
@@ -411,17 +815,18 @@ function App() {
       setMessage(`❌ Error: ${String(e)}`);
     } finally {
       setIsLoading(false);
-      audioToggleInFlightRef.current = false;
-
-      // Even if stopping failed, we likely already terminated the helper or cleared backend state.
-      // Ensure the UI doesn't remain stuck in "recording".
-      isRecordingAudioRef.current = false;
-      setIsRecordingAudio(false);
-      if (audioTimerRef.current) {
-        window.clearInterval(audioTimerRef.current);
-        audioTimerRef.current = null;
-      }
     }
+  };
+
+  const clearConversationHistory = () => {
+    setConversationHistory([]);
+    conversationHistoryRef.current = [];
+    setDisplayTranscripts([]);
+    setLiveTranscriptFinal('');
+    liveTranscriptFinalRef.current = '';
+    setLiveTranscriptInterim('');
+    setAiResponse('');
+    setMessage('Conversation cleared — starting fresh.');
   };
 
   useEffect(() => {
@@ -729,6 +1134,23 @@ function App() {
           const stats = await getUsageStats(session.user.id, sub);
           setUsageStats(stats);
           
+          // Fetch available models from server (fire-and-forget, don't block login)
+          invoke<ModelConfig>('fetch_models', { accessToken: session.access_token })
+            .then((config) => {
+              if (config?.pro_models?.length && config?.free_model?.id) {
+                setModelConfig(config);
+                localStorage.setItem('cached_models', JSON.stringify(config));
+                // If current model is no longer available, reset to default
+                const validIds = [...config.pro_models.map((m: ModelInfo) => m.id), config.free_model.id];
+                const currentModel = localStorage.getItem('ai_model') || config.default_pro_model;
+                if (!validIds.includes(currentModel)) {
+                  setAiConfig(prev => ({ ...prev, selected_model: config.default_pro_model }));
+                  localStorage.setItem('ai_model', config.default_pro_model);
+                }
+              }
+            })
+            .catch(() => { /* use cached/default models */ });
+
           // Fetch announcement
           await fetchAnnouncement(session.user.email, sub);
         }
@@ -1044,7 +1466,7 @@ function App() {
     }
 
     // Determine which model to use
-    const modelToUse = useBYOKey ? 'gemini-2.5-flash' : (isPro ? aiConfig.selected_model : FREE_MODEL.id);
+    const modelToUse = useBYOKey ? modelConfig.free_model.id : (isPro ? aiConfig.selected_model : modelConfig.free_model.id);
 
     setIsLoading(true);
     setAiResponse('');
@@ -1247,7 +1669,6 @@ function App() {
       <header className="app-header">
         <div className="header-left">
           <img src="/icon.png" alt="CrackingInterview" className="app-icon-img" />
-          <h1>CrackingInterview</h1>
         </div>
         <div className="header-right">
           {/* Quota Display */}
@@ -1266,6 +1687,11 @@ function App() {
               ) : (
                 <>🎁 {subscription.lifetime_ai_calls || 0}/3 calls</>
               )}
+            </span>
+          )}
+          {isPaidUser && usageStats && (
+            <span className="quota-badge" title={`${(usageStats.audio_seconds_used / 3600).toFixed(1)} of ${usageStats.audio_seconds_limit / 3600} audio hours used this month`}>
+              🎙️ {(usageStats.audio_seconds_used / 3600).toFixed(1)}/{usageStats.audio_seconds_limit / 3600}h
             </span>
           )}
           {cdpReady ? (
@@ -1358,9 +1784,35 @@ function App() {
         </button>
       </div>
 
-      {isRecordingAudio && (
+      {isRecordingAudio && !isLiveTranscribing && (
         <div className="message-box" style={{ margin: '0 20px 12px 20px' }}>
           🎙️ Recording system audio… <strong>{audioSeconds}s</strong> (press Stop / Audio hotkey to send)
+        </div>
+      )}
+
+      {isLiveTranscribing && (
+        <div style={{ margin: '0 20px 12px 20px' }}>
+          <LiveTranscript
+            interimText={liveTranscriptInterim}
+            finalText={liveTranscriptFinal}
+            isTranscribing={isLiveTranscribing}
+            silenceCountdown={silenceCountdown}
+          />
+        </div>
+      )}
+
+      {conversationHistory.length > 0 && (
+        <div className="conversation-controls" style={{ margin: '0 20px 8px 20px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span style={{ fontSize: '12px', color: '#888' }}>
+            {Math.floor(conversationHistory.filter(m => m.role === 'user').length)} exchange{conversationHistory.filter(m => m.role === 'user').length !== 1 ? 's' : ''} in this session
+          </span>
+          <button
+            onClick={clearConversationHistory}
+            className="new-session-btn"
+            title="Clear conversation and start fresh"
+          >
+            New Session
+          </button>
         </div>
       )}
 
@@ -1442,9 +1894,10 @@ function App() {
                 const currentIdx = phaseOrder.indexOf(solvePhase);
 
                 const modelName = (() => {
-                  const allModels = [...PRO_MODELS, FREE_MODEL];
-                  const found = allModels.find(m => m.id === aiConfig.selected_model);
-                  return found ? found.name : aiConfig.selected_model;
+                  const actualModelId = isPaidUser ? aiConfig.selected_model : modelConfig.free_model.id;
+                  const allModels = [...modelConfig.pro_models, modelConfig.free_model];
+                  const found = allModels.find(m => m.id === actualModelId);
+                  return found ? found.name : actualModelId;
                 })();
                 const promptLabel = getTemplateLabel(selectedTemplate);
 
@@ -1489,10 +1942,46 @@ function App() {
             </div>
           )}
 
-          <AIResponseDisplay 
-            response={aiResponse}
-            language={selectedLanguage.toLowerCase()}
-          />
+          {conversationHistory.length > 1 && selectedTab && isAudio(selectedTab) ? (
+            <div className="conversation-view">
+              {(() => {
+                const visible = conversationHistory.filter(msg => msg.role !== 'system');
+                // Group into Q&A pairs (user + assistant), reverse so newest is on top
+                // pairIndex maps to displayTranscripts index (0-based)
+                const pairs: Array<{ messages: typeof visible; transcriptIdx: number }> = [];
+                let userCount = 0;
+                for (let i = 0; i < visible.length; i += 2) {
+                  pairs.push({ messages: visible.slice(i, i + 2), transcriptIdx: userCount });
+                  userCount++;
+                }
+                pairs.reverse();
+                return pairs.map((pair, pairIdx) => (
+                  <div key={pairIdx} className="conversation-pair">
+                    {pairIdx === 0 && <div className="conversation-latest-badge">Latest</div>}
+                    {pair.messages.map((msg, msgIdx) => (
+                      <div key={msgIdx} className={`conversation-msg conversation-msg-${msg.role}`}>
+                        <div className="conversation-msg-label">
+                          {msg.role === 'user' ? '🎤 Interviewer' : '🤖 AI'}
+                        </div>
+                        {msg.role === 'assistant' ? (
+                          <AIResponseDisplay response={msg.content} language={selectedLanguage.toLowerCase()} />
+                        ) : (
+                          <div className="conversation-msg-text">
+                            {displayTranscripts[pair.transcriptIdx] || msg.content}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ));
+              })()}
+            </div>
+          ) : (
+            <AIResponseDisplay 
+              response={aiResponse}
+              language={selectedLanguage.toLowerCase()}
+            />
+          )}
         </div>
       </div>
 
@@ -1519,12 +2008,6 @@ function App() {
                 🤖 AI Models
               </button>
               <button 
-                className={`tab-btn ${settingsTab === 'input' ? 'active' : ''}`}
-                onClick={() => setSettingsTab('input')}
-              >
-                📥 Input Mode
-              </button>
-              <button 
                 className={`tab-btn ${settingsTab === 'prompts' ? 'active' : ''}`}
                 onClick={() => {
                   setSettingsTab('prompts');
@@ -1538,6 +2021,12 @@ function App() {
                 onClick={() => setSettingsTab('hotkeys')}
               >
                 ⌨️ HotKeys
+              </button>
+              <button 
+                className={`tab-btn ${settingsTab === 'app' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('app')}
+              >
+                🖥️ App
               </button>
             </div>
             
@@ -1563,13 +2052,12 @@ function App() {
                   </div>
 
                   <div className="form-group">
-                    <label>Usage {isPaidUser ? 'This Month' : '(Lifetime)'}:</label>
+                    <label>AI Calls {isPaidUser ? 'This Month' : '(Lifetime)'}:</label>
                     <div className="usage-bar-container">
                       {(() => {
                         const pct = isPaidUser && usageStats
                           ? Math.min(100, (usageStats.requests_used / usageStats.requests_limit) * 100)
                           : Math.min(100, ((subscription?.lifetime_ai_calls || 0) / 3) * 100);
-                        // Green → Yellow → Red gradient based on usage percentage
                         const barColor = pct < 50
                           ? `linear-gradient(90deg, #4caf50, #66bb6a)`
                           : pct < 80
@@ -1597,11 +2085,38 @@ function App() {
                     </div>
                   </div>
 
+                  {isPaidUser && usageStats && (
+                    <div className="form-group">
+                      <label>Audio Recording This Month:</label>
+                      <div className="usage-bar-container">
+                        {(() => {
+                          const pct = Math.min(100, (usageStats.audio_seconds_used / usageStats.audio_seconds_limit) * 100);
+                          const barColor = pct < 50
+                            ? `linear-gradient(90deg, #4caf50, #66bb6a)`
+                            : pct < 80
+                              ? `linear-gradient(90deg, #66bb6a, #ffc107)`
+                              : `linear-gradient(90deg, #ff9800, #f44336)`;
+                          return (
+                            <div
+                              className="usage-bar"
+                              style={{ width: `${pct}%`, background: barColor }}
+                            />
+                          );
+                        })()}
+                      </div>
+                      <div className="usage-text">
+                        <span>{(usageStats.audio_seconds_used / 3600).toFixed(1)} / {usageStats.audio_seconds_limit / 3600} hours</span>
+                        <span className="usage-reset">Resets {usageStats.period_end?.toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  )}
+
                   {!isPaidUser && (
                     <div className="upgrade-section">
                       <h4>🚀 Upgrade to Pro</h4>
                       <ul className="upgrade-benefits">
                         <li>✓ 150 AI requests per month</li>
+                        <li>✓ 10 hours audio recording per month</li>
                         <li>✓ GPT-5.2 Codex, Claude 4.5, Gemini 3, Grok 4.1</li>
                         <li>✓ Any website + screen capture</li>
                         <li>✓ Audio input with transcription</li>
@@ -1662,17 +2177,17 @@ function App() {
                         onChange={(e) => setAiConfig({...aiConfig, selected_model: e.target.value})}
                         className="input-field"
                       >
-                        {PRO_MODELS.map(model => (
+                        {modelConfig.pro_models.map(model => (
                           <option key={model.id} value={model.id}>
                             {model.name} ({model.provider})
                           </option>
                         ))}
                       </select>
                     ) : (
-                      <div className="input-field" style={{ backgroundColor: '#f5f5f5', cursor: 'not-allowed' }}>
+                      <div className="input-field" style={{ backgroundColor: 'var(--input-disabled-bg)', cursor: 'not-allowed' }}>
                         {(subscription?.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key 
                           ? 'Gemini 2.5 Flash (Google) - Your API Key'
-                          : `${FREE_MODEL.name} (${FREE_MODEL.provider}) - Free Tier`}
+                          : `${modelConfig.free_model.name} (${modelConfig.free_model.provider}) - Free Tier`}
                       </div>
                     )}
                   </div>
@@ -1753,12 +2268,9 @@ function App() {
                       </ul>
                     </div>
                   )}
-                </>
-              )}
 
-              {settingsTab === 'input' && (
-                <>
-                  <div className="form-group">
+                  {/* Input Mode (merged from old tab) */}
+                  <div className="form-group" style={{ marginTop: '20px', paddingTop: '16px', borderTop: `1px solid var(--border)` }}>
                     <label>Input Mode:</label>
                     <div className="toggle-group">
                       <button
@@ -1767,7 +2279,7 @@ function App() {
                       >
                         <span className="mode-icon">📝</span>
                         <span className="mode-label">Text Extraction</span>
-                        <span className="mode-desc">Fast · Text only</span>
+                        <span className="mode-desc">Chrome tabs only</span>
                       </button>
                       <button
                         onClick={() => setUseScreenshot(true)}
@@ -1783,10 +2295,10 @@ function App() {
                   <div className="info-note">
                     <h4 style={{marginBottom: '8px'}}>Mode Comparison:</h4>
                     <p className="small" style={{marginBottom: '12px'}}>
-                      <strong>📝 Text:</strong> Extracts text content only. Fast and efficient. Best for text-based problems.
+                      <strong>📝 Text:</strong> Extracts text from Chrome tabs only. Fast and efficient for text-based problems.
                     </p>
                     <p className="small">
-                      <strong>📸 Screenshot:</strong> Captures visual content including diagrams, tables, and formatting. Best for problems with images or complex layouts. If you chose Displays, the app will automatically use the Screenshot approach even when you press the Extract hotkey.
+                      <strong>📸 Screenshot:</strong> Captures visual content including diagrams, tables, and formatting. Works with any source. Display source always uses screenshot mode.
                     </p>
                   </div>
                 </>
@@ -1811,6 +2323,11 @@ function App() {
                         localStorage.setItem('language', lang);
                       }}
                       isPro={subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling'}
+                      interviewLanguage={interviewLanguage}
+                      onInterviewLanguageChange={(langCode: string) => {
+                        setInterviewLanguage(langCode);
+                        localStorage.setItem('interview_language', langCode);
+                      }}
                     />
                   ) : (
                     <>
@@ -1968,6 +2485,89 @@ function App() {
                     Display Input Source auto-uses Screenshot even with the Extract hotkey. Avoid Shift-only shortcuts (e.g. Shift+L).
                   </p>
                 </div>
+              )}
+
+              {settingsTab === 'app' && (
+                <>
+                  {/* Transparency */}
+                  <div className="app-settings-group">
+                    <div className="app-settings-label">Transparency</div>
+                    <div className="app-settings-desc">Adjust the window opacity from fully visible to semi-transparent.</div>
+                    <div className="opacity-slider-row">
+                      <input
+                        type="range"
+                        min="10"
+                        max="100"
+                        value={Math.round(windowOpacity * 100)}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value) / 100;
+                          setWindowOpacity(val);
+                          localStorage.setItem('window_opacity', val.toString());
+                          invoke('set_window_opacity', { opacity: val }).catch(console.error);
+                        }}
+                        className="opacity-slider"
+                      />
+                      <span className="opacity-value">{Math.round(windowOpacity * 100)}%</span>
+                    </div>
+                  </div>
+
+                  {/* Theme */}
+                  <div className="app-settings-group">
+                    <div className="app-settings-label">Theme</div>
+                    <div className="app-settings-desc">Switch between light and dark appearance.</div>
+                    <div className="theme-toggle-group">
+                      <button
+                        className={`theme-toggle-btn ${theme === 'light' ? 'active' : ''}`}
+                        onClick={() => {
+                          setTheme('light');
+                          localStorage.setItem('app_theme', 'light');
+                          document.documentElement.setAttribute('data-theme', 'light');
+                        }}
+                      >
+                        ☀️ Light
+                      </button>
+                      <button
+                        className={`theme-toggle-btn ${theme === 'dark' ? 'active' : ''}`}
+                        onClick={() => {
+                          setTheme('dark');
+                          localStorage.setItem('app_theme', 'dark');
+                          document.documentElement.setAttribute('data-theme', 'dark');
+                        }}
+                      >
+                        🌙 Dark
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Stealth Mode */}
+                  <div className="app-settings-group">
+                    <div className="app-settings-label">Stealth Mode</div>
+                    <div className="app-settings-desc">
+                      Hidden from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows).
+                    </div>
+                    <div className="stealth-toggle-row">
+                      <label className="toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={stealthMode}
+                          onChange={(e) => {
+                            const enabled = e.target.checked;
+                            setStealthMode(enabled);
+                            localStorage.setItem('stealth_mode', enabled.toString());
+                            invoke('set_stealth_mode', { enabled }).catch(console.error);
+                          }}
+                        />
+                        <span className="toggle-switch-slider" />
+                      </label>
+                      <span className="stealth-label">{stealthMode ? 'Enabled' : 'Disabled'}</span>
+                    </div>
+                    {runtimePlatform === 'macos' && (
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+                        Stealth changes take effect after restarting the app.
+                      </p>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </div>

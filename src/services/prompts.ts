@@ -141,11 +141,15 @@ STRICT RULES:
 
 const VERBAL_INTERVIEW_SYSTEM_PROMPT = `You are an expert interview coach helping candidates answer verbal interview questions.
 
+You will receive transcribed text from an interviewer's question. You may also see previous exchanges from this conversation for context — use them to give coherent follow-up answers.
+
+LANGUAGE: {LANGUAGE}
+
 RESPONSE FORMAT:
 Always structure your response using these exact markers:
 
 EXPLANATION_START
-[Brief transcription of the question, then your structured answer. 2-3 short paragraphs.]
+[Your structured answer to the question. 2-3 short paragraphs.]
 EXPLANATION_END
 
 SOLUTION_START
@@ -153,10 +157,95 @@ SOLUTION_START
 SOLUTION_END
 
 STRICT RULES:
-- Transcribe only key details from audio — not word-for-word
+- This is a live conversation — be concise and direct
+- Consider previous Q&A pairs when answering follow-ups
 - Keep tone professional and confident
 - If providing code in SOLUTION, write raw code only — no \`\`\` markdown fences
 - Always include both EXPLANATION_START/END and SOLUTION_START/END markers`;
+
+// Used when live transcription (Deepgram) is active — AI receives text, not audio
+export const DEEPGRAM_LANGUAGES: Array<{ code: string; label: string }> = [
+  { code: 'multi', label: 'Auto-detect (Multilingual)' },
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'fr', label: 'French' },
+  { code: 'de', label: 'German' },
+  { code: 'pt', label: 'Portuguese' },
+  { code: 'pt-BR', label: 'Portuguese (Brazil)' },
+  { code: 'it', label: 'Italian' },
+  { code: 'nl', label: 'Dutch' },
+  { code: 'ja', label: 'Japanese' },
+  { code: 'ko', label: 'Korean' },
+  { code: 'zh', label: 'Chinese (Mandarin)' },
+  { code: 'hi', label: 'Hindi' },
+  { code: 'ru', label: 'Russian' },
+  { code: 'ar', label: 'Arabic' },
+  { code: 'tr', label: 'Turkish' },
+  { code: 'pl', label: 'Polish' },
+  { code: 'uk', label: 'Ukrainian' },
+  { code: 'sv', label: 'Swedish' },
+  { code: 'da', label: 'Danish' },
+  { code: 'no', label: 'Norwegian' },
+  { code: 'fi', label: 'Finnish' },
+  { code: 'cs', label: 'Czech' },
+  { code: 'ro', label: 'Romanian' },
+  { code: 'hu', label: 'Hungarian' },
+  { code: 'el', label: 'Greek' },
+  { code: 'he', label: 'Hebrew' },
+  { code: 'id', label: 'Indonesian' },
+  { code: 'ms', label: 'Malay' },
+  { code: 'vi', label: 'Vietnamese' },
+  { code: 'th', label: 'Thai' },
+  { code: 'bg', label: 'Bulgarian' },
+  { code: 'hr', label: 'Croatian' },
+  { code: 'sr', label: 'Serbian' },
+  { code: 'sk', label: 'Slovak' },
+  { code: 'sl', label: 'Slovenian' },
+  { code: 'et', label: 'Estonian' },
+  { code: 'lv', label: 'Latvian' },
+  { code: 'lt', label: 'Lithuanian' },
+  { code: 'ca', label: 'Catalan' },
+  { code: 'fa', label: 'Persian' },
+  { code: 'ur', label: 'Urdu' },
+  { code: 'bn', label: 'Bengali' },
+  { code: 'ta', label: 'Tamil' },
+  { code: 'te', label: 'Telugu' },
+  { code: 'kn', label: 'Kannada' },
+  { code: 'mr', label: 'Marathi' },
+  { code: 'tl', label: 'Tagalog' },
+];
+
+export function getLiveConversationSystemPrompt(languageLabel: string): string {
+  const langInstruction = languageLabel === 'Auto-detect (Multilingual)'
+    ? 'Respond in the same language the interviewer is using.'
+    : `The interview is conducted in ${languageLabel}. You MUST respond entirely in ${languageLabel}.`;
+
+  return `You are an expert interview coach engaged in a live conversation helping a candidate during an interview.
+
+You will receive transcribed text from the interviewer's questions. You may also see previous exchanges from this conversation for context — use them to give coherent follow-up answers.
+
+LANGUAGE: ${langInstruction}
+
+RESPONSE FORMAT:
+Always structure your response using these exact markers:
+
+EXPLANATION_START
+[Your structured answer to the question. 2-3 short paragraphs.]
+EXPLANATION_END
+
+SOLUTION_START
+[If coding question: raw code only, no markdown fences. If non-coding: concise structured answer with bullet points and key takeaways.]
+SOLUTION_END
+
+STRICT RULES:
+- This is a live conversation — be concise and direct
+- Consider previous Q&A pairs when answering follow-ups
+- Keep tone professional and confident
+- If providing code in SOLUTION, write raw code only — no \`\`\` markdown fences
+- Always include both EXPLANATION_START/END and SOLUTION_START/END markers`;
+}
+
+export const LIVE_CONVERSATION_SYSTEM_PROMPT = getLiveConversationSystemPrompt('Auto-detect (Multilingual)');
 
 const DEFAULT_SYSTEM_PROMPTS: Record<PromptTemplate, string> = {
   [PromptTemplate.AlgorithmOptimal]: ALGORITHM_SYSTEM_PROMPT,
@@ -224,20 +313,19 @@ Requirements:
 
 {CONTENT}`,
 
-  [PromptTemplate.VerbalInterviewAudio]: `You will receive an AUDIO recording containing a verbal interview question.
+  [PromptTemplate.VerbalInterviewAudio]: `You will receive transcribed text from an interviewer's verbal question.
 
 Your tasks:
-1) Transcribe the question briefly (key details, constraints, terminology only — not word-for-word).
-2) Answer with a strong, structured response appropriate for the role/context.
-3) If ambiguous, state your assumptions and provide a best-effort answer.
+1) Answer with a strong, structured response appropriate for the role/context.
+2) If ambiguous, state your assumptions and provide a best-effort answer.
 
 Requirements:
-- In EXPLANATION: put the transcription and your structured answer (2-3 paragraphs max)
+- In EXPLANATION: your structured answer (2-3 paragraphs max)
 - In SOLUTION: if the question involves coding, provide the code; otherwise provide a concise structured answer with key points
 - Keep the tone professional and confident
 - Use bullet points where helpful
 
-Note: The audio is attached; you must use it. Do not ask the user to paste the audio.`,
+{CONTENT}`,
 };
 
 // Custom Prompts Manager
@@ -309,6 +397,49 @@ export function buildPrompt(
   }
 
   return finalPrompt;
+}
+
+export function getConversationPrompts(
+  template: PromptTemplate | string,
+  interviewLanguage: string,
+  content: string,
+): { systemPrompt: string; userMessage: string } {
+  let systemPrompt = GENERAL_SYSTEM_PROMPT;
+  let userTemplate = '';
+
+  if (!Object.values(PromptTemplate).includes(template as PromptTemplate)) {
+    const customPrompt = CustomPromptsManager.getById(template);
+    if (customPrompt) {
+      systemPrompt = customPrompt.systemPrompt;
+      userTemplate = customPrompt.userPrompt;
+    }
+  } else {
+    const builtInId = template as PromptTemplate;
+    const overriddenSystem = localStorage.getItem(`custom_${builtInId}_system`);
+    const overriddenUser = localStorage.getItem(`custom_${builtInId}_user`);
+    systemPrompt = overriddenSystem || DEFAULT_SYSTEM_PROMPTS[builtInId] || GENERAL_SYSTEM_PROMPT;
+    userTemplate = overriddenUser || DEFAULT_USER_TEMPLATES[builtInId];
+  }
+
+  const langEntry = DEEPGRAM_LANGUAGES.find(l => l.code === interviewLanguage);
+  const langLabel = langEntry?.label || 'Auto-detect (Multilingual)';
+  const langInstruction = langLabel === 'Auto-detect (Multilingual)'
+    ? 'Respond in the same language the interviewer is using.'
+    : `The interview is conducted in ${langLabel}. You MUST respond entirely in ${langLabel}.`;
+
+  systemPrompt = systemPrompt.replace(/{LANGUAGE}/g, langInstruction);
+
+  let userMessage: string;
+  if (userTemplate) {
+    userMessage = userTemplate
+      .replace(/{LANGUAGE}/g, langInstruction)
+      .replace(/{CONTENT}/g, content)
+      .replace(/{PROBLEM}/g, content);
+  } else {
+    userMessage = content;
+  }
+
+  return { systemPrompt, userMessage };
 }
 
 export function getTemplateLabel(template: PromptTemplate | string): string {

@@ -45,11 +45,13 @@ The primary source code is:
   - `chrome/*`: Chrome CDP integration (tabs, activate, execute JS, screenshots)
   - `ai/*`: Gemini + Claude HTTP clients + provider routing
   - `audio.rs`: System audio recording (macOS: ScreenCaptureKit via Swift helper, Windows: WASAPI loopback), MP3 encoding
+  - `transcription.rs`: Real-time audio capture → Deepgram WebSocket streaming → live transcript events
   - `screenshot.rs`: OS display capture (screenshots crate), thumbnails
 - **Resources**: `src-tauri/resources/`
-  - `audio_recorder.swift`: Swift helper for macOS audio recording (compiled at runtime)
+  - `audio_recorder.swift`: Swift helper for macOS audio recording + live PCM streaming (compiled at runtime)
 - **Supabase Edge Functions**: `supabase/functions/`
-  - `ai-proxy/index.ts`: OpenRouter proxy with quota enforcement
+  - `ai-proxy/index.ts`: OpenRouter proxy with quota enforcement (supports single prompt + multi-turn messages array)
+  - `deepgram-key/index.ts`: Securely provides Deepgram API key to authenticated Pro users
   - `create-checkout/index.ts`: Stripe checkout session creation (**production** — app calls this)
   - `create-checkout-test/index.ts`: Stripe checkout (test mode, kept for development)
   - `create-billing-portal/index.ts`: Stripe Customer Portal (**production** — app calls this)
@@ -57,9 +59,12 @@ The primary source code is:
   - `stripe-webhook/index.ts`: Stripe webhook handler (**production** — Stripe calls this)
   - `stripe-webhook-test/index.ts`: Stripe webhook handler (test mode, kept for development)
   - `notification/index.ts`: Announcement system (returns announcements based on user type + app version)
+  - `get-models/index.ts`: Returns LLM model configuration (pro models, free model, default) from shared constants
+  - `log-audio-usage/index.ts`: Logs audio recording duration for usage tracking
+  - `_shared/models.ts`: Shared LLM model constants (IDs, names, providers, OpenRouter mapping) used by `ai-proxy` and `get-models`
   - `ping/index.ts`: Network latency diagnostic
 - **Scripts** (project root):
-  - `toggle-visibility.sh`: Toggle stealth/normal mode in `.env`
+  - `toggle-visibility.sh`: (Legacy) Toggle stealth/normal mode — stealth is now controlled from App Settings
   - `restart-app.sh`: Kill and restart the Tauri dev app
 
 ### "Is this file used?" — how to verify quickly
@@ -82,6 +87,7 @@ App composition (current):
 - `src/App.tsx`
   - imports `TabDropdown` for Input Source selection
   - imports `AIResponseDisplay` to render the final LLM output
+  - imports `LiveTranscript` to render the real-time transcription panel
   - imports `PromptEditor` / `PromptListView` for prompt-template UX
   - imports `AuthScreen` for sign in/sign up flow
   - calls Tauri commands using `invoke(...)` for CDP, screenshots, AI, auth
@@ -104,6 +110,11 @@ Component responsibilities:
   - **Close buttons (✕)**: Each section (Explanation, Solution) has a dismiss button in its header
   - **Auto-reappear on new solve**: `useEffect` resets `showExplanation`, `showSolution`, `explanationVisible` to `true` when `response` prop changes
   - **Copy Code with feedback**: "📋 Copy Code" button → "✅ Copied!" for 2 seconds (copies only code blocks, not Mermaid diagram syntax)
+- `src/components/LiveTranscript.tsx`
+  - Displays real-time transcription from Deepgram during live recording
+  - Shows pulse dot + "Listening..." / "Silence detected — sending in Xs..." status
+  - Renders final text (normal) and interim text (dimmed, italic)
+  - Auto-scrolls to bottom as new text arrives
 - `src/components/AuthScreen.tsx`
   - Container for authentication views (sign in, sign up, forgot password)
   - Light theme with app branding
@@ -251,7 +262,7 @@ Backend:
 
 - reads bytes from `imagePath` and sends to AI provider with correct MIME type
 
-### D) Solve (audio mode)
+### D) Solve (audio mode — legacy, currently unused)
 
 Frontend:
 
@@ -268,6 +279,35 @@ Backend:
 - MP3 is base64-encoded and sent to OpenRouter with `input_audio` content type
 - Model is forced to `gemini-3-flash` (Google's Gemini model that supports audio input)
 - OpenRouter routes to `google/gemini-3-flash-preview`
+
+**Note:** This flow still exists in the codebase but `toggleAudioRecording` now routes to flow E (live transcription) instead.
+
+### E) Solve (live transcription mode — current audio flow)
+
+Frontend:
+
+- Select "Audio (System)" from Input Source dropdown
+- Click record or press hotkey → `toggleAudioRecording()` → `startLiveTranscription()`
+  1. Checks Pro subscription status
+  2. `fetchDeepgramKey()` — fetches Deepgram API key from `deepgram-key` edge function
+  3. `invoke('start_live_transcription', { deepgramKey, language: 'auto' })`
+  4. Starts audio timer and silence detection polling
+- Live transcript appears in `LiveTranscript` component as user speaks
+- Auto-stop after 5s silence (3s threshold + 2s countdown), or user clicks Stop / presses hotkey
+- `stopLiveTranscription()`:
+  1. `invoke('stop_live_transcription')` — returns accumulated transcript
+  2. `sendTranscriptToAI(transcript)`:
+     - Builds `messages[]` array with `LIVE_CONVERSATION_SYSTEM_PROMPT` (first turn) or conversation history (subsequent turns)
+     - `trimConversationHistory()` if exceeding 12000 tokens
+     - `invoke('query_ai_via_proxy_conversation', { messagesJson, model, accessToken })`
+     - Appends AI response to `conversationHistory`
+- Conversation view shows full multi-turn Q&A history
+
+Backend:
+
+- `transcription.rs`: connects to Deepgram WebSocket, streams PCM audio, emits transcript events
+- `main.rs`: `query_ai_via_proxy_conversation` sends the full `messages[]` array to `ai-proxy` edge function → OpenRouter
+- Uses user's selected Pro model (not forced to Gemini like the legacy audio flow)
 
 ## Tauri commands (API surface)
 
@@ -308,6 +348,13 @@ Audio:
 - `is_audio_recording() -> bool` - checks if currently recording
 - `query_ai_via_proxy_with_audio(prompt, audioPath, model, accessToken) -> AIProxyResponse` - sends audio to AI
 
+Live Transcription (Deepgram):
+
+- `start_live_transcription(deepgramKey: String, language: String) -> ()` - starts streaming system audio to Deepgram via WebSocket
+- `stop_live_transcription() -> String` - stops transcription, returns accumulated final transcript
+- `is_live_transcribing() -> bool` - checks if live transcription is active
+- `query_ai_via_proxy_conversation(messagesJson: String, model: String, accessToken: String) -> AIProxyResponse` - sends multi-turn conversation messages array to AI via proxy
+
 Auth (Supabase - proxied through Rust to bypass corporate VPN SSL issues):
 
 - `supabase_sign_up(email: String, password: String) -> SignUpResponse`
@@ -323,6 +370,12 @@ Utility:
 - `open_url(url: String) -> ()` (opens URL in system browser)
 - `open_external_url(url: String) -> ()` (opens URL in default browser, used by announcement link handler)
 - `resize_window(window: Window, width: f64, height: f64) -> ()`
+
+App Settings:
+
+- `set_window_opacity(opacity: f64) -> ()` (sets window transparency, 0.1–1.0)
+- `set_stealth_mode(enabled: bool) -> ()` (toggles stealth protections + saves preference to stealth.json)
+- `fetch_models(access_token: String) -> Value` (fetches LLM model config from get-models edge function)
 
 Hotkeys:
 
@@ -372,9 +425,10 @@ The app includes a full authentication and subscription system using Supabase an
 ├─────────────────────────────────────────────────────────────────────────┤
 │  AuthScreen (sign up/in)  →  MainApp (CDP, prompts, AI)                 │
 │                                                                          │
-│  Settings → Account Tab → Subscription status, quota display, upgrade    │
-│  Settings → AI Models Tab → Model selection, BYO API key (free users)    │
+│  Settings → Account Tab → Subscription, quota, audio usage, upgrade      │
+│  Settings → AI Models Tab → Model selection, Input Mode, BYO API key     │
 │  Settings → HotKeys Tab → Customize keyboard shortcuts                   │
+│  Settings → App Tab → Transparency, Theme, Stealth Mode                  │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -435,9 +489,76 @@ The app includes a full authentication and subscription system using Supabase an
   - `gemini-2.5-flash` → `google/gemini-2.5-flash` (free tier)
 
 **Model Display Names** (used in stepper info):
-- Model IDs are mapped to human-readable names via `PRO_MODELS` and `FREE_MODEL` objects in `App.tsx`
+- Model IDs are mapped to human-readable names via `modelConfig` state (fetched from `get-models` edge function, cached in localStorage)
 - Example: `claude-sonnet-4.5` → "Claude Sonnet 4.5"
 - The `getTemplateLabel(templateId)` function in `prompts.ts` maps template IDs to labels (e.g., `'algorithm-optimal'` → "Algorithm - Optimal")
+
+### Centralized LLM Model Definitions
+
+LLM model configurations are defined server-side in a single shared file and fetched dynamically by the app. This allows updating available models without releasing a new app version.
+
+#### Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│  supabase/functions/_shared/models.ts                │
+│  (Single source of truth for all model definitions)  │
+├──────────────────────────────────────────────────────┤
+│  PRO_MODELS[]    — Array of { id, name, provider }   │
+│  FREE_MODEL      — Single { id, name, provider }     │
+│  DEFAULT_PRO_MODEL — Default model ID for Pro users  │
+│  MODEL_MAP       — Maps app model IDs → OpenRouter   │
+│  PRO_MODEL_IDS   — Quick lookup array                │
+└──────────────────────────────────────────────────────┘
+         │                          │
+         ▼                          ▼
+┌─────────────────┐     ┌─────────────────────┐
+│  get-models      │     │  ai-proxy            │
+│  Edge Function   │     │  Edge Function       │
+│  Returns models  │     │  Validates model IDs │
+│  to frontend     │     │  Maps to OpenRouter  │
+└─────────────────┘     └─────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│  Tauri Command: fetch_models            │
+│  (Rust HTTP call bypasses VPN/proxy)    │
+├─────────────────────────────────────────┤
+│  App.tsx: called on login               │
+│  → Updates modelConfig state            │
+│  → Cached in localStorage               │
+│  → Falls back to cache if fetch fails   │
+└─────────────────────────────────────────┘
+```
+
+#### Shared Constants (`_shared/models.ts`)
+
+```typescript
+PRO_MODELS: ModelInfo[] = [
+  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', provider: 'OpenAI' },
+  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic' },
+  { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google' },
+  { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
+];
+FREE_MODEL: { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google' }
+DEFAULT_PRO_MODEL: 'gpt-5.2-codex'
+MODEL_MAP: Maps each ID → OpenRouter format (e.g., 'gpt-5.2-codex' → 'openai/gpt-5.2-codex')
+```
+
+#### Frontend Flow
+
+1. User logs in → `handleAuthSuccess` calls `invoke('fetch_models', { accessToken })`
+2. `fetch_models` Tauri command makes an authenticated POST to `get-models` edge function (through Rust to bypass VPN/proxy SSL issues)
+3. Response cached in `localStorage('cached_model_config')`
+4. On next startup, `loadCachedModels()` initializes state from cache before the network call completes
+5. `modelConfig` state used for: model selector dropdown, free tier display, stepper info, validation
+
+#### Updating Models
+
+To add, remove, or rename models:
+1. Edit `supabase/functions/_shared/models.ts`
+2. Deploy both `get-models` and `ai-proxy` edge functions
+3. Users get the new model list on their next sign-in — no app update needed
 
 ### AI Routing Logic
 
@@ -569,6 +690,334 @@ Per [OpenRouter documentation](https://openrouter.ai/docs/guides/overview/multim
 
 **Important**: Audio must use `input_audio` content type (not `audio_url`).
 
+### Real-time Transcription & Conversation Context (Deepgram)
+
+The app supports a **real-time live transcription mode** that streams system audio to [Deepgram](https://deepgram.com/) for speech-to-text, then sends the resulting text to the selected LLM. This replaces the previous "record → send audio file" flow for the verbal interview use case, enabling multi-turn conversations with context.
+
+#### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   Real-time Transcription Flow                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  User clicks Record / Cmd+3  →  fetchDeepgramKey()                      │
+│                                  ├── POST /functions/v1/deepgram-key    │
+│                                  ├── Headers: Authorization (JWT),      │
+│                                  │   apikey (anon)                      │
+│                                  └── Returns: { key: "dg-..." }        │
+│                                                                         │
+│  invoke('start_live_transcription')                                     │
+│    ├── Rust spawns async task (transcription.rs)                        │
+│    ├── Opens WebSocket to wss://api.deepgram.com/v1/listen              │
+│    │     Model: nova-3, encoding: linear16, 16kHz mono                  │
+│    ├── Spawns platform-specific audio capture thread:                   │
+│    │     macOS: Swift helper (--stream-pcm) → ScreenCaptureKit          │
+│    │     Windows: WASAPI loopback capture                               │
+│    └── Streams PCM chunks → Deepgram, receives transcripts              │
+│                                                                         │
+│  Deepgram responses → Tauri events:                                     │
+│    ├── "live_transcript" { text, is_final }                             │
+│    │     ├── is_final=true  → append to liveTranscriptFinal             │
+│    │     └── is_final=false → set liveTranscriptInterim                 │
+│    ├── "live_transcript_utterance_end" → silence detection trigger      │
+│    └── "live_transcript_error" → error display                          │
+│                                                                         │
+│  Silence detection (frontend polling every 500ms):                      │
+│    ├── 3s no speech → show countdown (2s)                               │
+│    └── 5s total silence → auto-stop and send to AI                      │
+│                                                                         │
+│  User clicks Stop / auto-stop → stopLiveTranscription()                 │
+│    ├── invoke('stop_live_transcription') → returns final transcript     │
+│    └── sendTranscriptToAI(transcript)                                   │
+│         ├── Builds messages[] array with conversation history           │
+│         │   First turn: [system prompt, user transcript]                │
+│         │   Subsequent: [system, ...history, user transcript]           │
+│         ├── trimConversationHistory() if >12000 tokens                  │
+│         ├── invoke('query_ai_via_proxy_conversation')                   │
+│         │     → Supabase ai-proxy → OpenRouter                         │
+│         ├── Appends AI response to conversationHistory                  │
+│         └── Displays response in conversation view                      │
+│                                                                         │
+│  Conversation UI:                                                       │
+│    ├── LiveTranscript component (during recording)                      │
+│    ├── Conversation view (multi-turn Q&A with AIResponseDisplay)        │
+│    └── "New Session" button to clear history                            │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Backend: `src-tauri/src/transcription.rs`
+
+New module handling the Deepgram WebSocket session and audio streaming. Key components:
+
+**Global state:**
+- `TRANSCRIPTION_ACTIVE` (`AtomicBool`) — whether a session is running
+- `STOP_SIGNAL` (`Arc<AtomicBool>`) — signals the async task to stop
+- `FINAL_TRANSCRIPT` (`Mutex<String>`) — accumulates all final transcript text server-side
+
+**Functions:**
+- `start_live_transcription(app_handle, deepgram_key, language)` — spawns an async task that connects to Deepgram, starts audio capture, and processes responses
+- `stop_live_transcription()` — sets the stop signal, waits 300ms for cleanup, returns the accumulated transcript
+- `is_transcribing()` — returns the current state
+- `run_transcription_session(...)` — the core async loop that:
+  1. Builds the Deepgram WebSocket URL with parameters (model=nova-3, language, punctuate, smart_format, interim_results, utterance_end_ms=3000, vad_events, encoding=linear16, sample_rate=16000, channels=1)
+  2. Connects with `Authorization: Token {key}` header
+  3. Spawns a native thread for audio capture, connected via `tokio::sync::mpsc::channel`
+  4. Forwards audio chunks to Deepgram as binary WebSocket messages
+  5. Parses Deepgram JSON responses (`Results` with `channel.alternatives[0].transcript`, `is_final`, and `UtteranceEnd` events)
+  6. Emits Tauri events: `live_transcript`, `live_transcript_utterance_end`, `live_transcript_error`
+  7. On stop: sends `{"type":"CloseStream"}` to Deepgram
+
+**Deepgram URL format:**
+```
+wss://api.deepgram.com/v1/listen?model=nova-3&language={lang}
+  &punctuate=true&smart_format=true&interim_results=true
+  &utterance_end_ms=3000&vad_events=true
+  &encoding=linear16&sample_rate=16000&channels=1
+```
+
+**Platform-specific audio capture (`capture_audio_to_channel`):**
+
+- **macOS**: Compiles and spawns the Swift helper (`audio_recorder.swift`) with `--stream-pcm` flag. The Swift helper uses ScreenCaptureKit to capture system audio, resamples to 16kHz mono Int16 PCM, and writes raw bytes to stdout. Rust reads stdout in 3200-byte chunks (100ms at 16kHz mono 16-bit) and sends to the mpsc channel.
+- **Windows**: Uses WASAPI loopback capture (same as `audio.rs`). Captures system audio, mixes to mono with 5x volume boost, resamples to 16kHz, converts to PCM16 bytes, and sends to the channel.
+- **Other platforms**: Returns an error ("only supported on macOS and Windows").
+
+**Dependencies** (`Cargo.toml`):
+```toml
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
+```
+
+The `rustls-tls-native-roots` feature is required for TLS support on the Deepgram WebSocket connection.
+
+#### Swift Helper: `--stream-pcm` Mode
+
+The existing `audio_recorder.swift` was extended with a `--stream-pcm` argument:
+
+- Sets `streamPCMMode = true` and `streamSampleRate = 16000`
+- In `stream(_:didOutputSampleBuffer:of:)`: converts captured audio to 16kHz mono Int16 PCM
+- Writes raw PCM bytes to `FileHandle.standardOutput` (stdout) instead of an `AVAudioFile`
+- Rust reads this stdout stream in real-time
+
+#### New Tauri Commands
+
+| Command | Signature | Description |
+|---------|-----------|-------------|
+| `start_live_transcription` | `(deepgramKey: string, language: string) → ()` | Start streaming audio to Deepgram |
+| `stop_live_transcription` | `() → string` | Stop transcription, return accumulated transcript |
+| `is_live_transcribing` | `() → bool` | Check if transcription is active |
+| `query_ai_via_proxy_conversation` | `(messagesJson: string, model: string, accessToken: string) → AIProxyResponse` | Send multi-turn conversation to AI via proxy |
+
+`query_ai_via_proxy_conversation` differs from `query_ai_via_proxy` in that it accepts a full JSON `messages` array (system + user + assistant turns) instead of a single prompt string. This enables multi-turn conversation context.
+
+#### Edge Function: `deepgram-key`
+
+File: `supabase/functions/deepgram-key/index.ts`
+
+Generates a **temporary Deepgram JWT** (30-second TTL) for authenticated Pro users. The permanent API key never leaves the server.
+
+Flow:
+1. Validates the user's Supabase JWT from the `Authorization` header
+2. Checks `subscription_status` in the `users` table (must be `active` or `cancelling`)
+3. Calls Deepgram's `POST /v1/auth/grant` with the permanent API key to get a temporary JWT
+4. Returns `{ key: "<temporary_jwt>" }` — this JWT expires in 30 seconds
+
+The Rust backend uses `Authorization: Bearer <jwt>` (not `Token`) to open the WebSocket. Per Deepgram docs, the WebSocket connection stays open beyond the JWT's TTL — the token only needs to be valid during the initial handshake.
+
+**Security**: Even if a user intercepts the token, it expires in 30 seconds and cannot be used to manage the Deepgram account (only `usage::write` permissions for `/listen`, `/speak`, `/read`, `/agent` APIs).
+
+**Supabase secret required:**
+```bash
+supabase secrets set DEEPGRAM_API_KEY=your-deepgram-api-key
+```
+
+**Deploy:**
+```bash
+supabase functions deploy deepgram-key
+```
+
+#### Frontend Integration (`src/App.tsx`)
+
+**State variables:**
+
+| Variable | Type | Purpose |
+|----------|------|---------|
+| `isLiveTranscribing` | `boolean` | Whether live transcription is active |
+| `liveTranscriptFinal` | `string` | Accumulated final (confirmed) transcript text |
+| `liveTranscriptInterim` | `string` | Current interim (in-progress) transcript text |
+| `conversationHistory` | `Array<{role, content}>` | Full multi-turn conversation messages |
+| `silenceCountdown` | `number \| null` | Seconds remaining before auto-stop |
+| `silenceTimerRef` | `useRef` | Interval ID for silence detection polling |
+| `lastTranscriptTimeRef` | `useRef` | Timestamp of last transcript event (for silence detection) |
+| `isLiveTranscribingRef` | `useRef` | Ref mirror of `isLiveTranscribing` for use in hotkey callbacks |
+
+**Key functions:**
+
+- **`fetchDeepgramKey()`**: Fetches the Deepgram API key from the `deepgram-key` edge function. Includes both `Authorization` and `apikey` headers.
+- **`startLiveTranscription()`**: Checks Pro status, fetches key, clears transcript state, invokes `start_live_transcription`, starts audio timer, begins silence detection.
+- **`stopLiveTranscription(autoTriggered)`**: Clears silence timer, invokes `stop_live_transcription`, calls `sendTranscriptToAI` with the accumulated transcript.
+- **`sendTranscriptToAI(transcript)`**: Builds the `messages` array:
+  - First turn: `[{system: LIVE_CONVERSATION_SYSTEM_PROMPT}, {user: transcript}]`
+  - Subsequent turns: `[...conversationHistory, {user: transcript}]`
+  - Calls `trimConversationHistory()` to keep within token limits
+  - Invokes `query_ai_via_proxy_conversation` with the JSON-serialized messages
+  - Appends the AI response to `conversationHistory`
+- **`autoSendTranscript()`**: Called by silence detection — snapshots and clears the current transcript, sends it to AI, but keeps the WebSocket and recording active for the next question. Guarded by `isSendingRef` to prevent overlapping sends.
+- **`startSilenceDetection()`**: Polls every 500ms. If no transcript event for 3s (`SILENCE_THRESHOLD_MS`), starts a 2s countdown. At 5s total, calls `autoSendTranscript()` (recording continues). Skips polling while a send is in progress.
+- **`estimateTokens(text)`**: Approximates token count as `text.length / 4`.
+- **`trimConversationHistory(messages)`**: Hybrid trimming strategy — keeps the last 10 Q&A pairs (20 messages) in full, summarizes older exchanges (first 500 chars each), with a 100K token safety cap. If still over the limit, progressively drops oldest summaries.
+- **`clearConversationHistory()`**: Resets all conversation and transcript state.
+
+**Event listeners** (in a `useEffect`):
+
+| Tauri Event | Handler |
+|-------------|---------|
+| `live_transcript` | Updates `lastTranscriptTimeRef`; if `is_final`, appends to `liveTranscriptFinal`; otherwise sets `liveTranscriptInterim` |
+| `live_transcript_utterance_end` | Updates `lastTranscriptTimeRef` (triggers silence detection) |
+| `live_transcript_error` | Sets error message, clears `isLiveTranscribing` |
+
+**`toggleAudioRecording` integration:**
+- When audio source is selected and user clicks Record / presses Cmd+3:
+  - If not recording → calls `startLiveTranscription()` (streams to Deepgram)
+  - If recording → calls `stopLiveTranscription()` (closes WebSocket, sends any remaining transcript to AI)
+- Debounced with a 1-second cooldown to prevent rapid toggling
+- During recording, silence auto-sends transcript to AI without stopping — the user only needs to click Record once and Stop once for the entire interview
+
+#### `LiveTranscript` Component
+
+File: `src/components/LiveTranscript.tsx`
+
+Displays the real-time transcription during recording:
+- Shows a pulsing dot + "Listening..." status (or "Silence detected — sending in Xs..." during countdown)
+- Renders `finalText` in normal style and `interimText` in dimmed/italic style
+- Auto-scrolls to bottom as new text arrives
+- Shows "Waiting for speech..." placeholder when empty
+
+#### Conversation View (UI)
+
+When `conversationHistory.length > 1` and the selected source is audio:
+- Renders a scrollable conversation view with alternating user/assistant messages
+- User messages show `🎤 You` label with plain text
+- Assistant messages show `🤖 AI` label with full `AIResponseDisplay` (markdown, code highlighting, Mermaid diagrams)
+- System messages are filtered out
+- **"New Session" button**: Shows exchange count and a button to clear conversation history
+
+When not in conversation mode (single response):
+- Falls back to standard `AIResponseDisplay` rendering
+
+#### `LIVE_CONVERSATION_SYSTEM_PROMPT` and Interview Language
+
+File: `src/services/prompts.ts`
+
+The live transcription system prompt is generated dynamically by `getLiveConversationSystemPrompt(languageLabel)`:
+- Role: expert interview coach in a live conversation
+- Expects transcribed text (not audio)
+- Uses previous exchanges for context on follow-ups
+- Same EXPLANATION_START/END and SOLUTION_START/END markers as other prompts
+- Emphasizes conciseness for real-time conversational flow
+- **Language instruction**: If a specific language is selected, includes "You MUST respond entirely in {language}". If auto-detect, includes "Respond in the same language the interviewer is using."
+
+The static `LIVE_CONVERSATION_SYSTEM_PROMPT` constant (default: auto-detect) is exported for backward compatibility but `getLiveConversationSystemPrompt()` is used by `sendTranscriptToAI()`.
+
+#### Interview Language Selector
+
+Users can select the interview language via the "🎙️ Audio" button popup in the Prompts tab. This controls two things:
+
+1. **Deepgram transcription language** — passed as the `language` parameter to `start_live_transcription`. Specifying a language (e.g., `ja` for Japanese) is more accurate than auto-detect (`multi`).
+2. **AI response language** — injected into the system prompt so the LLM responds in the same language.
+
+**Implementation:**
+- `DEEPGRAM_LANGUAGES` array in `src/services/prompts.ts` — 48 languages supported by Nova-3
+- `interviewLanguage` state in `App.tsx` — stored in `localStorage` as `interview_language`, defaults to `multi`
+- `PromptListView.tsx` — language `<select>` dropdown in the Audio Badge Info dialog
+- `transcription.rs` — `run_transcription_session()` passes the language code to Deepgram's WebSocket URL (`language={code}`)
+
+**Default**: "Auto-detect (Multilingual)" — Deepgram detects the language automatically, AI responds in the detected language.
+
+#### Key Differences from Audio Recording Mode
+
+| Aspect | Audio Recording (old) | Live Transcription (new) |
+|--------|----------------------|--------------------------|
+| Flow | Record → MP3 → send audio to Gemini | Stream PCM → Deepgram STT → send text to any LLM |
+| Model | Forced to Gemini 3 Flash (audio support) | Uses user's selected model (any Pro model) |
+| Context | Single turn only | Multi-turn with conversation history |
+| Latency | Wait for full recording + upload | Real-time transcript as you speak |
+| Silence | Manual stop only | Auto-sends after 5s silence (recording continues) |
+| UI | Timer only | Live transcript display + conversation view |
+
+**Note:** The original audio recording mode (record → MP3 → Gemini) still exists in the codebase but the `toggleAudioRecording` function now routes to the live transcription flow. The old flow could be restored by modifying `toggleAudioRecording`.
+
+#### Audio Recording Usage Limits
+
+Pro users have a **10-hour/month** audio recording limit and a **90-minute per-session** timeout.
+
+**Tracking Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   Audio Usage Tracking Flow                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  fetchDeepgramKey()                                                     │
+│    ├── deepgram-key edge function checks monthly audio usage           │
+│    ├── Returns: { key, remaining_seconds, audio_seconds_used,          │
+│    │             audio_seconds_limit }                                  │
+│    └── Returns 429 if limit exceeded                                   │
+│                                                                         │
+│  During recording:                                                      │
+│    ├── Frontend tracks elapsed seconds (audioSeconds state)            │
+│    ├── 90-minute session timeout → auto-stops recording                │
+│    └── Header shows: "🎙️ Xh Ym / 10h 0m"                             │
+│                                                                         │
+│  On stop (stopLiveTranscription):                                      │
+│    └── logAudioUsage(durationSeconds, accessToken)                     │
+│         └── POST /functions/v1/log-audio-usage                         │
+│              └── Inserts into audio_usage table                        │
+│                                                                         │
+│  Settings → Account tab:                                               │
+│    └── Shows audio usage bar alongside AI call usage bar               │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Database:**
+- `audio_usage` table: `id`, `user_id`, `duration_seconds`, `recorded_at`
+- `sum_audio_seconds(p_user_id, p_start, p_end)` — RPC function for efficient usage queries
+- `cleanup_old_audio_usage()` — pg_cron job runs daily, removes records older than 3 months
+- Migration: `supabase/migrations/003_audio_usage.sql`
+
+**Edge Functions:**
+- `deepgram-key/index.ts` — Checks monthly quota before issuing Deepgram JWT; returns remaining seconds
+- `log-audio-usage/index.ts` — Authenticated endpoint to record usage after each session
+
+**Constants:**
+- `MONTHLY_AUDIO_LIMIT = 36000` (10 hours in seconds)
+- `MAX_SESSION_SECONDS = 5400` (90 minutes)
+
+**Monthly Reset:** Audio usage resets automatically each billing period because queries filter by `subscription_start_date` to `subscription_end_date`, which are updated by the Stripe webhook on renewal.
+
+#### CSS Classes (in `src/App.css`)
+
+| Class | Purpose |
+|-------|---------|
+| `.live-transcript` | Container for the live transcript panel |
+| `.live-transcript-header` | Header with status indicator |
+| `.live-transcript-status` | Flex container for pulse dot + label |
+| `.live-transcript-body` | Scrollable text area |
+| `.live-transcript-text` | Final transcript text |
+| `.live-transcript-interim` | Interim text (dimmed, italic) |
+| `.live-transcript-placeholder` | "Waiting for speech..." placeholder |
+| `.pulse-dot` | Animated pulsing red dot |
+| `.conversation-view` | Scrollable conversation history container |
+| `.conversation-msg` | Individual message wrapper |
+| `.conversation-msg-user` | User message styling |
+| `.conversation-msg-assistant` | AI message styling |
+| `.conversation-msg-label` | "🎤 You" / "🤖 AI" label |
+| `.conversation-msg-text` | Plain text content for user messages |
+| `.new-session-btn` | "New Session" button styling |
+| `.conversation-controls` | Controls bar (exchange count + new session) |
+
 #### Model Selection
 
 Audio input **always** uses `gemini-3-flash` regardless of user's model selection:
@@ -597,21 +1046,20 @@ The app includes a "stealth mode" that makes it invisible to screen capture soft
 
 #### Configuration
 
-Controlled via environment variable in `.env`:
+Stealth mode preference is persisted in a `stealth.json` config file in the app's config directory (alongside `hotkeys.json`). On first launch, it defaults to `true` (stealth enabled).
 
-```
-APP_VISIBILITY=stealth   # Enable stealth mode
-APP_VISIBILITY=normal    # Disable stealth mode (default)
-```
+Users toggle stealth mode in **Settings → App → Stealth Mode**. On macOS, changes take effect after restarting the app (due to macOS activation policy constraints). On Windows, changes take effect immediately.
 
-A convenience script `toggle-visibility.sh` toggles between the two modes and reminds you to restart the app.
+**Config file functions** (`src-tauri/src/main.rs`):
+- `load_stealth_preference(app)` — reads `stealth.json`, returns `Option<bool>`
+- `save_stealth_preference(app, enabled)` — writes `stealth.json`
 
 #### How It Works
 
 Stealth mode is applied at app startup in `src-tauri/src/main.rs` → `setup()`:
 
-1. Read `APP_VISIBILITY` from `.env`
-2. If `"stealth"`, apply platform-specific protections:
+1. Read preference from `stealth.json` (defaults to `true` if no file exists)
+2. If enabled, apply platform-specific protections:
 
 **macOS:**
 - `apply_macos_dock_hiding()` — Sets `NSApp.activationPolicy` to `.accessory` (1) via raw ObjC runtime. Hides from Dock and Cmd+Tab.
@@ -659,10 +1107,8 @@ Both hotkeys are customizable in Settings → HotKeys tab.
 
 #### Key Files
 
-- `src-tauri/src/main.rs`: Stealth mode helpers (`apply_macos_dock_hiding`, `apply_macos_screen_capture_protection`, `apply_windows_stealth`, `restore_macos_screen_capture_visibility`) and startup logic
-- `.env`: `APP_VISIBILITY=stealth|normal`
-- `toggle-visibility.sh`: Toggle script
-- `restart-app.sh`: Restart after changing visibility mode
+- `src-tauri/src/main.rs`: Stealth mode helpers, `set_stealth_mode` Tauri command, `load_stealth_preference`/`save_stealth_preference` config file I/O, and startup logic
+- `stealth.json` (in app config dir): Persisted user preference `{"enabled": true/false}`
 
 ### Notification / Announcement System
 
@@ -800,6 +1246,16 @@ The webhook handler (`stripe-webhook` / `stripe-webhook-test`) processes:
 - `request_count` (int, default 1)
 - `created_at` (timestamp)
 
+**audio_usage table**:
+- `id` (UUID)
+- `user_id` (UUID, FK to users.id)
+- `duration_seconds` (numeric)
+- `recorded_at` (timestamptz, default now())
+
+**Automatic audio usage cleanup** (pg_cron):
+- Runs daily at 4:00 AM UTC
+- Deletes audio_usage records older than 3 months
+
 **Automatic user creation**:
 - Database trigger `on_auth_user_created` automatically creates a `public.users` entry when a new user signs up via `auth.users`
 - Trigger function: `handle_new_user()` (defined in migration `20260217000000_create_users_and_trigger.sql`)
@@ -844,6 +1300,7 @@ Or manually via Supabase Dashboard → SQL Editor
 
 **Supabase Edge Function Secrets:**
 - `OPENROUTER_API_KEY`: Your OpenRouter API key
+- `DEEPGRAM_API_KEY`: Deepgram API key for live transcription (used by `deepgram-key` edge function)
 - `STRIPE_SECRET_KEY`: Stripe secret key (production)
 - `STRIPE_SECRET_KEY_TEST`: Stripe secret key (test mode)
 - `STRIPE_WEBHOOK_SECRET`: Stripe webhook signing secret (production)
@@ -924,6 +1381,9 @@ Each of the 6 built-in prompts has its **own tailored system prompt** (not a sha
 | Code Review | `CODE_REVIEW_SYSTEM_PROMPT` | Senior software engineer | Improved/fixed code |
 | Explain Concept | `EXPLAIN_CONCEPT_SYSTEM_PROMPT` | Technical educator | Code example or structured summary |
 | Verbal Interview | `VERBAL_INTERVIEW_SYSTEM_PROMPT` | Interview coach | Code or bullet-point answer |
+| Live Conversation (auto) | `LIVE_CONVERSATION_SYSTEM_PROMPT` | Interview coach (live) | Concise code or bullet points |
+
+**`LIVE_CONVERSATION_SYSTEM_PROMPT`** is used automatically by the live transcription flow (not selectable as a template). It is injected as the system message on the first turn of a conversation. It emphasizes conciseness and multi-turn context awareness.
 
 **Key prompt rules enforced across all templates:**
 - Do NOT repeat or restate the problem
@@ -1022,11 +1482,13 @@ The usage bar in the Account settings tab uses a dynamic gradient:
 - 51–80%: Yellow (`#FFEB3B` → `#FFC107`)
 - >80%: Orange to Red (`#FF9800` → `#F44336`)
 
-#### Input Mode Visual Buttons (Settings → Input Mode)
+#### Input Mode (Merged into AI Models Tab)
 
-The "Text Extraction" / "Screenshot Capture" toggle buttons include icons and descriptions:
-- 📝 Text Extraction — "Fast · Text only"
+The Input Mode controls (text extraction vs screenshot) have been merged into the "AI Models" tab, below the model selector. This removes the standalone "Input Mode" tab.
+
+- 📝 Text Extraction — "Chrome tabs only"
 - 📸 Screenshot Capture — "Visual · Images & diagrams"
+- Note: Text extraction only works with Chrome tabs. Display source always uses screenshot mode.
 
 Styled via `.toggle-btn .mode-icon`, `.mode-label`, `.mode-description` in `App.css`.
 
@@ -1061,6 +1523,46 @@ The Settings → HotKeys tab uses a grouped, compact layout:
 - **Two-column grid** within each section for compact display
 - **Compact inputs**: Smaller padding/font (`hotkey-input` class) so all hotkeys fit on one page without scrolling
 - Styled via `.hotkeys-panel`, `.hotkeys-section`, `.hotkeys-section-title`, `.hotkeys-two-col`, `.hotkey-field`, `.hotkey-label`, `.hotkey-input` in `App.css`
+
+#### App Settings Tab (Settings → App)
+
+The "App" tab in the Settings modal provides three app-level preferences that persist across restarts:
+
+**Transparency Slider:**
+- Range: 10% to 100% opacity
+- Calls `invoke('set_window_opacity', { opacity })` on each slider change
+- macOS: Sets `NSWindow.setAlphaValue()` via raw ObjC runtime
+- Windows: Sets `WS_EX_LAYERED` + `SetLayeredWindowAttributes(LWA_ALPHA)` via Win32 API
+- Persisted in `localStorage('window_opacity')`, applied on startup via `useEffect`
+
+**Theme Toggle (Light / Dark):**
+- Two buttons: ☀️ Light / 🌙 Dark
+- Sets `data-theme` attribute on `document.documentElement`
+- CSS uses `:root` variables for light theme, `[data-theme="dark"]` overrides for dark theme
+- Dark palette: `#0a0a0f` background, `#1a1a2e` surface, `#d1d5db` text (matches website theme)
+- ~20+ CSS variables extracted from hardcoded colors: `--surface`, `--border`, `--shadow`, `--input-bg`, `--stepper-bg`, `--transcript-bg`, etc.
+- Persisted in `localStorage('app_theme')`, applied on startup
+
+**Stealth Mode Toggle:**
+- Switch control with "Enabled" / "Disabled" label
+- Calls `invoke('set_stealth_mode', { enabled })` which saves to `stealth.json` config file
+- On Windows: applies/removes stealth protections immediately
+- On macOS: saves preference for next app launch (shows note: "On macOS, stealth changes take effect after restarting the app.")
+- Persisted in both `localStorage('stealth_mode')` (for UI state) and `stealth.json` (for Rust startup)
+
+**Tauri Commands:**
+
+| Command | Signature | Description |
+|---------|-----------|-------------|
+| `set_window_opacity` | `(opacity: f64) → ()` | Set window transparency (0.1–1.0) |
+| `set_stealth_mode` | `(enabled: bool) → ()` | Toggle stealth protections + save preference |
+
+**CSS Classes:**
+- `.app-settings-group` — Setting group with bottom border separator
+- `.app-settings-label` / `.app-settings-desc` — Setting name and description
+- `.opacity-slider-row` / `.opacity-slider` / `.opacity-value` — Transparency slider layout
+- `.theme-toggle-group` / `.theme-toggle-btn` — Light/Dark toggle buttons
+- `.stealth-toggle-row` / `.toggle-switch` / `.toggle-switch-slider` — Stealth on/off switch
 
 #### Custom Prompt Management
 
@@ -1230,7 +1732,7 @@ Notes:
   - `useAuth()` hook (for Supabase auth state)
   - `useSubscription()` hook
 - **CDP commands use a constant `"id": 1`** for WebSocket requests. If you ever add concurrency, switch to incrementing IDs and matching responses.
-- **Audio sends directly to AI**: Local speech-to-text (Vosk) was removed. Audio is now sent directly to Gemini which handles transcription and understanding natively. This is simpler and more accurate.
+- **Audio flow has two paths**: The legacy "record → MP3 → Gemini" path still exists in `audio.rs` but `toggleAudioRecording` now routes to live transcription via Deepgram. The old path could be useful as a fallback if Deepgram is unreachable (e.g., corporate proxy blocking).
 - **Test vs Production Edge Functions**: Production functions are now active (no `-test` suffix). Test-mode copies still exist as separate deployments. Consider consolidating to a single function with environment variable switching.
 - **Corporate VPN workarounds**: Auth and some API calls go through Rust backend to bypass SSL inspection issues. This adds complexity but is necessary for some enterprise environments.
 - **Mermaid diagrams are client-side only**: If the AI returns malformed Mermaid syntax, it falls back to showing the raw text. Consider adding a retry mechanism or server-side validation.
