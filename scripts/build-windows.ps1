@@ -70,7 +70,12 @@ try {
         }
     }
     if (-not $found) {
-        Fail "CodeSignTool not found. Set `$env:CODESIGNTOOL_PATH or add it to PATH.`nDownload from: https://www.ssl.com/downloads/"
+        $manualPath = Read-Host "CodeSignTool not found. Enter full path to CodeSignTool.bat"
+        if ($manualPath -and (Test-Path $manualPath)) {
+            $CodeSignTool = $manualPath
+        } else {
+            Fail "CodeSignTool not found at '$manualPath'. Download from: https://www.ssl.com/downloads/"
+        }
     }
 }
 Write-Host "  CodeSignTool: $CodeSignTool"
