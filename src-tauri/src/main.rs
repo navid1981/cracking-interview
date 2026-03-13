@@ -1708,14 +1708,12 @@ async fn set_stealth_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), St
     save_stealth_preference(&app, enabled);
     println!("[AppSettings] Stealth preference saved: {}", enabled);
 
-    // On macOS, stealth protections (dock hiding, activation policy, content
-    // protection) can only be applied safely at startup. Changing them at
-    // runtime terminates the process. We save the preference to disk and
-    // it takes effect on the next app launch.
+    // On macOS, changing stealth properties at runtime can terminate the process.
+    // We only save the preference here — all changes take effect on next launch.
     #[cfg(target_os = "macos")]
     {
         let _ = &app;
-        println!("[AppSettings] macOS: stealth change will take effect on next launch");
+        println!("[AppSettings] macOS: stealth change saved, will take effect on next launch");
     }
 
     #[cfg(target_os = "windows")]
@@ -1745,16 +1743,26 @@ async fn set_stealth_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), St
 
 /// macOS: hide from Dock by setting NSApp activation policy to .accessory (1).
 /// This also removes the app from Cmd+Tab.
-/// Uses raw ObjC runtime so no extra crate dependency is needed.
+///
+/// Called during setup AND once more after a short delay because Tauri's
+/// run-loop initialization can reset the policy back to .regular.
 #[cfg(target_os = "macos")]
 fn apply_macos_dock_hiding() {
+    set_macos_activation_policy(1);
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        set_macos_activation_policy(1);
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_activation_policy(policy: i64) {
     use std::ffi::c_void;
 
-    // Thin wrappers around ObjC runtime functions (shipped with macOS).
     extern "C" {
         fn objc_getClass(name: *const std::ffi::c_char) -> *mut c_void;
         fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
-        // We transmute objc_msgSend to the right signature below.
         fn objc_msgSend();
     }
 
@@ -1780,9 +1788,14 @@ fn apply_macos_dock_hiding() {
             return;
         }
 
-        // NSApplicationActivationPolicyAccessory = 1
-        send_i64(app, policy_sel, 1);
-        println!("🕵️ [stealth-macOS] Dock icon hidden (activationPolicy = .accessory)");
+        send_i64(app, policy_sel, policy);
+        let label = match policy {
+            0 => "regular (Dock visible)",
+            1 => "accessory (Dock hidden)",
+            2 => "prohibited",
+            _ => "unknown",
+        };
+        println!("🕵️ [stealth-macOS] activationPolicy set to .{}", label);
     }
 }
 
