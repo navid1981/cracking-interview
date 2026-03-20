@@ -9,7 +9,8 @@
 ### Input Methods
 - **Text Extraction** - Extract text from Chrome tabs
 - **Screenshot Capture** - Capture problems from your screen
-- **Audio Recording** - Practice verbal interviews with voice input (system + mic)
+- **Audio Recording** - Practice verbal interviews with voice input (system audio capture via ScreenCaptureKit)
+- **Live Transcription** - Real-time speech-to-text via Deepgram (multi-language support including auto-detect)
 - **Chrome CDP Integration** - Seamlessly capture content from Chrome browser
 
 ### AI Models
@@ -66,6 +67,7 @@ Supports: Java, Python, JavaScript, TypeScript, C++, C, C#, Swift, Kotlin, Go, P
 - **OS:** macOS 11.0 (Big Sur) or later
 - **Optional:** Google Chrome (for tab capture features)
 - **Permissions:** Accessibility, Screen Recording, Microphone (macOS)
+- **No additional tools required** — audio capture helper is pre-compiled and bundled inside the app
 
 ---
 

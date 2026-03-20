@@ -4,7 +4,7 @@
 mod chrome;
 mod ai;
 mod screenshot;
-mod audio;
+pub(crate) mod audio;
 mod transcription;
 mod oauth_server;
 mod google_oauth;

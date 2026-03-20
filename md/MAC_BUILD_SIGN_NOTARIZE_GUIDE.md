@@ -25,19 +25,21 @@ Complete step-by-step guide to build a universal (ARM + Intel) DMG with proper i
 
 ## Step 1: Build Universal Binary
 
-Tauri has built-in support for universal macOS binaries. A single command builds for both ARM (Apple Silicon) and Intel, combines them with `lipo`, and produces the `.app` bundle automatically:
+Tauri has built-in support for universal macOS binaries. A single command builds for both ARM (Apple Silicon) and Intel, combines them with `lipo`, and produces the `.app` bundle automatically.
+
+During the build, the Rust build script (`src-tauri/build.rs`) automatically compiles the Swift audio helper (`src-tauri/resources/audio_recorder.swift`) into a native binary (`audio_recorder_bin`) using `xcrun swiftc`. This binary is then bundled inside the `.app` at `Contents/Resources/audio_recorder_bin` via `tauri.conf.json`'s `bundle.resources` config. This eliminates the need for end users to install Xcode Command Line Tools.
 
 ```bash
 # One-time setup: add Intel target to Rust
 rustup target add x86_64-apple-darwin
 
 # Build universal binary (ARM + Intel in one .app)
-npm run tauri build -- --target universal-apple-darwin
+npm run tauri build -- --target universal-apple-darwin --bundles app
 ```
 
 This produces:
 - `.app` at `src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app`
-- A DMG at `src-tauri/target/universal-apple-darwin/release/bundle/dmg/` (but we'll recreate this DMG ourselves in Step 3 to add the drag-to-Applications layout)
+  - Includes `Contents/Resources/audio_recorder_bin` (pre-compiled Swift audio helper)
 
 Verify the binary is truly universal:
 
@@ -46,20 +48,40 @@ lipo -info src-tauri/target/universal-apple-darwin/release/bundle/macos/Cracking
 # Expected: Architectures in the fat file: x86_64 arm64
 ```
 
-> **Why not use Tauri's DMG?** Tauri's auto-generated DMG just shows the `.app` icon. It doesn't include an Applications folder shortcut for the standard drag-to-install experience. We recreate the DMG in Step 3.
+Verify the audio helper is bundled:
+
+```bash
+ls -la src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app/Contents/Resources/audio_recorder_bin
+# Should exist and be executable
+```
+
+> **Why `--bundles app`?** We only build the `.app` bundle here because we create our own DMG in Step 3 with a drag-to-Applications layout. Tauri's auto-generated DMG doesn't include an Applications folder shortcut.
 
 ---
 
 ## Step 2: Code Sign the .app Bundle
 
-Tauri's build may use ad-hoc signing. We need to re-sign with your Developer ID, hardened runtime, and secure timestamp (all required for notarization):
+Tauri's build may use ad-hoc signing. We need to re-sign with your Developer ID, hardened runtime, and secure timestamp (all required for notarization).
+
+**Important:** The bundled `audio_recorder_bin` must be signed **individually before** signing the `.app`. The `--deep` flag on the `.app` does not reliably reach binaries inside `Contents/Resources/`. If the audio helper is unsigned, notarization will fail with "The binary is not signed" / "no secure timestamp" / "no hardened runtime enabled".
 
 ```bash
-codesign --force --deep \
-  --sign "Developer ID Application: Cracking Interview LLC (7JTN2XW63J)" \
+APP_PATH="src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app"
+IDENTITY="Developer ID Application: Cracking Interview LLC (7JTN2XW63J)"
+
+# 2a. Sign the audio helper binary first
+codesign --force \
+  --sign "$IDENTITY" \
   --options runtime \
   --timestamp \
-  src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app
+  "$APP_PATH/Contents/Resources/audio_recorder_bin"
+
+# 2b. Sign the .app bundle (includes all nested frameworks)
+codesign --force --deep \
+  --sign "$IDENTITY" \
+  --options runtime \
+  --timestamp \
+  "$APP_PATH"
 ```
 
 ### Flags Explained
@@ -74,7 +96,10 @@ codesign --force --deep \
 ### Verify the Signature
 
 ```bash
-codesign -dv --verbose=2 src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app 2>&1 | grep -E "Authority|flags|Timestamp"
+codesign -dv --verbose=2 "$APP_PATH" 2>&1 | grep -E "Authority|flags|Timestamp"
+
+# Also verify the audio helper is signed
+codesign -dv "$APP_PATH/Contents/Resources/audio_recorder_bin" 2>&1 | grep "Authority"
 ```
 
 Expected output:
@@ -233,10 +258,11 @@ Common errors and fixes:
 
 | Error | Fix |
 |-------|-----|
-| "The binary is not signed" | Re-run `codesign` on the `.app` (Step 2) |
+| "The binary is not signed" | Sign `audio_recorder_bin` individually, then re-sign `.app` (Step 2) |
 | "No secure timestamp" | Add `--timestamp` flag to `codesign` |
 | "Hardened runtime not enabled" | Add `--options runtime` flag to `codesign` |
 | "Signature is invalid" | Re-sign the `.app` after building |
+| `audio_recorder_bin` fails notarization | Sign the helper binary **before** signing the `.app` (Step 2a) |
 
 ### Check Notarization History
 
@@ -281,32 +307,35 @@ cp "$DMG_OUT" /path/to/your/website/CrackingInterview_1.0.0_universal.dmg
 After the one-time setup (`rustup target add x86_64-apple-darwin`), here's the complete flow:
 
 ```bash
-# 1. Build universal binary
-npm run tauri build -- --target universal-apple-darwin
+APP_PATH="src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app"
+IDENTITY="Developer ID Application: Cracking Interview LLC (7JTN2XW63J)"
 
-# 2. Code sign the .app
-codesign --force --deep \
-  --sign "Developer ID Application: Cracking Interview LLC (7JTN2XW63J)" \
-  --options runtime --timestamp \
-  src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app
+# 1. Build universal binary (also compiles Swift audio helper via build.rs)
+npm run tauri build -- --target universal-apple-darwin --bundles app
+
+# 2a. Sign the bundled audio helper binary (MUST be before signing .app)
+codesign --force --sign "$IDENTITY" --options runtime --timestamp \
+  "$APP_PATH/Contents/Resources/audio_recorder_bin"
+
+# 2b. Sign the .app
+codesign --force --deep --sign "$IDENTITY" --options runtime --timestamp "$APP_PATH"
 
 # 3. Prepare DMG contents
 WORK_DIR="/tmp/cracking-dmg-build"
 rm -rf "$WORK_DIR" && mkdir -p "$WORK_DIR/dmg-content"
-cp -R src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app "$WORK_DIR/dmg-content/"
+cp -R "$APP_PATH" "$WORK_DIR/dmg-content/"
 ln -s /Applications "$WORK_DIR/dmg-content/Applications"
 
 # 4. Create DMG
 DMG_OUT="src-tauri/target/universal-apple-darwin/release/bundle/dmg/CrackingInterview_1.0.0_universal.dmg"
+mkdir -p "$(dirname "$DMG_OUT")"
 hdiutil create -volname "CrackingInterview" -srcfolder "$WORK_DIR/dmg-content" \
   -ov -format UDZO -imagekey zlib-level=9 "$DMG_OUT"
 
 # 5. (Optional) Style DMG window — see Step 3c above
 
 # 6. Sign DMG
-codesign --force \
-  --sign "Developer ID Application: Cracking Interview LLC (7JTN2XW63J)" \
-  --timestamp "$DMG_OUT"
+codesign --force --sign "$IDENTITY" --timestamp "$DMG_OUT"
 
 # 7. Notarize
 xcrun notarytool submit "$DMG_OUT" \
@@ -322,9 +351,52 @@ xcrun stapler staple "$DMG_OUT"
 cp "$DMG_OUT" /path/to/your/website/CrackingInterview_1.0.0_universal.dmg
 ```
 
+> **Automated:** All of the above is automated by `bash scripts/build-macos.sh`
+
+---
+
+## Audio Helper Architecture
+
+The app uses a Swift helper binary (`audio_recorder_bin`) for system audio capture via ScreenCaptureKit. This architecture is required because ScreenCaptureKit is a Swift/Objective-C API that cannot be called directly from Rust.
+
+### How It Works
+
+1. **Build time** (`src-tauri/build.rs`): Compiles `src-tauri/resources/audio_recorder.swift` → `src-tauri/resources/audio_recorder_bin` using `xcrun swiftc`
+2. **Bundle** (`tauri.conf.json`): Bundles `resources/audio_recorder_bin` into `.app/Contents/Resources/audio_recorder_bin`
+3. **Code signing** (`scripts/build-macos.sh`): Signs the helper binary individually with Developer ID + hardened runtime before signing the `.app`
+4. **Runtime** (`src-tauri/src/audio.rs`): `find_helper_binary()` locates the signed binary inside the bundle. Both the warm-up recorder (`audio.rs`) and live transcription streamer (`transcription.rs`) use this same function
+5. **Fallback** (dev only): If the bundled binary is not found, falls back to runtime compilation via `xcrun swiftc` to `/tmp/` (requires Xcode CLT — developer machines only)
+
+### Why the Binary Must Be Signed
+
+macOS ScreenCaptureKit checks the "responsible process" when a helper binary uses its XPC service. An unsigned binary spawned by the app will have its XPC connection interrupted (`SCStreamErrorDomain Code=-3805`). The signed binary in the bundle inherits the app's Screen Recording permission because macOS attributes it to `CrackingInterview.app` (the responsible process).
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src-tauri/resources/audio_recorder.swift` | Swift source — ScreenCaptureKit audio capture |
+| `src-tauri/build.rs` | Compiles Swift source at build time |
+| `src-tauri/tauri.conf.json` | Bundles compiled binary into `.app` |
+| `src-tauri/src/audio.rs` | `find_helper_binary()` — locates bundled binary; warm-up & recording |
+| `src-tauri/src/transcription.rs` | Live transcription — uses `find_helper_binary()` for stream mode |
+| `scripts/build-macos.sh` | Signs `audio_recorder_bin` before `.app` in build pipeline |
+
 ---
 
 ## Troubleshooting
+
+### Audio Recording: "application connection being interrupted" (SCStreamErrorDomain -3805)
+- The `audio_recorder_bin` is unsigned or missing from the bundle
+- Verify the binary exists: `ls -la CrackingInterview.app/Contents/Resources/audio_recorder_bin`
+- Verify it is signed: `codesign -dv CrackingInterview.app/Contents/Resources/audio_recorder_bin 2>&1 | grep Authority`
+- If missing, rebuild with latest code. If unsigned, re-run Step 2 (sign helper before .app)
+- Also ensure CrackingInterview.app has **Screen Recording** permission in System Settings
+
+### Audio Recording: No transcription in dev mode
+- When running `npm run tauri dev`, the audio helper binary falls back to `/tmp/` (unsigned)
+- Run from **Terminal.app** (not IDE terminals) — Terminal must have Screen Recording permission
+- Alternatively, add the Tauri dev binary to Screen Recording: `src-tauri/target/debug/cracking-interview`
 
 ### Notarization Stuck "In Progress"
 - Typically completes in 2-10 minutes. If stuck for hours:

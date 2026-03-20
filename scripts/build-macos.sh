@@ -57,6 +57,19 @@ ok "Universal .app built at $APP_PATH"
 # ── Step 2: Code sign the .app ───────────────────────────────────────────────
 step 2 "Code sign .app with Developer ID + hardened runtime"
 
+# Sign the bundled audio helper binary first (must be signed individually
+# before signing the .app, since --deep doesn't reach into Resources/)
+AUDIO_HELPER="$APP_PATH/Contents/Resources/audio_recorder_bin"
+if [[ -f "$AUDIO_HELPER" ]]; then
+  echo "  Signing audio_recorder_bin..."
+  codesign --force \
+    --sign "$SIGNING_IDENTITY" \
+    --options runtime \
+    --timestamp \
+    "$AUDIO_HELPER"
+  ok "audio_recorder_bin signed"
+fi
+
 codesign --force --deep \
   --sign "$SIGNING_IDENTITY" \
   --options runtime \

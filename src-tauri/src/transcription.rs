@@ -258,47 +258,10 @@ fn capture_audio_to_channel(
     use std::io::{BufRead, BufReader, Read};
     use std::process::{Command, Stdio};
 
-    // Use the same Swift helper but in a special "stream" mode that outputs raw PCM to stdout
-    // For now, we use a simpler approach: spawn a small Core Audio capture and pipe PCM
-    let swift_src = include_str!("../resources/audio_recorder.swift");
-    let mut src_path = std::env::temp_dir();
-    src_path.push("cracking_interview_audio_recorder.swift");
+    // Cool down the warm helper first — its SCStream can conflict with ours
+    crate::audio::cooldown_audio_capture();
 
-    let mut bin_path = std::env::temp_dir();
-    bin_path.push("cracking_interview_audio_recorder");
-
-    // Ensure helper is built (reuse existing binary if source unchanged)
-    let source_changed = match std::fs::read_to_string(&src_path) {
-        Ok(existing) => existing != swift_src,
-        Err(_) => true,
-    };
-
-    if source_changed || !bin_path.exists() {
-        std::fs::write(&src_path, swift_src)
-            .map_err(|e| format!("Failed to write Swift source: {}", e))?;
-
-        let output = Command::new("xcrun")
-            .args([
-                "swiftc", "-parse-as-library", "-O", "-o",
-            ])
-            .arg(&bin_path)
-            .arg(&src_path)
-            .args([
-                "-framework", "Foundation",
-                "-framework", "AVFoundation",
-                "-framework", "CoreMedia",
-                "-framework", "ScreenCaptureKit",
-            ])
-            .output()
-            .map_err(|e| format!("Failed to compile audio helper: {}", e))?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "Swift compile failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-    }
+    let bin_path = crate::audio::macos::find_helper_binary()?;
 
     let mut wav_path = std::env::temp_dir();
     wav_path.push("cracking_interview_stream.wav");
@@ -346,7 +309,7 @@ fn capture_audio_to_channel(
         }
     }
 
-    // Stop the helper
+    // Stop the helper and wait for full cleanup
     if let Some(mut stdin) = child.stdin.take() {
         use std::io::Write;
         let _ = writeln!(stdin, "stop");

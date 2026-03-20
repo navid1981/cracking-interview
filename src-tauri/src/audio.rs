@@ -342,104 +342,107 @@ pub fn convert_wav_to_mp3(wav_path: &PathBuf, mp3_path: &PathBuf) -> Result<(), 
 }
 
 #[cfg(target_os = "macos")]
-mod macos {
+pub(crate) mod macos {
     use super::{MacRecordingState, WarmAudioState, WARM_STATE, MAX_RECORDING_SECONDS, convert_wav_to_mp3};
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
     use std::io::Write;
     use std::time::Instant;
 
-    const SWIFT_HELPER_NAME: &str = "cracking_interview_audio_recorder";
+    /// Locate the pre-compiled audio recorder binary.
+    /// 1. Bundled inside the .app (production build)
+    /// 2. In the resources/ directory next to the executable (dev build)
+    /// 3. Fall back to /tmp compile from source (dev convenience)
+    pub(crate) fn find_helper_binary() -> Result<PathBuf, String> {
+        // 1. Check inside the .app bundle: ../Resources/audio_recorder_bin
+        if let Ok(exe) = std::env::current_exe() {
+            let bundle_path = exe
+                .parent()                     // .app/Contents/MacOS/
+                .and_then(|p| p.parent())      // .app/Contents/
+                .map(|p| p.join("Resources").join("audio_recorder_bin"));
+            if let Some(ref path) = bundle_path {
+                if path.exists() {
+                    ensure_executable(path);
+                    println!("🎙️ Using bundled audio helper: {}", path.display());
+                    return Ok(path.clone());
+                }
+            }
+        }
 
-    fn swift_source() -> &'static str {
-        include_str!("../resources/audio_recorder.swift")
+        // 2. Check next to the executable (Tauri dev mode places resources here)
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let dev_path = dir.join("audio_recorder_bin");
+                if dev_path.exists() {
+                    ensure_executable(&dev_path);
+                    println!("🎙️ Using dev audio helper: {}", dev_path.display());
+                    return Ok(dev_path);
+                }
+            }
+        }
+
+        // 3. Fall back: compile from embedded source (requires Xcode CLI tools — dev only)
+        println!("🎙️ Bundled helper not found, compiling from source (dev mode)...");
+        compile_helper_from_source()
     }
 
-    fn helper_paths() -> (PathBuf, PathBuf) {
+    /// Ensure the binary has the executable permission bit set.
+    /// Tauri's resource bundling may not preserve it.
+    fn ensure_executable(path: &PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mut perms = meta.permissions();
+            let mode = perms.mode();
+            if mode & 0o111 == 0 {
+                perms.set_mode(mode | 0o755);
+                let _ = std::fs::set_permissions(path, perms);
+                println!("🎙️ Set executable permission on audio helper");
+            }
+        }
+    }
+
+    fn compile_helper_from_source() -> Result<PathBuf, String> {
         let mut bin = std::env::temp_dir();
-        bin.push(SWIFT_HELPER_NAME);
-
+        bin.push("cracking_interview_audio_recorder");
         let mut src = std::env::temp_dir();
-        src.push(format!("{SWIFT_HELPER_NAME}.swift"));
+        src.push("cracking_interview_audio_recorder.swift");
 
-        (bin, src)
-    }
+        let current_source = include_str!("../resources/audio_recorder.swift");
 
-    fn ensure_helper_built() -> Result<PathBuf, String> {
-        let (bin, src) = helper_paths();
-        let current_source = swift_source();
-
-        // Check if source content changed (compare with existing file)
         let source_changed = match std::fs::read_to_string(&src) {
             Ok(existing) => existing != current_source,
-            Err(_) => true, // File doesn't exist
+            Err(_) => true,
         };
 
-        // Only write source if it changed
         if source_changed {
             std::fs::write(&src, current_source)
                 .map_err(|e| format!("Failed to write Swift helper source: {e}"))?;
         }
 
-        // Check if binary exists and is newer than source
-        let needs_rebuild = if source_changed {
-            true // Source changed, must rebuild
-        } else {
-            // Source unchanged, check if binary exists
-            !bin.exists()
-        };
-
-        if bin.exists() && !needs_rebuild {
+        if bin.exists() && !source_changed {
             return Ok(bin);
         }
 
-        println!("🎙️ Building audio recorder helper (first time or updated)...");
-        
         let output = Command::new("xcrun")
-            .arg("swiftc")
-            .arg("-parse-as-library")
-            .arg("-O")
-            .arg("-o")
+            .args(["swiftc", "-parse-as-library", "-O", "-o"])
             .arg(&bin)
             .arg(&src)
-            .arg("-framework")
-            .arg("Foundation")
-            .arg("-framework")
-            .arg("AVFoundation")
-            .arg("-framework")
-            .arg("CoreMedia")
-            .arg("-framework")
-            .arg("ScreenCaptureKit")
+            .args(["-framework", "Foundation", "-framework", "AVFoundation",
+                   "-framework", "CoreMedia", "-framework", "ScreenCaptureKit"])
             .output()
-            .map_err(|e| {
-                format!(
-                    "Failed to run `xcrun swiftc` (needed for macOS 13+ audio capture). Install Xcode Command Line Tools.\nUnderlying error: {e}"
-                )
-            })?;
+            .map_err(|e| format!("Failed to run xcrun swiftc: {e}"))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let details = if !stderr.trim().is_empty() {
-                stderr.trim().to_string()
-            } else if !stdout.trim().is_empty() {
-                stdout.trim().to_string()
-            } else {
-                "No compiler output captured.".to_string()
-            };
-            return Err(format!(
-                "Failed to compile audio helper (xcrun swiftc). Ensure Xcode Command Line Tools are installed.\n\nswiftc output:\n{}",
-                details
-            ));
+            return Err(format!("Swift compile failed: {}", stderr.trim()));
         }
 
-        println!("🎙️ Audio recorder helper built successfully");
         Ok(bin)
     }
 
-    /// Pre-compile the Swift helper (called on app startup)
+    /// Verify the audio helper binary is available (called on app startup).
     pub fn prewarm_helper() -> Result<(), String> {
-        ensure_helper_built()?;
+        find_helper_binary()?;
         Ok(())
     }
     
@@ -457,7 +460,7 @@ mod macos {
         println!("🔥 Warming up audio capture...");
         let total_start = std::time::Instant::now();
         
-        let helper = ensure_helper_built()?;
+        let helper = find_helper_binary()?;
         
         let mut wav_path = std::env::temp_dir();
         wav_path.push("cracking_interview_audio.wav");
@@ -569,7 +572,7 @@ mod macos {
         // Cold start - spawn new helper
         println!("🎙️ Cold start (no warm helper available)");
         
-        let helper = ensure_helper_built()?;
+        let helper = find_helper_binary()?;
         println!("🎙️ [TIMING] Helper ready: {:?}", total_start.elapsed());
         
         // Output WAV first, will convert to MP3 after recording

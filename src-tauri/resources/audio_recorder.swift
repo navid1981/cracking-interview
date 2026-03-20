@@ -372,6 +372,18 @@ final class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     isRecording = false
     timeoutWorkItem?.cancel()
     timeoutWorkItem = nil
+
+    if let stream = self.stream {
+      let sem = DispatchSemaphore(value: 0)
+      Task {
+        try? await stream.stopCapture()
+        sem.signal()
+      }
+      _ = sem.wait(timeout: .now() + 2)
+      self.stream = nil
+      fputs("SCStream stopped and released\n", stderr)
+    }
+
     audioFile = nil
     convertToInt16()
     fputs("Recording stopped. Total frames: \(totalFrames)\n", stderr)
@@ -521,13 +533,14 @@ struct AudioRecorderApp {
           
           if cmd == "start" {
             recorder.startRecording()
-          } else if cmd == "stop" {
+          } else if cmd == "stop" || cmd == "exit" || cmd == "quit" {
             recorder.stopRecording()
-            exit(0)
-          } else if cmd == "exit" || cmd == "quit" {
             exit(0)
           }
         }
+        // stdin closed — stop gracefully
+        recorder.stopRecording()
+        exit(0)
       } else {
         // Legacy mode: start immediately
         try await recorder.start()

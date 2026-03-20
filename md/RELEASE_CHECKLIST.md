@@ -25,6 +25,7 @@
 - [x] Developer ID Application certificate created (Team ID: 7JTN2XW63J)
 - [x] Production build completed with code signing
 - [x] Hardened runtime enabled
+- [x] Audio helper binary (`audio_recorder_bin`) bundled and signed with Developer ID
 - [x] DMG generated (8.5MB)
 - [x] Signature verified (full Apple authority chain)
 
@@ -46,7 +47,8 @@
 - [ ] Custom prompt create / edit / rename / delete
 - [ ] Text extraction works
 - [ ] Screenshot capture works
-- [ ] Audio recording works
+- [ ] Audio recording works (warm-up + file recording)
+- [ ] Live transcription works (stream mode via Deepgram)
 - [ ] Chrome CDP connects
 - [ ] All global hotkeys functional
 - [ ] Stealth mode (hide from screen sharing)

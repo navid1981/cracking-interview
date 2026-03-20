@@ -518,7 +518,7 @@ function App() {
       liveTranscriptFinalRef.current = '';
       setLiveTranscriptInterim('');
       setSilenceCountdown(null);
-      lastTranscriptTimeRef.current = Date.now();
+      lastTranscriptTimeRef.current = 0;
 
       await invoke('start_live_transcription', {
         deepgramKey: dgResult.key,
