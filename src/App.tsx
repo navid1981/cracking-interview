@@ -1308,32 +1308,43 @@ function App() {
       // Fetch displays (always available)
       const displaysData = await invoke<DisplayInfo[]>('get_displays');
       
-      // Fetch thumbnails for displays
+      // Fetch thumbnails for displays (5s timeout each)
       const displaysWithThumbnails = await Promise.all(
         displaysData.map(async (display) => {
           try {
-            const thumbnail = await invoke<string>('get_display_thumbnail', { displayId: display.id });
+            const thumbnail = await Promise.race([
+              invoke<string>('get_display_thumbnail', { displayId: display.id }),
+              new Promise<string>((_, reject) => setTimeout(() => reject('timeout'), 5000)),
+            ]);
             return { ...display, thumbnail };
-          } catch (error) {
-            // Silent fail - continue without thumbnail
+          } catch {
             return display;
           }
         })
       );
       
-      // Fetch Chrome tabs if CDP ready
+      // Fetch Chrome tabs if CDP ready (8s timeout for tab list)
       let chromeTabs: ChromeTab[] = [];
       if (cdpReady) {
-        chromeTabs = await invoke<ChromeTab[]>('get_chrome_tabs');
+        try {
+          chromeTabs = await Promise.race([
+            invoke<ChromeTab[]>('get_chrome_tabs'),
+            new Promise<ChromeTab[]>((_, reject) => setTimeout(() => reject('timeout'), 8000)),
+          ]);
+        } catch {
+          chromeTabs = [];
+        }
         
-        // Fetch thumbnails for Chrome tabs
+        // Fetch thumbnails for Chrome tabs (6s timeout each)
         chromeTabs = await Promise.all(
           chromeTabs.map(async (tab) => {
             try {
-              const thumbnail = await invoke<string>('get_tab_thumbnail', { tabId: tab.id });
+              const thumbnail = await Promise.race([
+                invoke<string>('get_tab_thumbnail', { tabId: tab.id }),
+                new Promise<string>((_, reject) => setTimeout(() => reject('timeout'), 6000)),
+              ]);
               return { ...tab, thumbnail };
-            } catch (error) {
-              // Silent fail - continue without thumbnail
+            } catch {
               return tab;
             }
           })

@@ -20,7 +20,13 @@ pub struct ChromeTab {
 
 /// Get all Chrome tabs
 pub async fn get_all_tabs() -> Result<Vec<ChromeTab>, String> {
-    let response = reqwest::get("http://localhost:9222/json/list")
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let response = client.get("http://localhost:9222/json/list")
+        .send()
         .await
         .map_err(|e| format!("Chrome CDP not accessible: {}. Click 'Open Chrome CDP' button.", e))?;
     
@@ -224,14 +230,29 @@ pub async fn capture_screenshot(tab_id: &str) -> Result<Vec<u8>, String> {
 }
 
 
-/// Capture thumbnail (small screenshot) of tab
+/// Capture thumbnail (small screenshot) of tab, with a 5-second timeout
 pub async fn capture_thumbnail(tab_id: &str) -> Result<Vec<u8>, String> {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        capture_thumbnail_inner(tab_id),
+    ).await {
+        Ok(result) => result,
+        Err(_) => Err("Thumbnail capture timed out".to_string()),
+    }
+}
+
+async fn capture_thumbnail_inner(tab_id: &str) -> Result<Vec<u8>, String> {
     use tokio_tungstenite::connect_async;
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message;
     
-    // Get WebSocket URL for the tab
-    let tabs_response = reqwest::get("http://localhost:9222/json/list")
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let tabs_response = client.get("http://localhost:9222/json/list")
+        .send()
         .await
         .map_err(|e| format!("Failed to get tabs: {}", e))?;
     
@@ -248,14 +269,12 @@ pub async fn capture_thumbnail(tab_id: &str) -> Result<Vec<u8>, String> {
         .as_str()
         .ok_or("No WebSocket URL")?;
     
-    // Connect to WebSocket
     let (ws_stream, _) = connect_async(ws_url)
         .await
         .map_err(|e| format!("WebSocket failed: {}", e))?;
     
     let (mut write, mut read) = ws_stream.split();
     
-    // Capture small thumbnail (quality: 50, format: jpeg for smaller size)
     let command = serde_json::json!({
         "id": 1,
         "method": "Page.captureScreenshot",
@@ -271,7 +290,6 @@ pub async fn capture_thumbnail(tab_id: &str) -> Result<Vec<u8>, String> {
         .await
         .map_err(|e| format!("Send failed: {}", e))?;
     
-    // Read response
     if let Some(msg) = read.next().await {
         let msg = msg.map_err(|e| format!("Read failed: {}", e))?;
         let text = msg.to_text().map_err(|e| format!("Invalid: {}", e))?;
@@ -279,9 +297,7 @@ pub async fn capture_thumbnail(tab_id: &str) -> Result<Vec<u8>, String> {
         let response: serde_json::Value = serde_json::from_str(text)
             .map_err(|e| format!("Parse failed: {}", e))?;
         
-        // Extract base64 image data
         if let Some(data) = response["result"]["data"].as_str() {
-            // Decode base64 to bytes
             use base64::{Engine as _, engine::general_purpose};
             let bytes = general_purpose::STANDARD
                 .decode(data)
