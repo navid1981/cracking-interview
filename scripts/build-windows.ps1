@@ -82,7 +82,7 @@ Write-Host "  CodeSignTool: $CodeSignTool"
 
 # ── Collect credentials ──────────────────────────────────────────────────────
 $SslUsername = if ($env:SSL_USERNAME) { $env:SSL_USERNAME } else {
-    Read-Host "Enter SSL.com username (email)"
+    Read-Host "Enter SSL.com username"
 }
 if (-not $SslUsername) { Fail "SSL.com username is required" }
 
