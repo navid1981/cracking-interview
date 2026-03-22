@@ -37,7 +37,12 @@ pub async fn get_all_tabs() -> Result<Vec<ChromeTab>, String> {
     
     let page_tabs: Vec<ChromeTab> = tabs
         .into_iter()
-        .filter(|t| t.tab_type == "page")
+        .filter(|t| {
+            t.tab_type == "page"
+                && !t.url.starts_with("chrome://")
+                && !t.url.starts_with("chrome-extension://")
+                && !t.url.starts_with("devtools://")
+        })
         .collect();
     
     Ok(page_tabs)
