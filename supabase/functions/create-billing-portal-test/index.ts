@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
         },
         body: new URLSearchParams({
           customer: customerId,
-          return_url: "https://crackinginterview.org/subscription/portal-return",
+          return_url: "https://crackinginterview.org/",
         }).toString(),
       }
     );
