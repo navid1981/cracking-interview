@@ -610,6 +610,21 @@ async fn get_tab_thumbnail(tab_id: String) -> Result<String, String> {
     Ok(format!("data:image/jpeg;base64,{}", base64_data))
 }
 
+/// Returns a short string describing how Chrome is connected:
+///   "user"  – connected to the user's original Chrome (remote debugging enabled)
+///   "app"   – connected to a Chrome window launched by this app
+///   "none"  – Chrome is not connected
+#[tauri::command]
+async fn get_chrome_connection_mode() -> Result<String, String> {
+    if chrome::is_connected_to_user_chrome().await {
+        Ok("user".to_string())
+    } else if chrome::launcher::is_cdp_accessible().await {
+        Ok("app".to_string())
+    } else {
+        Ok("none".to_string())
+    }
+}
+
 
 // ============================================================================
 // SCREEN CAPTURE COMMANDS
@@ -1980,6 +1995,7 @@ fn main() {
             get_chrome_tabs,
             get_cdp_status,
             open_chrome_cdp,
+            get_chrome_connection_mode,
             extract_tab_text,
             activate_tab,
             capture_tab_screenshot,

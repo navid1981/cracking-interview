@@ -1,0 +1,4 @@
+# Files/directories that Tauri's dev watcher should not trigger on.
+# Without this, the Swift build script writes audio_recorder_bin during
+# compilation, Tauri sees the change and restarts cargo mid-link — infinite loop.
+resources/audio_recorder_bin
