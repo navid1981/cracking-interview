@@ -136,13 +136,17 @@ Component responsibilities:
   - registers global hotkeys and emits events (frontend listens)
   - domain validation for free tier restrictions
 - `src-tauri/src/chrome/mod.rs`
-  - CDP tab listing (`GET http://localhost:9222/json/list`)
-  - activate tab (`/json/activate/<id>`)
-  - execute JS via per-tab WebSocket (`Runtime.evaluate`)
-  - screenshots / thumbnails via CDP (`Page.captureScreenshot`)
+  - All CDP operations dispatch to HTTP or WS implementation based on current mode
+  - HTTP mode: tab listing via `GET /json/list`, per-tab WS for JS/screenshots
+  - WS mode: `Target.getTargets` for tabs, `Target.attachToTarget` (flat protocol) + `sessionId` for JS/screenshots
+  - `cdp_http_base()` helper uses `get_cdp_port()` — never hardcodes port 9222
 - `src-tauri/src/chrome/launcher.rs`
-  - launches a dedicated Chrome instance with `--remote-debugging-port=9222`
-  - tries to avoid killing user's primary Chrome session
+  - `detect_user_chrome_port()` — reads `DevToolsActivePort` from system Chrome profile dirs
+  - `WsBrowserHandle` — cloneable handle wrapping an `mpsc::UnboundedSender`; all CDP commands go through one persistent WS connection
+  - Background Tokio task owns the WS stream, routes responses to callers by message ID via `oneshot` channels
+  - `is_cdp_accessible()` — TCP port check only in WS mode (never opens a new WS connection)
+  - `launch_chrome_cdp_window()` — tries user Chrome (HTTP → WS), falls back to launching new Chrome
+  - `get_cdp_port()` / `get_ws_browser_handle()` — runtime accessors for the active connection
 - `src-tauri/src/ai/mod.rs`
   - routes to Gemini vs Claude based on `config.selected_model`
   - MIME sniffing helper for image bytes
@@ -167,18 +171,68 @@ Component responsibilities:
 
 ### 1) Chrome integration via CDP (not a Chrome extension)
 
-Chrome tabs are fetched from:
+The app supports two Chrome connection modes, tried in priority order:
 
-- `http://localhost:9222/json/list`
+#### Mode A — Your Chrome (auto-detect)
 
-This requires Chrome to be running with:
+If you enable **"Allow remote debugging"** in Chrome at `chrome://inspect/#remote-debugging` (Chrome 144+), the app connects to your existing browser window automatically — no new window is opened.
 
+**How detection works:**
+
+Chrome writes a `DevToolsActivePort` file to its user-data-dir whenever remote debugging is active. The file contains the port number and the browser WebSocket path:
+
+```
+9222
+/devtools/browser/<UUID>
+```
+
+Checked paths (macOS):
+- `~/Library/Application Support/Google/Chrome/DevToolsActivePort`
+- `~/Library/Application Support/Google/Chrome Beta/DevToolsActivePort`
+- (+ Dev, Canary, Chromium variants)
+
+Windows: `%LOCALAPPDATA%\Google\Chrome\User Data\DevToolsActivePort`
+
+**Two sub-modes within Mode A:**
+
+| Sub-mode | When | HTTP API |
+|---|---|---|
+| HTTP mode | Chrome launched with `--remote-debugging-port` | Available (`/json/list`) |
+| WS mode | `chrome://inspect` toggle | Not available (404) |
+
+In **WS mode**, the app creates a **single persistent WebSocket connection** to the browser endpoint (`ws://localhost:PORT/devtools/browser/<UUID>`) and multiplexes ALL CDP commands through it using a background Tokio task + mpsc channels. This is critical — Chrome shows a permission dialog for every new WS connection, so one connection = one dialog.
+
+The permission dialog ("Allow remote debugging?") appears the first time only. Once allowed, all tab listing, JS execution, and screenshots flow through the same connection silently.
+
+#### Mode B — App Chrome (fallback)
+
+If no user Chrome is detected (or the port is closed), the app launches a dedicated Chrome window:
 - `--remote-debugging-port=9222`
+- `--user-data-dir=/tmp/cracking-interview-chrome` (macOS) or `C:\Temp\cracking-interview-chrome` (Windows)
+- Opens `https://leetcode.com` as the initial page
 
-This project includes a "CDP Chrome" launcher (separate profile) so you don't need to close your normal Chrome:
+**Decision flow when "Open Chrome" is clicked:**
 
-- `src-tauri/src/chrome/launcher.rs`
+```
+DevToolsActivePort file found?
+  → NO  → launch new Chrome (Mode B)
+  → YES → port open?
+      → NO  → stale file, launch new Chrome (Mode B)
+      → YES → HTTP /json/list works?
+          → YES → HTTP mode connected (Mode A)
+          → NO  → try WebSocket (20s timeout for user to click Allow)
+              → connected  → WS mode connected (Mode A)
+              → WS error   → launch new Chrome (Mode B)
+              → timeout    → error: "check Chrome for permission dialog"
+```
+
+**Implementation files:**
+- `src-tauri/src/chrome/launcher.rs` — detection, WsBrowserHandle, persistent WS task, fallback launcher
+- `src-tauri/src/chrome/mod.rs` — all CDP operations dispatch to HTTP or WS implementation
 - Tauri command: `open_chrome_cdp` → `chrome::launch_chrome_cdp_window()`
+- Tauri command: `get_chrome_connection_mode` → returns `"user"`, `"app"`, or `"none"`
+
+**Status polling (every 3s):** Uses a TCP port check only (`TcpStream::connect(127.0.0.1:PORT)`). Never opens a new WebSocket — avoids triggering Chrome permission dialogs during polling.
 
 ### 2) Input sources in the UI
 
@@ -316,8 +370,9 @@ Defined in `src-tauri/src/main.rs` and used by the frontend via `invoke(...)`.
 Chrome/CDP:
 
 - `get_chrome_tabs() -> Vec<ChromeTab>`
-- `get_cdp_status() -> String`
-- `open_chrome_cdp() -> String`
+- `get_cdp_status() -> String` — always returns `"🟢 Chrome Ready"` or `"🔴 Chrome Not Running"`
+- `open_chrome_cdp() -> String` — auto-detects user Chrome first, falls back to launching new window
+- `get_chrome_connection_mode() -> String` — returns `"user"` (your Chrome), `"app"` (launched by app), or `"none"`
 - `activate_tab(tab_id: String) -> ()`
 - `extract_tab_text(tab_id: String) -> String`
 - `capture_tab_screenshot(tab_id: String) -> String` (returns temp file path)
@@ -1349,14 +1404,17 @@ supabase secrets list
 The app no longer shows a yellow "Chrome CDP not running" banner in the main content area. Instead, Chrome status is shown compactly in the **header bar**:
 
 - **Chrome not running**: `Open Chrome` button with inline Chrome logo SVG (styled with `.chrome-open-btn` — blue border, Google Blue `#4285F4` accent, pill shape)
-- **Opening**: `⏳ Opening…` (button disabled, grayed out)
+- **Opening/detecting**: `⏳ Detecting Chrome… (if Chrome asks for permission, click Allow)` (button disabled, grayed out)
 - **Ready**: `🟢 Chrome Ready` status text
+
+The Rust backend always returns just "🟢 Chrome Ready" or "🔴 Chrome Not Running" — no port or mode details are surfaced in the string.
 
 Implementation in `src/App.tsx`:
 - `cdpReady` (boolean state) tracks CDP availability
 - `isOpeningChrome` (boolean state) tracks connection in progress
-- `openChromeCdp()` function calls `invoke('open_chrome_cdp')` and manages state transitions
+- `openChromeCdp()` function calls `invoke('open_chrome_cdp')`, sets message to guide user to click Allow in Chrome if prompted, handles connection errors
 - Header conditionally renders button or status text based on these states
+- Status polling calls both `get_cdp_status` and `get_chrome_connection_mode` every 3s (but only displays the status string)
 
 ### Free User Audio Restriction
 
@@ -1595,6 +1653,7 @@ The Rust backend (`src-tauri/src/main.rs`) calls these production endpoints. Tes
 
 ### Build Configuration
 
+- **`src-tauri/.taurignore`**: Excludes `resources/audio_recorder_bin` from Tauri's dev file watcher. Without this, the Swift helper binary compiled by `build.rs` triggers an infinite rebuild loop during `npm run tauri dev` (Tauri detects the binary change → restarts cargo → compiles binary → repeat).
 - **`src-tauri/tauri.conf.json`**:
   - `macOS.minimumSystemVersion` set to `"11.0"` (Big Sur, required for ScreenCaptureKit audio recording)
   - Bundle targets: `"all"` (builds all platform-appropriate bundles — DMG on macOS, NSIS `.exe` + MSI on Windows)
@@ -1731,7 +1790,7 @@ Notes:
   - `useSolveFlow()` hook
   - `useAuth()` hook (for Supabase auth state)
   - `useSubscription()` hook
-- **CDP commands use a constant `"id": 1`** for WebSocket requests. If you ever add concurrency, switch to incrementing IDs and matching responses.
+- **WS mode CDP commands use incrementing IDs** (`AtomicU64 MSG_ID`) with a `oneshot` channel map for response routing. HTTP mode still uses fixed IDs per-request (single command per temporary WS connection, no concurrency issue).
 - **Audio flow has two paths**: The legacy "record → MP3 → Gemini" path still exists in `audio.rs` but `toggleAudioRecording` now routes to live transcription via Deepgram. The old path could be useful as a fallback if Deepgram is unreachable (e.g., corporate proxy blocking).
 - **Test vs Production Edge Functions**: Production functions are now active (no `-test` suffix). Test-mode copies still exist as separate deployments. Consider consolidating to a single function with environment variable switching.
 - **Corporate VPN workarounds**: Auth and some API calls go through Rust backend to bypass SSL inspection issues. This adds complexity but is necessary for some enterprise environments.

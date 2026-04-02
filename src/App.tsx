@@ -129,6 +129,8 @@ function App() {
   // ========== APP STATE ==========
   const [cdpStatus, setCdpStatus] = useState('🔴 Chrome Not Running');
   const [cdpReady, setCdpReady] = useState(false);
+  // "user" | "app" | "none"
+  const [chromeConnectionMode, setChromeConnectionMode] = useState<'user' | 'app' | 'none'>('none');
   const [allSources, setAllSources] = useState<InputSource[]>([]);
   const allSourcesRef = useRef<InputSource[]>([]);
   const [selectedTab, setSelectedTab] = useState<InputSource | null>(null);
@@ -1274,12 +1276,17 @@ function App() {
 
   const checkCdpStatus = async () => {
     try {
-      const status = await invoke<string>('get_cdp_status');
+      const [status, mode] = await Promise.all([
+        invoke<string>('get_cdp_status'),
+        invoke<string>('get_chrome_connection_mode'),
+      ]);
       setCdpStatus(status);
       setCdpReady(status.includes('🟢'));
+      setChromeConnectionMode(mode as 'user' | 'app' | 'none');
     } catch (error) {
       setCdpStatus('🔴 Error');
       setCdpReady(false);
+      setChromeConnectionMode('none');
     }
   };
 
@@ -1288,14 +1295,20 @@ function App() {
 
     setIsOpeningChrome(true);
     setIsLoading(true);
-    setMessage('🚀 Opening Chrome CDP...');
-    
+    setMessage('🔍 Detecting Chrome… (if Chrome asks for permission, click Allow)');
+
     try {
       const result = await invoke<string>('open_chrome_cdp');
       setMessage(`✅ ${result}`);
       setTimeout(() => checkCdpStatus(), 1000);
-    } catch (error) {
-      setMessage(`❌ ${error}`);
+    } catch (error: any) {
+      const msg = String(error);
+      // Surface the "check for permission dialog" error with extra visibility
+      if (msg.includes('permission dialog') || msg.includes('Allow')) {
+        setMessage(`⚠️ ${msg}`);
+      } else {
+        setMessage(`❌ ${msg}`);
+      }
     } finally {
       setIsLoading(false);
       setTimeout(() => setIsOpeningChrome(false), 2000);
@@ -1706,18 +1719,36 @@ function App() {
             </span>
           )}
           {cdpReady ? (
-            <span className="status-indicator">{cdpStatus}</span>
+            <span
+              className={`status-indicator${chromeConnectionMode === 'user' ? ' chrome-user-mode' : ''}`}
+              title={
+                chromeConnectionMode === 'user'
+                  ? 'Connected to your existing Chrome browser'
+                  : 'Connected to a Chrome window opened by this app'
+              }
+            >
+              {cdpStatus}
+            </span>
           ) : (
-            <button 
+            <button
               className="status-indicator chrome-open-btn"
               onClick={openChromeCdp}
               disabled={isOpeningChrome}
-              title="Click to open Chrome with CDP"
+              title="Open or connect to Chrome"
             >
               {isOpeningChrome ? (
-                <>⏳ Opening…</>
+                <>🔍 Check Chrome for a dialog…</>
               ) : (
-                <><svg className="chrome-logo" viewBox="0 0 48 48" width="14" height="14"><circle cx="24" cy="24" r="12" fill="#fff"/><path d="M24,12H44.78a24,24,0,0,0-41.56.003L13.61,30l.01-.002A12,12,0,0,1,24,12Z" fill="#EA4335"/><circle cx="24" cy="24" r="9.5" fill="#1a73e8"/><path d="M34.39,30L24,48A24,24,0,0,0,44.78,12H24l-.003.009A12,12,0,0,1,34.39,30Z" fill="#FBBC04"/><path d="M13.61,30L3.22,12.01A24,24,0,0,0,24,48L34.39,30l-.007-.007A12,12,0,0,1,13.61,30Z" fill="#34A853"/></svg> Open Chrome</>
+                <>
+                  <svg className="chrome-logo" viewBox="0 0 48 48" width="14" height="14">
+                    <circle cx="24" cy="24" r="12" fill="#fff"/>
+                    <path d="M24,12H44.78a24,24,0,0,0-41.56.003L13.61,30l.01-.002A12,12,0,0,1,24,12Z" fill="#EA4335"/>
+                    <circle cx="24" cy="24" r="9.5" fill="#1a73e8"/>
+                    <path d="M34.39,30L24,48A24,24,0,0,0,44.78,12H24l-.003.009A12,12,0,0,1,34.39,30Z" fill="#FBBC04"/>
+                    <path d="M13.61,30L3.22,12.01A24,24,0,0,0,24,48L34.39,30l-.007-.007A12,12,0,0,1,13.61,30Z" fill="#34A853"/>
+                  </svg>
+                  {' '}Open Chrome
+                </>
               )}
             </button>
           )}
