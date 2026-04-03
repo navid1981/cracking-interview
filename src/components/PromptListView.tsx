@@ -11,6 +11,7 @@ interface PromptListViewProps {
   isPro: boolean;
   interviewLanguage: string;
   onInterviewLanguageChange: (langCode: string) => void;
+  onOpenDocuments: () => void;
 }
 
 export default function PromptListView({
@@ -22,6 +23,7 @@ export default function PromptListView({
   isPro,
   interviewLanguage,
   onInterviewLanguageChange,
+  onOpenDocuments,
 }: PromptListViewProps) {
   const [templates, setTemplates] = useState(getAllTemplates());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -235,7 +237,14 @@ export default function PromptListView({
           className="action-btn primary prompt-new-btn"
           disabled={!canAddMore}
         >
-          + New Prompt
+          New Prompt
+        </button>
+        <button
+          onClick={onOpenDocuments}
+          className="action-btn primary prompt-new-btn"
+          title="Upload documents and create @placeholders"
+        >
+          Upload Docs
         </button>
       </div>
 

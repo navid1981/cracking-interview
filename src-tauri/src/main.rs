@@ -8,6 +8,7 @@ pub(crate) mod audio;
 mod transcription;
 mod oauth_server;
 mod google_oauth;
+mod documents;
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -1616,6 +1617,57 @@ async fn query_ai_via_proxy_conversation(
 }
 
 // ============================================================================
+// DOCUMENT PLACEHOLDER COMMANDS
+// ============================================================================
+
+#[tauri::command]
+async fn extract_document_text(file_name: String, file_data_base64: String) -> Result<String, String> {
+    let data = general_purpose::STANDARD.decode(&file_data_base64)
+        .map_err(|e| format!("Failed to decode file data: {}", e))?;
+    documents::extract_text_from_bytes(&file_name, &data)
+}
+
+#[tauri::command]
+async fn save_document_placeholder(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+    display_name: String,
+    file_name: String,
+    extracted_text: String,
+) -> Result<(), String> {
+    let config_dir = app_config_dir(&app)?;
+    let mut placeholders = documents::load_placeholders(&config_dir);
+
+    placeholders.retain(|p| p.id != id);
+
+    placeholders.push(documents::DocumentPlaceholder {
+        id,
+        name,
+        display_name,
+        file_name,
+        extracted_text,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    });
+
+    documents::save_placeholders(&config_dir, &placeholders)
+}
+
+#[tauri::command]
+async fn get_document_placeholders(app: tauri::AppHandle) -> Result<Vec<documents::DocumentPlaceholder>, String> {
+    let config_dir = app_config_dir(&app)?;
+    Ok(documents::load_placeholders(&config_dir))
+}
+
+#[tauri::command]
+async fn delete_document_placeholder(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let config_dir = app_config_dir(&app)?;
+    let mut placeholders = documents::load_placeholders(&config_dir);
+    placeholders.retain(|p| p.id != id);
+    documents::save_placeholders(&config_dir, &placeholders)
+}
+
+// ============================================================================
 // GOOGLE OAUTH COMMANDS
 // ============================================================================
 
@@ -2020,6 +2072,10 @@ fn main() {
             start_live_transcription,
             stop_live_transcription,
             is_live_transcribing,
+            extract_document_text,
+            save_document_placeholder,
+            get_document_placeholders,
+            delete_document_placeholder,
             create_checkout_session,
             create_billing_portal_session,
             open_url,

@@ -143,7 +143,7 @@ const VERBAL_INTERVIEW_SYSTEM_PROMPT = `You are an expert interview coach helpin
 
 You will receive transcribed text from an interviewer's question. You may also see previous exchanges from this conversation for context — use them to give coherent follow-up answers.
 
-LANGUAGE: {LANGUAGE}
+LANGUAGE: {INTERVIEW_LANGUAGE}
 
 RESPONSE FORMAT:
 Always structure your response using these exact markers:
@@ -360,6 +360,34 @@ export class CustomPromptsManager {
   }
 }
 
+const DOC_PLACEHOLDERS_STORAGE_KEY = 'document_placeholders';
+
+export interface StoredDocPlaceholder {
+  name: string;
+  extractedText: string;
+}
+
+export function getDocumentPlaceholders(): StoredDocPlaceholder[] {
+  try {
+    const raw = localStorage.getItem(DOC_PLACEHOLDERS_STORAGE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function replaceDocumentPlaceholders(text: string): string {
+  const placeholders = getDocumentPlaceholders();
+  for (const doc of placeholders) {
+    const token = `{${doc.name}}`;
+    if (text.includes(token)) {
+      text = text.split(token).join(doc.extractedText);
+    }
+  }
+  return text;
+}
+
 export function buildPrompt(
   template: PromptTemplate | string,
   language: ProgrammingLanguage,
@@ -396,7 +424,7 @@ export function buildPrompt(
     finalPrompt += '\nQuestion:\n' + content;
   }
 
-  return finalPrompt;
+  return replaceDocumentPlaceholders(finalPrompt);
 }
 
 export function getConversationPrompts(
@@ -427,19 +455,22 @@ export function getConversationPrompts(
     ? 'Respond in the same language the interviewer is using.'
     : `The interview is conducted in ${langLabel}. You MUST respond entirely in ${langLabel}.`;
 
-  systemPrompt = systemPrompt.replace(/{LANGUAGE}/g, langInstruction);
+  systemPrompt = systemPrompt.replace(/{INTERVIEW_LANGUAGE}/g, langInstruction);
 
   let userMessage: string;
   if (userTemplate) {
     userMessage = userTemplate
-      .replace(/{LANGUAGE}/g, langInstruction)
+      .replace(/{INTERVIEW_LANGUAGE}/g, langInstruction)
       .replace(/{CONTENT}/g, content)
       .replace(/{PROBLEM}/g, content);
   } else {
     userMessage = content;
   }
 
-  return { systemPrompt, userMessage };
+  return {
+    systemPrompt: replaceDocumentPlaceholders(systemPrompt),
+    userMessage: replaceDocumentPlaceholders(userMessage),
+  };
 }
 
 export function getTemplateLabel(template: PromptTemplate | string): string {

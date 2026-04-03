@@ -41,6 +41,11 @@ lazy_static = "1.5"
 image = "0.25"
 hound = "3.5"
 
+# Document text extraction
+pdf-extract = "0.7"
+zip = "2"
+quick-xml = "0.36"
+
 # MP3 encoding - LAME encoder (high-level wrapper)
 mp3lame-encoder = "0.2"
 
