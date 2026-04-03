@@ -37,6 +37,7 @@ The primary source code is:
   - `src/components/AIResponseDisplay.tsx`: renders AI response, parses common markers/blocks, syntax-highlights code
   - `src/components/PromptEditor.tsx` + `.css`: UI for editing prompt templates
   - `src/components/PromptListView.tsx` + `.css`: UI for selecting templates and entering edit mode
+  - `src/components/DocumentManager.tsx` + `.css`: UI for uploading documents and managing `{PLACEHOLDER}` names
   - `src/components/AuthScreen.tsx` + `.css`: Sign in/sign up container
   - `src/components/SignInForm.tsx`: Email/password sign in form
   - `src/components/SignUpForm.tsx`: Email/password sign up form
@@ -46,6 +47,7 @@ The primary source code is:
   - `ai/*`: Gemini + Claude HTTP clients + provider routing
   - `audio.rs`: System audio recording (macOS: ScreenCaptureKit via Swift helper, Windows: WASAPI loopback), MP3 encoding
   - `transcription.rs`: Real-time audio capture → Deepgram WebSocket streaming → live transcript events
+  - `documents.rs`: Document text extraction (PDF, DOCX, DOC, TXT) and placeholder persistence
   - `screenshot.rs`: OS display capture (screenshots crate), thumbnails
 - **Resources**: `src-tauri/resources/`
   - `audio_recorder.swift`: Swift helper for macOS audio recording + live PCM streaming (compiled at runtime)
@@ -409,6 +411,13 @@ Live Transcription (Deepgram):
 - `stop_live_transcription() -> String` - stops transcription, returns accumulated final transcript
 - `is_live_transcribing() -> bool` - checks if live transcription is active
 - `query_ai_via_proxy_conversation(messagesJson: String, model: String, accessToken: String) -> AIProxyResponse` - sends multi-turn conversation messages array to AI via proxy
+
+Document Placeholders:
+
+- `extract_document_text(fileName: String, fileDataBase64: String) -> String` - extracts text from a base64-encoded file (PDF, DOCX, DOC, TXT)
+- `save_document_placeholder(id, name, displayName, fileName, extractedText) -> ()` - persists a document placeholder to `documents.json`
+- `get_document_placeholders() -> Vec<DocumentPlaceholder>` - loads all saved placeholders
+- `delete_document_placeholder(id: String) -> ()` - removes a placeholder
 
 Auth (Supabase - proxied through Rust to bypass corporate VPN SSL issues):
 
@@ -1466,6 +1475,67 @@ Each of the 6 built-in prompts has its **own tailored system prompt** (not a sha
 - Edge function default (`ai-proxy/index.ts`)
 
 **AI request timeout:** 50 seconds (both Rust HTTP client and edge function `AbortController`). Increased from 30s to accommodate System Design prompts with Mermaid diagrams + screenshot input.
+
+### Document Placeholders
+
+Users can upload documents (resume, cover letter, etc.) and assign `{PLACEHOLDER}` names. When a placeholder like `{MY_RESUME}` appears in any prompt (built-in or custom), it is automatically replaced with the extracted document text before the prompt is sent to AI. Document placeholders use the same `{NAME}` syntax as built-in placeholders (`{CONTENT}`, `{LANGUAGE}`, etc.), but reserved names are blocked during validation.
+
+#### How it works
+
+1. **Settings → Prompts → Upload Docs** button opens the Document Manager modal
+2. User uploads up to 3 files (PDF, DOCX, DOC, TXT) and assigns a name to each
+3. The app extracts text server-side (Rust) and persists it to `{app_config_dir}/documents.json`
+4. When `buildPrompt()` or `getConversationPrompts()` runs, `replaceDocumentPlaceholders()` scans the assembled prompt for `{NAME}` tokens and replaces them with the extracted text
+
+#### Text extraction (Rust: `src-tauri/src/documents.rs`)
+
+| Format | Method |
+|--------|--------|
+| PDF | `pdf-extract` crate (pure Rust) |
+| DOCX | Custom ZIP + XML parser (`zip` + `quick-xml` crates) — reads `word/document.xml` and extracts `<w:t>` text nodes |
+| DOC (legacy) | macOS: `textutil -convert txt -stdout`; Windows/Linux: error with "convert to DOCX" message |
+| TXT/MD | `String::from_utf8` |
+
+Extracted text is truncated to 50,000 chars to stay within prompt token limits.
+
+#### Data flow
+
+```
+File input (HTML) → JS reads as ArrayBuffer → base64 → invoke('extract_document_text')
+  → Rust decodes base64, extracts text by extension → returns text string
+  → JS displays char count, user sets {NAME} → invoke('save_document_placeholder')
+  → Rust writes to documents.json in app config dir
+```
+
+#### Placeholder substitution (`src/services/prompts.ts`)
+
+- `getDocumentPlaceholders()` reads from `localStorage('document_placeholders')` (synced from Rust on startup and after saves)
+- `replaceDocumentPlaceholders(text)` does `text.split('{NAME}').join(extractedText)` for each placeholder
+- Called at the end of both `buildPrompt()` and `getConversationPrompts()`
+- Users can put `{MY_RESUME}` in any prompt template text — the system prompt, the user prompt, or both
+
+#### Reserved names
+
+`LANGUAGE`, `CONTENT`, `PROBLEM`, `INTERVIEW_LANGUAGE` are reserved (used by built-in prompt placeholders) and rejected during validation.
+
+#### Key files
+
+| File | Role |
+|------|------|
+| `src-tauri/src/documents.rs` | Text extraction + JSON persistence |
+| `src-tauri/src/main.rs` | 4 Tauri commands (`extract_document_text`, `save_document_placeholder`, `get_document_placeholders`, `delete_document_placeholder`) |
+| `src/components/DocumentManager.tsx` + `.css` | Upload UI with 3 slots, file picker, name input, extraction status |
+| `src/components/PromptListView.tsx` | "Documents" button in the Prompts tab header |
+| `src/services/prompts.ts` | `replaceDocumentPlaceholders()` integrated into `buildPrompt()` and `getConversationPrompts()` |
+| `src/App.tsx` | State management, startup loading, localStorage sync |
+
+#### Cargo dependencies
+
+```toml
+pdf-extract = "0.7"
+zip = "2"
+quick-xml = "0.36"
+```
 
 ### Programming Languages
 

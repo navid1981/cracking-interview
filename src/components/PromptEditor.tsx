@@ -101,7 +101,7 @@ export default function PromptEditor({ currentTemplateId, onCancel, onSaved }: P
         <div className="section-header">
           <h3>👤 User Prompt</h3>
           <p className="help-text">
-            Use placeholders: {'{CONTENT}'}, {'{LANGUAGE}'}
+            Use placeholders: {'{CONTENT}'}, {currentTemplateId === PromptTemplate.VerbalInterviewAudio ? '{INTERVIEW_LANGUAGE}' : '{LANGUAGE}'}, {'{DOC_NAME}'}
           </p>
         </div>
         <textarea

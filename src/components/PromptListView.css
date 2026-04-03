@@ -6,7 +6,7 @@
 
 .list-header {
   display: flex;
-  justify-content: space-between;
+  gap: 8px;
   align-items: center;
   padding-bottom: 12px;
   border-bottom: 1px solid #e5e5e5;
@@ -14,9 +14,11 @@
 
 /* Uses global `.action-btn.primary` from App.css; keep a tiny local tweak for this view */
 .prompt-new-btn {
+  flex: 1;
   padding: 8px 16px;
   font-size: 13px;
   border-radius: 8px;
+  text-align: center;
 }
 
 .language-selector {

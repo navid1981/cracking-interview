@@ -6,8 +6,9 @@ import LiveTranscript from './components/LiveTranscript';
 import TabDropdown from './components/TabDropdown';
 import PromptEditor from './components/PromptEditor';
 import PromptListView from './components/PromptListView';
+import DocumentManager, { DocumentPlaceholder } from './components/DocumentManager';
 import AuthScreen from './components/AuthScreen';
-import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts } from './services/prompts';
+import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts, StoredDocPlaceholder } from './services/prompts';
 import { 
   onAuthStateChange, 
   getUserSubscription, 
@@ -195,6 +196,10 @@ function App() {
       // Silent fail - non-critical
     }
   }, [useScreenshot]);
+
+  // ========== DOCUMENT PLACEHOLDERS STATE ==========
+  const [showDocumentManager, setShowDocumentManager] = useState(false);
+  const [documentPlaceholders, setDocumentPlaceholders] = useState<DocumentPlaceholder[]>([]);
 
   // ========== APP SETTINGS STATE ==========
   const [windowOpacity, setWindowOpacity] = useState<number>(() => {
@@ -848,6 +853,23 @@ function App() {
         else if (ua.includes('windows')) setRuntimePlatform('windows');
         else if (ua.includes('linux')) setRuntimePlatform('linux');
         else setRuntimePlatform('unknown');
+      }
+    })();
+  }, []);
+
+  // Load document placeholders from disk on startup and cache in localStorage for sync access in buildPrompt
+  useEffect(() => {
+    (async () => {
+      try {
+        const placeholders = await invoke<DocumentPlaceholder[]>('get_document_placeholders');
+        setDocumentPlaceholders(placeholders);
+        const forPrompts: StoredDocPlaceholder[] = placeholders.map(p => ({
+          name: p.name,
+          extractedText: p.extracted_text,
+        }));
+        localStorage.setItem('document_placeholders', JSON.stringify(forPrompts));
+      } catch {
+        // Non-critical — placeholders just won't be available
       }
     })();
   }, []);
@@ -2370,6 +2392,7 @@ function App() {
                         setInterviewLanguage(langCode);
                         localStorage.setItem('interview_language', langCode);
                       }}
+                      onOpenDocuments={() => setShowDocumentManager(true)}
                     />
                   ) : (
                     <>
@@ -2617,6 +2640,21 @@ function App() {
       )}
 
       {/* Audio Prompt Warning Dialog */}
+      {showDocumentManager && (
+        <DocumentManager
+          onClose={() => setShowDocumentManager(false)}
+          existingPlaceholders={documentPlaceholders}
+          onSaved={(saved) => {
+            setDocumentPlaceholders(saved);
+            const forPrompts: StoredDocPlaceholder[] = saved.map(p => ({
+              name: p.name,
+              extractedText: p.extracted_text,
+            }));
+            localStorage.setItem('document_placeholders', JSON.stringify(forPrompts));
+          }}
+        />
+      )}
+
       {showAudioPromptWarning && (
         <div className="dialog-overlay" onClick={() => setShowAudioPromptWarning(false)}>
           <div className="dialog-box" onClick={(e) => e.stopPropagation()}>
