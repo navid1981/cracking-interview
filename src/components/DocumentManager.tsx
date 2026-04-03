@@ -124,7 +124,6 @@ export default function DocumentManager({ onClose, existingPlaceholders, onSaved
   };
 
   const validate = (): string | null => {
-    const activeSlots = slots.filter(s => s.status === 'ready' || s.fileName);
     const names = new Set<string>();
 
     for (let i = 0; i < slots.length; i++) {
