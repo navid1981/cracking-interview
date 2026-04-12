@@ -14,55 +14,49 @@ Scripts ready to paste into ElevenLabs for AI voiceover generation. Each section
 
 ---
 
-### Section 2: Getting Started (0:30 – 1:00)
+### Section 2: Audio / Verbal Interview Mode (0:30 – 1:50)
 
-**[SCREEN]** Show the crackinginterview.org website, click Download, install the app, and launch it. Show the main window appearing.
+**[SCREEN]** Show a Zoom meeting window on the left side of the screen with a fake interviewer (AI-generated avatar or a profile picture with camera off). The CrackingInterview app sits on the right side, partially overlapping. In the app, switch to the Audio input source. Click on the language selector — show the full dropdown list of supported languages (scroll through: English, Spanish, French, German, Persian, Chinese, Japanese, Portuguese, and more). Select English. Click the Record button. The "interviewer" on Zoom speaks (use Google Translate text-to-speech playing as system audio): "Can you explain how you would implement a rate limiter?" — show live transcription appearing in real time in the CrackingInterview app as the Zoom audio plays. The silence detection countdown triggers, and the AI response streams in with a detailed explanation and code. The interviewer asks a follow-up through Zoom: "How would you handle distributed rate limiting across multiple servers?" — transcription flows in again, and the AI response builds on the previous answer with full context (demonstrating agent memory). Then the interviewer asks a behavioral question: "Tell me about a time you optimized a system for scale." The AI responds using context from the uploaded resume, referencing the candidate's actual past experience and projects — all while the Zoom call continues naturally in the background.
 
-> Getting started takes less than a minute. Head to crackinginterview.org and download the installer for your platform. On Mac, just drag the app to your Applications folder. On Windows, run the installer and you're done. When you launch CrackingInterview, you'll see a compact always-on-top window. It connects to your Chrome browser automatically and shows all your open tabs. That's it — you're ready to go.
-
----
-
-### Section 3: Text Extraction + AI Solving (1:00 – 1:50)
-
-**[SCREEN]** Open Chrome with a LeetCode Two Sum problem. Switch to the CrackingInterview app, show the tab listed, select "Algorithm Optimal" prompt, pick Python as the language, then press the Extract hotkey. Show the AI response streaming in with a clean, formatted solution.
-
-> Let's say you're working on a coding problem. Open any LeetCode, HackerRank, or CodeSignal problem in Chrome. In CrackingInterview, you'll see your Chrome tabs listed as input sources. Select the tab with your problem, choose a prompt type — like Algorithm Optimal for the most efficient solution — and pick your programming language. Now just press the Solve hotkey. CrackingInterview extracts the problem text directly from your browser tab and sends it to the AI. Within seconds, you get a complete solution with the approach explained, time and space complexity analyzed, and clean, ready-to-use code. You can also use the Screenshot mode to capture problems from any source — not just text. This works for images, diagrams, or any content visible on your screen.
+> Here's the most powerful feature of CrackingInterview — built-in audio mode for verbal interviews. Pick your language — the app supports over 30 languages, including English, Spanish, French, German, Persian, Chinese, Japanese, and many more. Click Record and the app starts listening through your microphone, transcribing the interviewer's questions in real time. When the interviewer stops speaking, the app detects the silence, shows a brief countdown, and sends the transcribed question to the AI. You get a structured answer with explanation and code. But here's what makes this truly game-changing — the AI remembers everything. When the interviewer asks a follow-up, the AI builds on its previous response with full context. It doesn't start from scratch — it understands the entire conversation flow. Every follow-up question gets a smarter, more context-aware answer because the AI carries the full history of your interview. It's like having a coach who's been listening to every word. And it gets even better. Upload your resume in the settings, and the AI knows your background. When the interviewer asks a behavioral question like "Tell me about a time you optimized a system," the AI pulls from your actual experience — your projects, your roles, your achievements. It answers as you, with your story. This is a real-time AI interview partner that knows your history and follows the conversation like a human coach sitting right next to you.
 
 ---
 
-### Section 4: System Design Interviews (1:50 – 2:40)
+### Section 3: Text Extraction + AI Solving (1:50 – 2:30)
 
-**[SCREEN]** Switch the prompt to "System Design". Show a system design problem like "Design a URL Shortener". Press Solve. Show the AI response with a Mermaid architecture diagram rendering beautifully, followed by structured sections.
+**[SCREEN]** In the CrackingInterview app, click the "Open Chrome" button — Chrome launches automatically. In Chrome, manually navigate to a LeetCode problem (e.g., Two Sum). Switch back to the CrackingInterview app and click the refresh icon next to the input source dropdown — the LeetCode tab now appears in the list. Open Prompt Settings, show the "Algorithm Optimal" prompt selected, and set the language to Python. Back in the main app window, press the Solve hotkey. Show the AI response streaming in with a clean, formatted solution. Scroll down through the full response.
 
-> CrackingInterview isn't just for algorithm problems. Switch to the System Design prompt, and it becomes your architecture coach. Paste or extract a system design question — something like "Design a URL Shortener" — and the AI generates a complete response with a visual architecture diagram. These diagrams render right inside the app using Mermaid, so you can see the system components, data flow, and connections at a glance. Below the diagram, you get structured sections covering the API design, database schema, and scaling strategy. It's like having a senior engineer walking you through the design on a whiteboard.
-
----
-
-### Section 5: Audio / Verbal Interview Mode (2:40 – 3:50)
-
-**[SCREEN]** Switch to the Audio input source. Click the Record button. Show live transcription appearing as you speak a sample interview question: "Can you explain how you would implement a rate limiter?" Show the silence detection countdown, then the AI response appearing with an explanation and code.
-
-> Here's where it gets really powerful. CrackingInterview has a built-in audio mode for verbal interviews. Select the Audio source and click Record. The app starts listening through your microphone and transcribes the interviewer's questions in real time using Deepgram's speech recognition. It supports over 30 languages — English, Spanish, French, German, Persian, and many more. When the interviewer finishes speaking, the app detects the silence, shows a brief countdown, and automatically sends the transcribed question to the AI. You get a structured response with both an explanation and code — ready for you to reference as you answer. The conversation history is preserved, so follow-up questions get context-aware answers. This means the AI understands the flow of your interview, not just isolated questions.
+> CrackingInterview also excels at text-based coding problems. Click the Open Chrome button right in the app — it launches Chrome for you. Navigate to any coding problem, like this first Missing Positive problem on LeetCode. Back in the app, hit the refresh icon to detect your tab. Open the prompt settings — select Algorithm Optimal for the most efficient solution, and choose Python as your language. Press the hotkey. CrackingInterview extracts the problem text directly from your Chrome tab and sends it to the AI. A complete solution streams in — optimized approach, time and space complexity, and clean Python code, ready to use.
 
 ---
 
-### Section 6: Customizable Prompts & Settings (3:50 – 4:20)
+### Section 4: System Design Interviews (2:30 – 3:20)
 
-**[SCREEN]** Open Settings, go to the Prompts tab. Show the list of built-in prompts. Click to edit one, show the system prompt and user prompt fields. Show creating a custom prompt. Then show the AI Models tab with model selection.
+**[SCREEN]** Switch the prompt to "System Design". Show a Miro board open in the browser with a system design question like "Design a URL Shortener" written on it. Back in the CrackingInterview app, switch the input source to Screenshot mode. Press the Screenshot hotkey — show the screen capture overlay appear, drag to select the Miro board area containing the question. The captured image is sent to the AI. Show the AI response with a Mermaid architecture diagram rendering beautifully, followed by structured sections.
 
-> Every interview is different, and CrackingInterview lets you customize how the AI responds. Open Settings and go to the Prompts tab. You'll find built-in prompts for algorithm problems, system design, code review, and concept explanation. Each one is fully editable — you can tweak the system prompt and response format to match your style. You can also create entirely new prompts from scratch for specialized interviews. In the AI Models tab, you can choose between multiple AI providers. Pro users get access to premium models from OpenAI, Google, and Anthropic for the highest quality responses.
-
----
-
-### Section 7: Stealth Features (4:20 – 5:00)
-
-**[SCREEN]** Show the Settings App tab. Drag the transparency slider from 100% down to about 30%, showing the app becoming see-through with the desktop visible behind it. Toggle stealth mode on. Then open Zoom, start a screen share, and show a split view: on your actual screen, CrackingInterview is clearly visible with an AI response — but on the Zoom screen-share preview, it's completely gone. Invisible. Then show using hotkeys to scroll the AI response, move the window around the screen, and toggle visibility — all without touching the mouse.
-
-> CrackingInterview is designed to be invisible when you need it to be. In the App settings, you can adjust the window transparency so the app blends into your screen. Slide it down and the window becomes see-through — you can read the AI response while still seeing your interview window behind it. Now watch this. Turn on Stealth Mode and start a Zoom screen share. On your screen, the app is right here with a full solution visible. But look at the Zoom preview — it's completely gone. Your interviewer sees nothing. The app is invisible to screen sharing, screenshots, and screen recordings. It even hides from your system's dock and taskbar. And with global hotkeys, you control everything without switching windows. Scroll through responses, move the app around your screen, or toggle its visibility — all with keyboard shortcuts you can customize.
+> CrackingInterview isn't just for algorithm problems — and it works with more than just text. Switch to the System Design prompt. Your interviewer has shared a Miro board with the question on it. No problem. Switch the input to Screenshot mode or just press the hotkey to capture screen shot from your whole chrome tab — the app reads the question directly from the image. In seconds, the AI generates a complete system design response with a visual architecture diagram. These diagrams render right inside the app using Mermaid, so you can see the system components, data flow, and connections at a glance. Below the diagram, you get structured sections covering the API design, database schema, and scaling strategy. It's like having a senior engineer walk you through the design on a whiteboard.
 
 ---
 
-### Section 8: Call to Action (5:00 – 5:15)
+### Section 5: Customizable Prompts & Settings (3:20 – 3:55)
+
+**[SCREEN]** Open Settings, go to the Prompts tab. Show the list of built-in prompts. Click to edit the "Verbal Interview" prompt — show the system prompt and user prompt fields with a `{resume}` placeholder already visible in the prompt body. Then go to the Resume tab (or resume upload area), drag in a PDF resume — show it being uploaded and parsed. Switch back to the Prompts tab to show the placeholder is now populated with the resume content. Then show the AI Models tab with model selection.
+
+> Every interview is different, and CrackingInterview lets you customize how the AI responds. Open Settings and go to the Prompts tab. You'll find built-in prompts for algorithm problems, system design, verbal interviews, and more. Each one is fully editable. Look at the Verbal Interview prompt — you can add a resume placeholder in system prompt. Upload your resume in the upload document, and the app automatically injects it into every verbal interview response. The AI now knows your background, your experience, and your skills — so its answers are tailored specifically to you. In the AI Models tab, you can choose between multiple AI providers. Pro users get access to premium models from OpenAI, Google, and Anthropic for the highest quality responses.
+
+---
+
+### Section 6: Stealth Features (3:55 – 4:50)
+
+**[SCREEN]** This entire section uses a persistent side-by-side layout. **Left side (~60%)**: your actual screen showing HackerRank's coding environment in Chrome with CrackingInterview floating on top. **Right side (~40%)**: the Zoom screen-share preview window, which only shows HackerRank — CrackingInterview is completely invisible. Both views are visible simultaneously throughout the entire section so the viewer can constantly compare what you see vs. what the interviewer sees.
+
+The section opens with this split already in place — Zoom is running, screen share is active, stealth mode is on. On the left, CrackingInterview has an AI response visible, floating on top of HackerRank. On the right, the Zoom preview shows only HackerRank. First, briefly show the Settings App tab and drag the transparency slider from 100% down to about 30% — the app becomes see-through and the HackerRank code editor is now visible through it. The Zoom side still shows nothing. Now start typing code into HackerRank — the mouse cursor is inside Chrome, the keyboard focus is on HackerRank's code editor, and CrackingInterview stays floating on top, never going behind. The Zoom side continues to show only HackerRank with the code you're typing. Press a global hotkey to scroll down the AI response — the left side scrolls, the right side shows nothing. Press another hotkey to move the CrackingInterview window to a different corner — the left side shows it moving, the right side shows nothing. Press another hotkey to toggle visibility off and on — the left side shows the app disappearing and reappearing, the right side never changes. Throughout all of this, the mouse cursor and keyboard focus never leave HackerRank.
+
+> CrackingInterview is designed to be invisible when you need it to be — and completely undetectable by interview platforms. Watch the left side of your screen. That's what you see — the AI solution floating right on top of your coding environment. Now look at the right side. That's what your interviewer sees through Zoom screen share — just HackerRank. Nothing else. The app is invisible. Let's make it even better. Adjust the transparency, and now you can read the AI response and see the code editor right through it. Start typing your solution directly into HackerRank. The app stays on top — always. It never drops behind your browser. And your mouse, your keyboard, your focus — it all stays inside HackerRank the entire time. You never click on CrackingInterview. You never switch tabs. You never leave the page. That matters, because platforms like HackerRank, CodeSignal, and CoderPad track exactly that — tab switches, focus loss, leaving the browser window. That's how they flag cheating. With CrackingInterview, none of those signals ever fire. Watch — I'm scrolling through the AI response with a hotkey. Left side scrolls. Right side? Nothing. I'm moving the window to a different corner. Left side moves. Right side? Still just HackerRank. I'm toggling the app window on and off. Gone, back, gone, back. Right side never changes. Every action is controlled through global hotkeys that work system-wide without ever shifting your focus. As far as the interview platform is concerned, you never left. Transparent, always on top, zero focus changes, invisible to screen share — this is what undetectable looks like.
+
+---
+
+### Section 7: Call to Action (4:50 – 5:05)
 
 **[SCREEN]** Show the crackinginterview.org website with the download button and pricing section.
 
@@ -176,15 +170,160 @@ Record each section as a **separate screen recording**. This makes editing much 
 | File Name | What to Record | Duration |
 |-----------|---------------|----------|
 | `01-overview.mp4` | App window appearing next to a coding problem | ~30s |
-| `02-install.mp4` | crackinginterview.org > Download > Install > Launch app | ~30s |
-| `03-solve.mp4` | Chrome with LeetCode Two Sum > Select tab > Choose prompt > Hotkey > AI streams solution | ~50s |
-| `04-system-design.mp4` | Switch to System Design prompt > "Design a URL Shortener" > AI response with Mermaid diagram | ~50s |
-| `05-audio.mp4` | Select Audio source > Click Record > Speak a question > Live transcription > Silence countdown > AI response | ~70s |
-| `06-settings.mp4` | Open Settings > Prompts tab > Edit a prompt > AI Models tab > Model selection | ~30s |
-| `07-stealth.mp4` | Transparency slider > Stealth mode toggle > Zoom screen share showing app invisible (see below) > Hotkey scrolling/moving | ~40s |
-| `08-cta.mp4` | crackinginterview.org website with download button and pricing | ~15s |
+| `02-audio.mp4` | Zoom meeting with fake interviewer on left + CrackingInterview app on right > Select Audio source > language dropdown > select English > Click Record > Interviewer "speaks" via Google Translate system audio > Live transcription > AI response > Follow-up question showing agent memory > Behavioral question answered using resume context (see setup guide below) | ~80s |
+| `03-solve.mp4` | Click "Open Chrome" in app > Chrome opens > navigate to LeetCode Two Sum > back in app refresh input source > Prompt Settings: Algorithm Optimal + Python > press Solve hotkey > AI streams solution > scroll through response | ~40s |
+| `04-system-design.mp4` | Switch to System Design prompt > show Miro board with "Design a URL Shortener" question > switch to Screenshot mode > press Screenshot hotkey > drag to capture Miro board area > AI response with Mermaid diagram | ~50s |
+| `05-settings.mp4` | Open Settings > Prompts tab > Open "Verbal Interview" prompt > show {resume} placeholder > go to Resume tab > upload a PDF resume > back to Prompts to show placeholder populated > AI Models tab > Model selection | ~30s |
+| `06-stealth.mp4` | Persistent side-by-side: left = your screen (HackerRank + CrackingInterview on top), right = Zoom screen-share preview (only HackerRank visible). Transparency slider > type code in HackerRank > app stays on top > global hotkeys scroll/move/toggle without focus change > Zoom side never shows the app (see recording guide below) | ~55s |
+| `07-cta.mp4` | crackinginterview.org website with download button and pricing | ~15s |
 
-#### How to Record the Stealth/Zoom Scene (Section 7)
+#### How to Record the Audio/Zoom Interview Scene (Section 2)
+
+This is the most important demo in the entire video — it sells the core product experience. The goal is to make it look and feel like a real Zoom interview.
+
+**How to create a fake Zoom meeting with a second person:**
+
+You need two Zoom accounts so the meeting shows two participants (you + the "interviewer"). Here are three approaches, from simplest to most polished:
+
+**Method A: Second Zoom Account — Camera Off (easiest, free)**
+
+1. Create a second free Zoom account using a different email (e.g., a Gmail alias like `yourname+interviewer@gmail.com`)
+2. On the second account, go to Zoom profile settings at [zoom.us/profile](https://zoom.us/profile):
+   - Set the display name to something like **"Sarah Chen"** or **"David Kim — Engineering Manager"**
+   - Upload a professional-looking profile picture (use a stock photo from [unsplash.com](https://unsplash.com) or generate one with [thispersondoesnotexist.com](https://thispersondoesnotexist.com))
+3. From your main account, start a Zoom meeting and copy the invite link
+4. Open an **incognito/private browser window**, go to the invite link, and join from the second account. Keep the camera OFF on this second account
+5. The Zoom window now shows two participant tiles: your tile + the "interviewer" tile with their name and profile photo. This looks exactly like a real interview where the interviewer has their camera off (very common in real interviews)
+6. Arrange the Zoom window so the interviewer tile is prominently visible
+
+**Method B: Second Account + OBS Virtual Camera (more polished, free)**
+
+This makes the fake interviewer appear with a **live webcam feed** in Zoom — looks even more real. OBS Virtual Camera turns any OBS scene into a fake webcam that other apps (like Zoom) can use as a camera input.
+
+**Step 1: Get a stock video of a person**
+
+You need a short video of someone sitting at a desk, looking at the screen, nodding occasionally — the kind of thing an interviewer looks like on Zoom. Download one of these:
+- [Pexels — "person video call"](https://pexels.com/search/videos/person%20video%20call/) — free, no sign-up
+- [Pexels — "woman office laptop"](https://pexels.com/search/videos/woman%20office%20laptop/) — free
+- Search for "person on zoom call" or "person listening at desk" on Pexels or [Pixabay](https://pixabay.com/videos/)
+- Or record a friend sitting at a desk for 2-3 minutes — just looking at the screen, nodding, occasionally glancing down. No talking needed
+
+Save the video file somewhere accessible, e.g. `~/Videos/fake-interviewer.mp4`
+
+**Step 2: Set up OBS Studio with the video**
+
+1. Open **OBS Studio** (download from [obsproject.com](https://obsproject.com) if not installed)
+2. Look at the bottom of the OBS window — you'll see a row of panels: **Scenes**, **Sources**, **Audio Mixer**, **Scene Transitions**, and **Controls**
+
+**Create a Scene:**
+
+3. In the **Scenes** panel (bottom-left), click the **+** button
+4. A dialog pops up asking for the scene name — type `Fake Interviewer` and click **OK**
+5. The new scene appears in the list and is now selected (highlighted)
+
+**Add the video as a Media Source:**
+
+6. In the **Sources** panel (directly to the right of Scenes), click the **+** button
+7. A dropdown menu appears with a list of source types. Select **Media Source** (sometimes called "Media Source (FFmpeg)")
+8. A dialog asks "Create new" or "Add existing" — leave **"Create new"** selected
+9. Type a name: `Interviewer Video` → click **OK**
+10. The **Properties** dialog opens — this is where you load the video file:
+
+    | Setting | Value |
+    |---------|-------|
+    | **Local File** | ✅ Check this box (it should be checked by default) |
+    | **Input** | Click **Browse** → navigate to your video file (e.g. `~/Videos/fake-interviewer.mp4`) → select it → click **Open** |
+    | **Loop** | ✅ **Check this box** — critical! This makes the video repeat endlessly so the "interviewer" stays on screen for the entire recording |
+    | **Restart playback when source becomes active** | ✅ Check this box |
+    | **Use hardware decoding when available** | ✅ Leave checked (default) |
+    | All other settings | Leave at defaults |
+
+11. Click **OK** to close the Properties dialog
+
+**Resize the video to fill the canvas:**
+
+12. The video now appears in the OBS preview area (the big black rectangle in the center). It might appear small or off-center
+13. Right-click on the video in the preview → **Transform** → **Fit to screen**
+    - This stretches the video to fill the entire OBS canvas
+    - Alternatively: right-click → **Transform** → **Stretch to screen** if "Fit" leaves black bars
+14. The OBS preview should now show the person from your video filling the entire frame — this is exactly what Zoom will see as the "webcam" feed
+
+**Verify it's playing:**
+
+15. You should see the video playing in the OBS preview. If it's frozen on a black frame, right-click the `Interviewer Video` source in the Sources panel → **Media Controls** → click the **play ▶** button
+16. The video should now be looping continuously in the preview
+
+**Step 3: Start the OBS Virtual Camera**
+
+1. In OBS, go to the menu bar: **Tools** → **Start Virtual Camera**
+   - On Mac: if this is your first time, macOS may ask for camera permissions — allow it
+   - The button in the bottom-right control panel also shows **Start Virtual Camera** — you can click either one
+2. The OBS status bar at the bottom now shows "Virtual Camera Active" — OBS is now broadcasting the fake interviewer video as a webcam feed that any app can use
+
+**Step 4: Join Zoom with the fake camera**
+
+1. From your main Zoom account, start a meeting and copy the invite link
+2. Open an **incognito/private browser window** and go to the invite link to join from your second Zoom account
+3. When the Zoom browser client (or Zoom app) asks to select a camera, choose **"OBS Virtual Camera"** from the camera dropdown
+   - If you're already in the meeting: click the **^** arrow next to the camera icon in the Zoom toolbar → select **"OBS Virtual Camera"**
+   - If OBS Virtual Camera doesn't appear, make sure Step 3 is done (Virtual Camera is running in OBS) and try restarting Zoom
+4. The Zoom meeting now shows your stock video playing as the "interviewer's" live webcam. It looks like a real person on camera
+
+**Step 5: Verify the layout**
+
+1. Your Zoom window should now show two tiles: **you** (main account) and the **"interviewer"** (second account with the OBS Virtual Camera feed)
+2. On your main account, you can turn your own camera off if you don't want your face in the recording — the focus should be on the interviewer tile + the CrackingInterview app
+3. Position everything for the recording: Zoom on the left, CrackingInterview on the right
+
+**Important notes:**
+- You need **two separate instances** of Zoom running — the easiest way is to use the Zoom desktop app for your main account and the Zoom **web client** (in an incognito browser) for the interviewer account
+- The stock video doesn't need audio — you're providing the interviewer's "voice" separately via Google Translate or ElevenLabs MP3s
+- The lip movement won't match the audio, but this is fine — the viewer's attention will be on the CrackingInterview app transcribing and generating answers, not scrutinizing the interviewer's face
+- If the video looks choppy in Zoom, in OBS go to **Settings > Video** and set the output resolution to **1280x720** and FPS to **30** — this is plenty for a Zoom webcam feed
+
+**Method C: AI-Generated Talking Avatar (most polished, paid)**
+
+1. Use [HeyGen](https://heygen.com) (free trial: 3 videos) or [D-ID](https://d-id.com) (free trial: 5 min)
+2. Type the three interviewer questions as the script text
+3. Choose a professional-looking avatar and generate a video of them "asking" the questions
+4. Play this video using OBS Virtual Camera (same as Method B step 2-4), or simply overlay the generated video on top of the Zoom tile area in post-production using Descript
+
+---
+
+**Full recording setup (works with any method above):**
+
+1. **Prepare the interviewer audio** — pre-type all three questions in Google Translate ([translate.google.com](https://translate.google.com)):
+   - "Can you explain how you would implement a rate limiter?"
+   - "How would you handle distributed rate limiting across multiple servers?"
+   - "Tell me about a time you optimized a system for scale."
+   - You'll click the **speaker icon** to play each one as system audio during recording
+   - *Better option*: Pre-generate the questions as MP3s using ElevenLabs with a different voice than your narration — sounds much more natural than Google Translate
+2. **Route system audio to CrackingInterview**: The app needs to hear the interviewer audio as microphone input. On Mac, install **BlackHole** ([existential.audio/blackhole](https://existential.audio/blackhole/) — free). In System Settings > Sound, set output to BlackHole. Then in CrackingInterview, set the audio input to BlackHole. This routes whatever plays on your speakers into the app as if it were a mic
+3. **Screen layout**: Position Zoom on the left ~60% of the screen, CrackingInterview app on the right ~40%, slightly overlapping
+4. **Upload your resume** in CrackingInterview Settings > Resume tab before recording
+5. **Record with OBS** using Display Capture to capture the full screen
+
+**Recording flow:**
+
+1. Start OBS recording
+2. Show the Zoom meeting with two participants — the "interviewer" is visible
+3. In CrackingInterview, switch to Audio, select English, click Record
+4. Play the first question audio (Google Translate speaker icon or pre-made MP3). The audio plays through the system → BlackHole routes it to CrackingInterview → live transcription appears in the app. To the viewer, it looks like the Zoom interviewer asked the question
+5. Wait for silence detection countdown → AI response streams in
+6. Pause 3-4 seconds, then play the second question (follow-up) → AI builds on the previous answer
+7. Pause, then play the third question (behavioral) → AI uses resume context in its response
+8. Stop recording
+
+**Tips:**
+- Practice the full flow 1-2 times before the real recording to nail the timing
+- Keep 3-4 seconds of silence between questions so the app's silence detection triggers cleanly
+- If using Method A (camera off), the viewer won't question it — most real interviewers keep their camera off
+- Keep Zoom's participant count and meeting timer visible to sell the realism
+- If using ElevenLabs for the interviewer voice, pick a voice that sounds different from your narration voice (e.g., use a female voice for the interviewer if your narrator is male)
+
+---
+
+#### How to Record the Stealth/Zoom Scene (Section 6)
 
 This is the most important demo. Here are two methods:
 
@@ -230,13 +369,12 @@ For each section below, paste ONLY the narration text (not the [SCREEN] directio
 | ElevenLabs File to Save | Script Section to Paste |
 |--------------------------|------------------------|
 | `V1-01-hook.mp3` | Section 1: "Ever frozen during a coding interview..." (full paragraph) |
-| `V1-02-install.mp3` | Section 2: "Getting started takes less than a minute..." (full paragraph) |
-| `V1-03-solve.mp3` | Section 3: "Let's say you're working on a coding problem..." (full paragraph) |
+| `V1-02-audio.mp3` | Section 2: "Here's the most powerful feature of CrackingInterview..." (full paragraph) |
+| `V1-03-solve.mp3` | Section 3: "CrackingInterview also excels at text-based..." (full paragraph) |
 | `V1-04-sysdesign.mp3` | Section 4: "CrackingInterview isn't just for algorithm problems..." (full paragraph) |
-| `V1-05-audio.mp3` | Section 5: "Here's where it gets really powerful..." (full paragraph) |
-| `V1-06-settings.mp3` | Section 6: "Every interview is different..." (full paragraph) |
-| `V1-07-stealth.mp3` | Section 7: "CrackingInterview is designed to be invisible..." (full paragraph) |
-| `V1-08-cta.mp3` | Section 8: "CrackingInterview is available now..." (full paragraph) |
+| `V1-05-settings.mp3` | Section 5: "Every interview is different..." (full paragraph) |
+| `V1-06-stealth.mp3` | Section 6: "CrackingInterview is designed to be invisible..." (full paragraph) |
+| `V1-07-cta.mp3` | Section 7: "CrackingInterview is available now..." (full paragraph) |
 
 #### Video 2 — Section-by-Section Audio Generation
 
@@ -281,9 +419,9 @@ This is where you combine all recordings, voiceover clips, and cards into the fi
 2. Create a new Project: name it "CrackingInterview Videos"
 3. Create two **Compositions**: "Homepage Video" and "YouTube Ad"
 
-#### Assembling Video 1 (Homepage ~5 min)
+#### Assembling Video 1 (Homepage ~5:15 min)
 
-1. **Import all files**: Drag in all your screen recordings (`01-overview.mp4` through `08-cta.mp4`), all voiceover audio (`V1-01-hook.mp3` through `V1-08-cta.mp3`), and the Canva cards
+1. **Import all files**: Drag in all your screen recordings (`01-overview.mp4` through `07-cta.mp4`), all voiceover audio (`V1-01-hook.mp3` through `V1-07-cta.mp3`), and the Canva cards
 2. **Build the timeline in order**:
    - Drag `intro-card.mp4` to the beginning
    - For each section: drag the voiceover MP3 first, then place the matching screen recording on the video track above it
@@ -379,24 +517,116 @@ Before you start recording, you can paste the script sections into Claude and as
 ### Step 7: Publish
 
 #### Homepage Video
+
 1. Upload the final MP4 to **YouTube** (Public or Unlisted)
-2. Add a title: "CrackingInterview — AI-Powered Coding Interview Coach"
-3. Add a description with your website link: crackinginterview.org
-4. Copy the YouTube embed code and paste it into your website's homepage HTML
-5. Alternatively, host the video directly (e.g., upload to your web hosting or use a service like Vimeo for cleaner embeds without YouTube branding)
+2. Use the title, description, tags, and thumbnail guide below
+3. Copy the YouTube embed code and paste it into your website's homepage HTML
+4. Alternatively, host the video directly (e.g., upload to your web hosting or use a service like Vimeo for cleaner embeds without YouTube branding)
+
+**YouTube Title:**
+
+```
+CrackingInterview — AI That Solves Coding Interviews in Real Time (Live Demo)
+```
+
+**YouTube Description (copy-paste ready):**
+
+```
+CrackingInterview is an invisible AI-powered interview coach that sits on your screen and helps you ace coding interviews in real time. Available for Mac and Windows.
+
+🔗 Download free: https://crackinginterview.org
+
+⏱ TIMESTAMPS:
+0:04 — What is CrackingInterview?
+0:32 — Audio Mode: Real-time verbal interview with AI memory & resume context
+2:14 — Text Extraction: Solve LeetCode problems instantly
+3:01 — System Design: Auto-generated architecture diagrams
+3:52 — Custom Prompts, Resume Upload & AI Model Selection
+4:44 — Stealth Mode: Invisible to screen share, always on top, zero focus changes
+6:44 — Download & Pricing
+
+🎯 WHAT YOU'LL SEE IN THIS VIDEO:
+• Live audio interview demo — the AI listens, transcribes, and answers in real time
+• Follow-up questions with full conversation memory (agent context)
+• Behavioral questions answered using your uploaded resume
+• One-hotkey problem solving from LeetCode, HackerRank, and any browser tab
+• System design responses with Mermaid architecture diagrams
+• Stealth mode: invisible to Zoom screen share, HackerRank, CodeSignal, and CoderPad
+• Always-on-top window with adjustable transparency
+• Global hotkeys — control everything without changing browser focus
+
+🛡 STEALTH FEATURES:
+• Invisible to screen sharing, screenshots, and screen recordings
+• Always-on-top — never drops behind your browser
+• Global hotkeys — scroll, move, toggle without leaving the interview platform
+• Zero tab switches, zero focus loss — anti-cheat systems detect nothing
+• Adjustable transparency — read AI responses while coding through the window
+
+🌐 SUPPORTED LANGUAGES:
+Audio mode supports 30+ languages including English, Spanish, French, German, Persian, Chinese, Japanese, Portuguese, and many more.
+
+🤖 AI MODELS:
+Works with OpenAI, Google Gemini, and Anthropic Claude. Free tier included — Pro unlocks premium models.
+
+📥 DOWNLOAD:
+https://crackinginterview.org
+Available on Mac and Windows. Free to start.
+
+#CodingInterview #LeetCode #HackerRank #InterviewPrep #AI #CrackingInterview #SystemDesign #SoftwareEngineering #TechInterview #CodingInterviewHelp
+```
+
+**YouTube Tags (paste into the tags field):**
+
+```
+cracking interview, coding interview help, AI interview coach, leetcode solver, hackerrank cheating, coding interview AI, system design interview, verbal interview AI, real time interview help, invisible interview app, stealth mode interview, interview screen share invisible, coding interview tool, AI coding assistant, leetcode AI, hackerrank AI, codesignal, coderbyte, software engineer interview, tech interview prep, coding bootcamp, interview anxiety, coding interview tips, AI resume interview, behavioral interview AI
+```
+
+---
+
+#### Homepage Video — Thumbnail Design
+
+Create in **Canva** at **1280x720** (YouTube standard). The thumbnail needs to communicate the core value in under 2 seconds.
+
+**Recommended layout — side-by-side stealth proof:**
+
+| Element | Details |
+|---------|---------|
+| **Background** | Dark gradient (dark blue/black to deep purple) — looks premium and techy |
+| **Left side** | Screenshot of your app floating on top of a HackerRank coding environment — the AI response clearly visible. Add a subtle green glow or border around the app window |
+| **Right side** | Screenshot of the Zoom screen-share preview showing only HackerRank — no app visible. Add a red "X" or "INVISIBLE" stamp over where the app would be |
+| **Divider** | A thin vertical line or "VS" badge between the two sides |
+| **Top text (large, bold)** | `AI INTERVIEW COACH` — white or bright green, bold sans-serif (Montserrat or Inter), at least 60pt |
+| **Bottom text (smaller)** | `Invisible to Screen Share • Always On Top • Real-Time AI` — white, 24-30pt |
+| **Corner badge** | `FREE DOWNLOAD` in a bright green or yellow pill/badge shape — bottom-right corner |
+| **App logo** | Small CrackingInterview logo in the top-left or top-right corner |
+
+**Alternative thumbnail — audio mode focus:**
+
+| Element | Details |
+|---------|---------|
+| **Background** | Screenshot of the Zoom meeting with the fake interviewer on the left, CrackingInterview on the right with an AI response visible |
+| **Overlay text (large)** | `IT LISTENS. IT ANSWERS.` — bold white text with dark shadow |
+| **Subtitle** | `Real-Time AI for Verbal Interviews` — smaller, below the main text |
+| **Audio waveform graphic** | A stylized green/blue waveform across the bottom — signals audio/voice |
+| **Corner badge** | `FREE • Mac & Windows` |
+
+**Thumbnail tips:**
+- Test both designs — upload one, check the click-through rate in YouTube Studio after a few days, then try the other
+- Avoid small text — thumbnails appear tiny on mobile. If you can't read it at phone size, make it bigger
+- Use no more than 5-7 words of text total on the thumbnail
+- High contrast matters: bright text on dark background performs best on YouTube
+- No faces needed since this is a software product — the app screenshot IS the visual hook
+
+---
 
 #### YouTube Ad
+
 1. Upload to YouTube as Public
 2. To run as an ad, go to [ads.google.com](https://ads.google.com) and create a Video campaign
 3. Campaign type: **Video > Drive conversions**
 4. Select your uploaded YouTube video
 5. Target audience: software engineers, job seekers, coding bootcamp students
 6. Set your daily budget (start with $10-20/day to test)
-
-#### Thumbnails
-1. Create in Canva (1280x720, the YouTube standard)
-2. Show: your app window with a solution visible + text like "AI Interview Coach" + "Free Download"
-3. Use bold, readable text and a clean screenshot — avoid clutter
 
 ---
 
@@ -408,15 +638,14 @@ Before you start recording, you can paste the script sections into Claude and as
 - [ ] Create Canva account (free)
 - [ ] Clean desktop and prepare demo content
 - [ ] Record Section 1 → save as `01-overview.mp4`
-- [ ] Record Section 2 → save as `02-install.mp4`
+- [ ] Record Section 2 → save as `02-audio.mp4`
 - [ ] Record Section 3 → save as `03-solve.mp4`
 - [ ] Record Section 4 → save as `04-system-design.mp4`
-- [ ] Record Section 5 → save as `05-audio.mp4`
-- [ ] Record Section 6 → save as `06-settings.mp4`
-- [ ] Record Section 7 → save as `07-stealth.mp4`
-- [ ] Record Section 8 → save as `08-cta.mp4`
+- [ ] Record Section 5 → save as `05-settings.mp4`
+- [ ] Record Section 6 → save as `06-stealth.mp4`
+- [ ] Record Section 7 → save as `07-cta.mp4`
 - [ ] Upload raw recordings to Gemini for feedback → re-record if needed
-- [ ] Generate V1 voiceover clips (8 MP3 files) in ElevenLabs
+- [ ] Generate V1 voiceover clips (7 MP3 files) in ElevenLabs
 - [ ] Generate V2 voiceover clips (6 MP3 files) in ElevenLabs
 - [ ] Create intro + outro cards in Canva → export as MP4
 - [ ] Import everything into Descript
