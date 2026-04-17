@@ -106,125 +106,175 @@ One campaign with 4 ad groups, each targeting a different keyword intent type:
 
 #### Campaign Settings
 
+- **Campaign name:** CrackingInterview - Search Ads
 - **Campaign type:** Search > Website visits
 - **Bidding strategy:** Maximize clicks (first 2 weeks to gather data, then switch to Target CPA once you have 15+ conversions)
 - **Daily budget:** $10/day
-- **Geographic targeting:** United States + Canada
+- **Geographic targeting:** United States
 - **Language targeting:** English
-- **Audience targeting:** Age 22-40, interests in software engineering, computer science, programming, job searching
-- **Landing page:** https://crackinginterview.org
+- **Landing page:** https://crackinginterview.org/ads.html (dedicated policy-compliant page — no stealth/invisible language)
 - **Ad schedule:** All day (interview prep happens at all hours)
 - **Device targeting:** All devices (desktop + mobile)
+- **Free desktop software certificate:** Approved (April 14, 2026)
+- **Google Tag:** AW-18084639735 (installed on all website pages including ads.html)
 
 #### Ad Group 1: Competitor Brand Names
 
 People searching for competitors by name are high-intent buyers already sold on the concept. Bidding on their brand names puts your ad in front of them at the decision moment.
 
-**Keywords (Exact Match + Phrase Match):**
-- `ultracode ai`
-- `interview coder`
-- `interview coder ai`
-- `lockedin ai`
-- `locked in ai`
-- `final round ai`
-- `finalround ai`
-- `leetcode wizard`
-- `linkjob ai`
-- `link job ai`
-- `interview sidekick`
-- `interview sidekick ai`
+**Keywords (Phrase Match):**
+- `"ultracode ai"`
+- `"interview coder"`
+- `"interview coder ai"`
+- `"lockedin ai"`
+- `"locked in ai"`
+- `"final round ai"`
+- `"finalround ai"`
+- `"leetcode wizard"`
+- `"linkjob ai"`
+- `"link job ai"`
+- `"interview sidekick"`
+- `"interview sidekick ai"`
 
-**Ad copy:**
-- Headline 1: "Coding Interview AI — Just $15/mo"
-- Headline 2: "Free Tier + System Design Diagrams"
-- Headline 3: "Invisible to Zoom Screen Share"
-- Description 1: "Why pay $50-800 for interview AI? CrackingInterview gives you real-time coding + system design help with visual architecture diagrams. Free to start. $15/mo Pro. Mac & Windows."
-- Description 2: "Solve LeetCode, HackerRank, CodeSignal problems instantly. Audio mode for verbal interviews in 20+ languages. Stealth mode invisible to screen share. Download free."
+**Display path:** `/interview/ai`
+
+**Headlines:**
+1. Interview AI — Just $15/mo
+2. Free + System Design Diagrams
+3. AI Coding Interview Prep
+4. Why Pay $50-800?
+5. Download Free — Mac & Windows
+6. 4 Premium AI Models
+7. Audio Mode — 20+ Languages
+8. System Design Diagrams
+9. Interview Prep Tool — Free
+10. AI-Powered Study Tool
+
+**Descriptions:**
+1. CrackingInterview: AI-powered coding & system design prep. Free plan. Pro $15/mo.
+2. Prep for LeetCode, HackerRank, CodeSignal interviews. Audio for 20+ languages.
+3. Practice coding & system design with architecture diagrams. Download free.
+4. AI-powered prep for coding & system design interviews. Mac & Windows. Try free.
 
 #### Ad Group 2: Product Category Keywords
 
 People searching for the product category — they know what they want but haven't picked a tool yet.
 
-**Keywords:**
-- `ai coding interview tool`
-- `ai coding interview assistant`
-- `ai interview assistant`
-- `ai interview copilot`
-- `coding interview ai`
-- `coding interview helper`
-- `ai leetcode solver`
-- `leetcode ai assistant`
-- `system design interview tool`
-- `system design interview ai`
-- `real time interview ai`
-- `ai interview app`
-- `coding interview software`
-- `undetectable interview ai`
-- `invisible interview ai`
-- `ai for coding interviews`
-- `ai interview help`
+**Keywords (Phrase Match):**
+- `"ai coding interview tool"`
+- `"ai coding interview assistant"`
+- `"ai interview assistant"`
+- `"ai interview copilot"`
+- `"coding interview ai"`
+- `"coding interview helper"`
+- `"ai leetcode solver"`
+- `"leetcode ai assistant"`
+- `"system design interview tool"`
+- `"system design interview ai"`
+- `"real time interview ai"`
+- `"ai interview app"`
+- `"coding interview software"`
+- `"ai for coding interviews"`
+- `"ai interview help"`
 
-**Ad copy:**
-- Headline 1: "AI Coding Interview Assistant — Free"
-- Headline 2: "System Design Diagrams + Stealth"
-- Headline 3: "Mac & Windows — Try Free Today"
-- Description 1: "Solve coding problems, generate system design architecture diagrams, and get real-time verbal interview help. Invisible to screen share. Free to start — Pro just $15/mo."
-- Description 2: "Extract problems from LeetCode, HackerRank, any site. AI solves with code + explanation. Audio mode transcribes verbal interviews in 20+ languages. Download free."
+**Display path:** `/coding/ai`
+
+**Headlines:**
+1. AI Coding Interview Assistant
+2. Free Plan — Pro Just $15/mo
+3. System Design + Diagrams
+4. Mac & Windows — Try Free
+5. AI-Powered Study Tool
+6. Prep for Coding Interviews
+7. 4 Premium AI Models
+8. Audio Mode — 20+ Languages
+9. Interview Prep Tool — Free
+10. Download Free Today
+
+**Descriptions:**
+1. Solve coding problems & get system design diagrams. Free plan. Pro just $15/mo.
+2. Extract problems from LeetCode, HackerRank & more. AI solves with code. Free.
+3. Audio mode for verbal interviews in 20+ languages. Custom prompts & hotkeys.
+4. AI for coding, system design & verbal interviews. Mac & Windows. Try free.
 
 #### Ad Group 3: Competitor Alternative Keywords
 
 People actively looking for alternatives to a competitor they've already tried or rejected (price, quality, etc.). These are the **highest-conversion keywords**.
 
-**Keywords:**
-- `ultracode ai alternative`
-- `interview coder alternative`
-- `lockedin ai alternative`
-- `final round ai alternative`
-- `finalround ai alternative`
-- `leetcode wizard alternative`
-- `linkjob ai alternative`
-- `interview sidekick alternative`
-- `cheaper than interview coder`
-- `cheaper than lockedin ai`
-- `cheaper than ultracode`
-- `interview coder vs`
-- `lockedin ai vs`
-- `final round ai vs`
-- `best ai interview tool 2026`
-- `best coding interview ai 2026`
+**Keywords (Phrase Match):**
+- `"ultracode ai alternative"`
+- `"interview coder alternative"`
+- `"lockedin ai alternative"`
+- `"final round ai alternative"`
+- `"finalround ai alternative"`
+- `"leetcode wizard alternative"`
+- `"linkjob ai alternative"`
+- `"interview sidekick alternative"`
+- `"cheaper than interview coder"`
+- `"cheaper than lockedin ai"`
+- `"cheaper than ultracode"`
+- `"interview coder vs"`
+- `"lockedin ai vs"`
+- `"final round ai vs"`
+- `"best ai interview tool 2026"`
+- `"best coding interview ai 2026"`
 
-**Ad copy:**
-- Headline 1: "Best Interview AI Alternative — $15/mo"
-- Headline 2: "Why Pay $50-800? Start Free"
-- Headline 3: "Coding + System Design + Audio"
-- Description 1: "Looking for a better AI interview tool? CrackingInterview: system design with diagrams, audio for verbal interviews, stealth mode. Free tier included. Pro just $15/mo."
-- Description 2: "Switch to CrackingInterview. Same features, fraction of the price. Visual architecture diagrams no competitor offers. Custom prompts. 20+ languages. Mac & Windows."
+**Display path:** `/compare/ai`
+
+**Headlines:**
+1. Best Interview AI — $15/mo
+2. Why Pay $50-800? Start Free
+3. Coding + System Design + Audio
+4. Switch & Save — Free Plan
+5. System Design Diagrams Free
+6. 4 AI Models — Mac & Windows
+7. 20+ Languages Supported
+8. Compare & Save Today
+9. AI Interview Prep — Try Free
+10. Better Features, Lower Price
+
+**Descriptions:**
+1. Looking for a better AI interview tool? CrackingInterview: free plan. Pro $15/mo.
+2. Same features, fraction of the price. Visual architecture diagrams included.
+3. Switch to CrackingInterview. Custom prompts, 20+ languages. Mac & Windows.
+4. Compare plans & features. System design diagrams no competitor offers. Free.
 
 #### Ad Group 4: Problem/Pain Keywords
 
 People searching for help with a specific interview problem — they may not know AI interview tools exist yet.
 
-**Keywords:**
-- `coding interview help`
-- `leetcode interview help`
-- `system design interview help`
-- `how to pass coding interview`
-- `coding interview anxiety`
-- `leetcode too hard`
-- `hackerrank interview help`
-- `codesignal interview help`
-- `verbal interview help`
-- `coding interview tips`
-- `coding interview prep tool`
-- `technical interview help`
-- `software engineer interview help`
+**Keywords (Phrase Match):**
+- `"coding interview help"`
+- `"leetcode interview help"`
+- `"system design interview help"`
+- `"how to pass coding interview"`
+- `"hackerrank interview help"`
+- `"codesignal interview help"`
+- `"verbal interview help"`
+- `"coding interview tips"`
+- `"coding interview prep tool"`
+- `"technical interview help"`
+- `"software engineer interview help"`
 
-**Ad copy:**
-- Headline 1: "Struggling With Coding Interviews?"
-- Headline 2: "AI Solves Problems in Seconds"
-- Headline 3: "Free Download — Mac & Windows"
-- Description 1: "Stop grinding LeetCode alone. CrackingInterview extracts the problem and delivers the optimal solution with explanation. System design with architecture diagrams. Free to try."
-- Description 2: "Real-time AI for coding, system design, and verbal interviews. Invisible to screen share. Works with LeetCode, HackerRank, CodeSignal. Free tier — Pro $15/mo."
+**Display path:** `/interview/prep`
+
+**Headlines:**
+1. Interview Prep Made Easy
+2. AI-Powered Study Tool
+3. Free Download — Mac & Windows
+4. Practice Coding Interviews
+5. System Design Practice Tool
+6. Prep for Technical Interviews
+7. AI Interview Practice — Free
+8. Study in 20+ Languages
+9. Step-by-Step Explanations
+10. Try Free — Pro Just $15/mo
+
+**Descriptions:**
+1. Practice coding interviews with AI-powered explanations & solutions. Free to start.
+2. AI study tool for coding, system design & verbal interview prep. Try free today.
+3. Prep for LeetCode, HackerRank, CodeSignal interviews. Diagrams included. Free.
+4. Step-by-step explanations & code solutions. Mac & Windows. Download free.
 
 #### Negative Keywords
 
@@ -243,22 +293,17 @@ Add these to prevent wasting budget on irrelevant clicks:
 #### Ad Extensions
 
 - **Sitelink extensions:**
-  - "Download Free" -> crackinginterview.org
-  - "See Pricing" -> crackinginterview.org (scroll to Plans section)
-  - "Compare to Competitors" -> crackinginterview.org/compare.html
-  - "Setup Guide" -> crackinginterview.org/guide.html
-- **Callout extensions:** "Free Tier Available" | "System Design Diagrams" | "20+ Languages" | "Mac & Windows" | "Invisible to Screen Share"
-- **Structured snippets:** Types: "Coding Problems, System Design, Verbal Interviews, Code Review"
-- **Price extension:** "Pro Plan — $15/mo"
+  - "Download Free" -> crackinginterview.org/ads.html (Mac & Windows available · Start practicing in seconds)
+  - "System Design Prep" -> crackinginterview.org/ads.html (Architecture diagrams included · ER models & sequence flows)
+  - "Compare Plans" -> crackinginterview.org/ads.html#plans (Free plan with 3 AI calls · Pro $15/mo — 150 AI calls)
+  - "User Guide" -> crackinginterview.org/guide.html (Step-by-step setup guide · Get started in minutes)
 
 #### Conversion Tracking Setup
 
-Before launching, set up conversion tracking to measure ROI:
-1. In Google Ads, go to Tools > Conversions > New conversion action
-2. Track "Website" conversions
-3. Add the Google Ads tag to crackinginterview.org
-4. Track two events: (a) Download button click, (b) Page visit to any download URL
-5. This tells you which keywords and ad groups actually drive downloads, not just clicks
+Conversion tracking is live:
+1. **Google Tag (gtag.js)** installed on all pages: `AW-18084639735`
+2. **Conversion action:** "App Download" (Sign-up category), tracking page load on `crackinginterview.org/ads.html`
+3. Tag verified and active by Google
 
 #### Budget Allocation Strategy
 

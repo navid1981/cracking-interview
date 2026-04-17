@@ -4,17 +4,17 @@ Scripts ready to paste into ElevenLabs for AI voiceover generation. Each section
 
 ---
 
-## Video 1: Homepage Introduction (~5 minutes)
+## Video 1: Homepage Introduction (~7 minutes)
 
-### Section 1: Hook + Overview (0:00 – 0:30)
+### Section 1: Hook + Overview (0:00 – 0:43)
 
 **[SCREEN]** Show a split view: on the left, a coding interview screen with a hard problem. On the right, the CrackingInterview app with a solution appearing.
 
-> Ever frozen during a coding interview, staring at a problem you know you could solve with just a little more time? CrackingInterview is your invisible AI-powered interview coach. It sits right on your screen, extracts problems from your browser, solves them instantly, and even listens to your verbal interviews in real time. It works on Mac and Windows, and it's designed to stay completely out of the way while giving you exactly the help you need.
+> Ever frozen during a coding interview, staring at a problem you know you could solve with just a little more time? CrackingInterview is your invisible AI-powered interview coach. It sits right on your screen, extracts problems from your browser, solves them instantly, and even listens to your verbal interviews in real time. It works on Mac and Windows, and it's designed to stay completely out of the way while giving you exactly the help you need. Whether it's algorithms, system design, or behavioral questions — this one tool has you covered from start to finish.
 
 ---
 
-### Section 2: Audio / Verbal Interview Mode (0:30 – 1:50)
+### Section 2: Audio / Verbal Interview Mode (0:43 – 2:25)
 
 **[SCREEN]** Show a Zoom meeting window on the left side of the screen with a fake interviewer (AI-generated avatar or a profile picture with camera off). The CrackingInterview app sits on the right side, partially overlapping. In the app, switch to the Audio input source. Click on the language selector — show the full dropdown list of supported languages (scroll through: English, Spanish, French, German, Persian, Chinese, Japanese, Portuguese, and more). Select English. Click the Record button. The "interviewer" on Zoom speaks (use Google Translate text-to-speech playing as system audio): "Can you explain how you would implement a rate limiter?" — show live transcription appearing in real time in the CrackingInterview app as the Zoom audio plays. The silence detection countdown triggers, and the AI response streams in with a detailed explanation and code. The interviewer asks a follow-up through Zoom: "How would you handle distributed rate limiting across multiple servers?" — transcription flows in again, and the AI response builds on the previous answer with full context (demonstrating agent memory). Then the interviewer asks a behavioral question: "Tell me about a time you optimized a system for scale." The AI responds using context from the uploaded resume, referencing the candidate's actual past experience and projects — all while the Zoom call continues naturally in the background.
 
@@ -22,7 +22,7 @@ Scripts ready to paste into ElevenLabs for AI voiceover generation. Each section
 
 ---
 
-### Section 3: Text Extraction + AI Solving (1:50 – 2:30)
+### Section 3: Text Extraction + AI Solving (2:25 – 3:15)
 
 **[SCREEN]** In the CrackingInterview app, click the "Open Chrome" button — Chrome launches automatically. In Chrome, manually navigate to a LeetCode problem (e.g., Two Sum). Switch back to the CrackingInterview app and click the refresh icon next to the input source dropdown — the LeetCode tab now appears in the list. Open Prompt Settings, show the "Algorithm Optimal" prompt selected, and set the language to Python. Back in the main app window, press the Solve hotkey. Show the AI response streaming in with a clean, formatted solution. Scroll down through the full response.
 
@@ -30,7 +30,7 @@ Scripts ready to paste into ElevenLabs for AI voiceover generation. Each section
 
 ---
 
-### Section 4: System Design Interviews (2:30 – 3:20)
+### Section 4: System Design Interviews (3:15 – 4:05)
 
 **[SCREEN]** Switch the prompt to "System Design". Show a Miro board open in the browser with a system design question like "Design a URL Shortener" written on it. Back in the CrackingInterview app, switch the input source to Screenshot mode. Press the Screenshot hotkey — show the screen capture overlay appear, drag to select the Miro board area containing the question. The captured image is sent to the AI. Show the AI response with a Mermaid architecture diagram rendering beautifully, followed by structured sections.
 
@@ -38,7 +38,7 @@ Scripts ready to paste into ElevenLabs for AI voiceover generation. Each section
 
 ---
 
-### Section 5: Customizable Prompts & Settings (3:20 – 3:55)
+### Section 5: Customizable Prompts & Settings (4:05 – 4:56)
 
 **[SCREEN]** Open Settings, go to the Prompts tab. Show the list of built-in prompts. Click to edit the "Verbal Interview" prompt — show the system prompt and user prompt fields with a `{resume}` placeholder already visible in the prompt body. Then go to the Resume tab (or resume upload area), drag in a PDF resume — show it being uploaded and parsed. Switch back to the Prompts tab to show the placeholder is now populated with the resume content. Then show the AI Models tab with model selection.
 
@@ -46,7 +46,7 @@ Scripts ready to paste into ElevenLabs for AI voiceover generation. Each section
 
 ---
 
-### Section 6: Stealth Features (3:55 – 4:50)
+### Section 6: Stealth Features (4:56 – 6:56)
 
 **[SCREEN]** This entire section uses a persistent side-by-side layout. **Left side (~60%)**: your actual screen showing HackerRank's coding environment in Chrome with CrackingInterview floating on top. **Right side (~40%)**: the Zoom screen-share preview window, which only shows HackerRank — CrackingInterview is completely invisible. Both views are visible simultaneously throughout the entire section so the viewer can constantly compare what you see vs. what the interviewer sees.
 
@@ -56,7 +56,7 @@ The section opens with this split already in place — Zoom is running, screen s
 
 ---
 
-### Section 7: Call to Action (4:50 – 5:05)
+### Section 7: Call to Action (6:56 – 7:10)
 
 **[SCREEN]** Show the crackinginterview.org website with the download button and pricing section.
 

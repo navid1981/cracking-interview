@@ -179,3 +179,6 @@ Interviewer is talking — Deepgram sends transcript events, the app keeps reset
 Interviewer stops talking — no more transcript events arrive
 After 3 seconds of silence — the app shows a countdown: "Silence detected — sending in 2s..."
 After 5 seconds total silence (3s threshold + 2s countdown) — the app automatically stops recording and sends the transcript to the AI
+
+----------
+/Applications/CrackingInterview.app/Contents/MacOS/cracking-interview
