@@ -120,6 +120,89 @@ The section opens with this split already in place — Zoom is running, screen s
 ---
 ---
 
+## Video 3: Chrome Connection Guide — YouTube Short (43 seconds, 1080×1920, 60fps)
+
+A short vertical tutorial showing the two ways to connect CrackingInterview to Chrome. Designed for YouTube Shorts.
+
+**Source video:** `/Users/nsalehvaziri/Desktop/connect to chrome with two ways.mp4`
+**Narration script below is timestamp-aligned to that exact recording.**
+
+### Descript-ready narration script
+
+Paste each section into Descript and align to the timestamp shown.
+
+---
+
+**[0:00 – 0:03]** — Hook
+> Two ways to connect CrackingInterview to Chrome. Pick yours.
+
+**[0:03 – 0:08]** — Option 1: Click
+> Option one — just click "Open Chrome" in the app.
+
+**[0:08 – 0:13]** — Option 1: Connected
+> The app launches its own Chrome and connects automatically — no setup.
+
+**[0:13 – 0:17]** — Option 1: Pick a tab
+> Your tabs show up in the input source dropdown, ready to solve.
+
+**[0:17 – 0:24]** — Option 2 intro
+> Option two — use your existing Chrome with all your real tabs and logins. Open the guide and find the Chrome 144 plus section.
+
+**[0:24 – 0:29]** — Copy the URL
+> Copy this URL.
+
+**[0:29 – 0:35]** — Paste and toggle
+> Paste it in Chrome and check "Allow remote debugging".
+
+**[0:35 – 0:40]** — Connect
+> Back in CrackingInterview, click "Open Chrome" — it detects your running Chrome and connects.
+
+**[0:40 – 0:43]** — Outro
+> Your real tabs are now ready. Two ways in. Same powerful AI.
+
+---
+
+### Quick-paste version for Descript (no markup)
+
+```
+Two ways to connect CrackingInterview to Chrome. Pick yours.
+
+Option one — just click "Open Chrome" in the app.
+
+The app launches its own Chrome and connects automatically — no setup.
+
+Your tabs show up in the input source dropdown, ready to solve.
+
+Option two — use your existing Chrome with all your real tabs and logins. Open the guide and find the Chrome 144 plus section.
+
+Copy this URL.
+
+Paste it in Chrome and check "Allow remote debugging".
+
+Back in CrackingInterview, click "Open Chrome" — it detects your running Chrome and connects.
+
+Your real tabs are now ready. Two ways in. Same powerful AI.
+```
+
+### Frame-by-frame breakdown (for reference)
+
+| Time | On screen | Narration cue |
+|---|---|---|
+| 0:00 | App with "Open Chrome" button | "Two ways to connect…" |
+| 0:04 | "Check Chrome for dialog…" loading | "Option one — just click…" |
+| 0:08 | 🟢 Chrome Ready + LeetCode opens | "The app launches its own Chrome…" |
+| 0:12 | LeetCode selected in dropdown | "Your tabs show up…" |
+| 0:17 | Guide page table of contents | "Option two — use your existing Chrome…" |
+| 0:24 | URL highlighted in blue | "Copy this URL." |
+| 0:28 | chrome://inspect page, unchecked | "Paste it in Chrome…" |
+| 0:32 | Checkbox CHECKED, app visible | "…and check Allow remote debugging." |
+| 0:36 | Server running | "Back in CrackingInterview…" |
+| 0:40 | Real Chrome tabs in dropdown (WS mode) | "…it detects your running Chrome…" |
+| 0:42 | User Guide tab selected | "Two ways in. Same powerful AI." |
+
+---
+---
+
 ## Full Production Guide
 
 This guide walks you through the entire process from raw screen recordings to finished, published videos.
@@ -655,3 +738,116 @@ Create in **Canva** at **1280x720** (YouTube standard). The thumbnail needs to c
 - [ ] Upload Video 1 to YouTube → embed on crackinginterview.org
 - [ ] Upload Video 2 to YouTube → set up Google Ads campaign
 - [ ] Create thumbnails in Canva
+
+---
+---
+
+## Video 4: Online Exam Mode — YouTube Short (55 seconds, 1080×1920, 60fps)
+
+A short vertical tutorial showing how CrackingInterview helps candidates with protected online exams like Pearson VUE. Demonstrates creating a custom "Online exam" prompt and using it to solve multiple-choice questions in a live proctored exam environment.
+
+**Source video:** `/Users/nsalehvaziri/cracking-interview/videos/online exam.mp4`
+**Narration script below is timestamp-aligned to that exact recording.**
+
+### Descript-ready narration script
+
+Paste each section into Descript and align to the timestamp shown.
+
+---
+
+**[0:00 – 0:04]** — Hook
+> Stuck on a proctored online exam? CrackingInterview has you covered.
+
+**[0:04 – 0:09]** — Open Settings + Show Prompts
+> Open Settings and go to the Prompts tab. You'll see all the built-in prompts — but for online exams, we need something custom.
+
+**[0:09 – 0:14]** — Create Custom Prompt
+> Click "New Prompt" and name it "Online exam."
+
+**[0:14 – 0:24]** — Configure the Prompt
+> In the system prompt, type: "You are an expert technical assistant. I have multiple choice exam. Give me final answer." That's it — short and direct. Save it.
+
+**[0:24 – 0:29]** — Prompt Saved + Active
+> The new prompt appears in your list and is set to active. Close settings — you're ready.
+
+**[0:29 – 0:34]** — Launch the Exam
+> Now launch the Pearson VUE demo test. The exam opens in its own protected browser window.
+
+**[0:34 – 0:38]** — Show Exam Questions
+> Here's a multiple-choice question — "What colour is the sky on a clear day?" Easy. But the next one gets harder.
+
+**[0:38 – 0:43]** — Harder Question + Select Input Source
+> "Which elements are metals? Select three." Now open CrackingInterview, click the input source dropdown, and select the Pearson VUE test content tab.
+
+**[0:43 – 0:49]** — Solve + AI Response
+> Hit Solve. The app captures the exam content, sends it to Gemini, and the answer comes back instantly — Gold, Magnesium, and Potassium. A, C, D.
+
+**[0:49 – 0:55]** — Select Answers + Outro
+> Check the answers and move on. Custom prompts, protected exams, instant solutions. CrackingInterview works everywhere.
+
+---
+
+### Quick-paste version for Descript (no markup)
+
+```
+Stuck on a proctored online exam? CrackingInterview has you covered.
+
+Open Settings and go to the Prompts tab. You'll see all the built-in prompts — but for online exams, we need something custom.
+
+Click "New Prompt" and name it "Online exam."
+
+In the system prompt, type: "You are an expert technical assistant. I have multiple choice exam. Give me final answer." That's it — short and direct. Save it.
+
+The new prompt appears in your list and is set to active. Close settings — you're ready.
+
+Now launch the Pearson VUE demo test. The exam opens in its own protected browser window.
+
+Here's a multiple-choice question — "What colour is the sky on a clear day?" Easy. But the next one gets harder.
+
+"Which elements are metals? Select three." Now open CrackingInterview, click the input source dropdown, and select the Pearson VUE test content tab.
+
+Hit Solve. The app captures the exam content, sends it to Gemini, and the answer comes back instantly — Gold, Magnesium, and Potassium. A, C, D.
+
+Check the answers and move on. Custom prompts, protected exams, instant solutions. CrackingInterview works everywhere.
+```
+
+### Frame-by-frame breakdown (for reference)
+
+| Time | On screen | Narration cue |
+|---|---|---|
+| 0:00 | CrackingInterview app over Pearson VUE demo test page, Display 1 selected as input | "Stuck on a proctored online exam…" |
+| 0:02 | User clicks Settings gear icon | |
+| 0:04 | Settings open → Prompts tab visible with built-in prompts list (Algorithm-Optimal active, Java selected) | "Open Settings and go to the Prompts tab…" |
+| 0:07 | User clicks "New Prompt" button | "Click New Prompt…" |
+| 0:09 | "New Custom Prompt" dialog appears, user types "Online exam" | "…and name it Online exam." |
+| 0:10 | Prompt editor opens: System Prompt + User Prompt fields visible | "In the system prompt, type…" |
+| 0:14 | User types system prompt: "You are an expert technical assistant. I have multiple choice exam. Give me final answer" | "…short and direct. Save it." |
+| 0:24 | Back to prompts list — "Online exam" now appears at bottom with Active badge | "The new prompt appears in your list…" |
+| 0:28 | Settings close, Pearson VUE demo test page visible with "Launch demo test" button | "Now launch the Pearson VUE demo test…" |
+| 0:31 | Pearson VUE test loading screen | |
+| 0:33 | Welcome screen: "Demo - Pearson VUE Test Driver" | "The exam opens in its own protected browser…" |
+| 0:37 | Question 1: "What colour is the sky on a clear day?" (A-D, single select) | "Here's a multiple-choice question…" |
+| 0:40 | Question 2: Periodic Table metals question (A-E, multi select) | "Which elements are metals? Select three." |
+| 0:43 | CrackingInterview app overlay — input source dropdown open showing Pearson VUE test content tab | "…select the Pearson VUE test content tab." |
+| 0:45 | "Pearson VUE test content" selected, "Selected: Pearson VUE test content" confirmed | |
+| 0:46 | User clicks Solve — pipeline shows Screenshot → Asking AI | "Hit Solve…" |
+| 0:49 | Pipeline shows Gemini 3 Flash model + Online exam prompt being used | "…sends it to Gemini…" |
+| 0:52 | AI response: Explanation with Final Answer: A, C, D (Gold, Magnesium, Potassium) | "…Gold, Magnesium, and Potassium. A, C, D." |
+| 0:55 | User checks A (Gold), C (Magnesium), D (Potassium) on the exam | "Check the answers and move on." |
+
+---
+
+### ElevenLabs audio generation
+
+| ElevenLabs File to Save | Script Section to Paste |
+|--------------------------|------------------------|
+| `V4-01-hook.mp3` | "Stuck on a proctored online exam? CrackingInterview has you covered." |
+| `V4-02-settings.mp3` | "Open Settings and go to the Prompts tab. You'll see all the built-in prompts — but for online exams, we need something custom." |
+| `V4-03-new-prompt.mp3` | "Click New Prompt and name it Online exam." |
+| `V4-04-configure.mp3` | "In the system prompt, type: You are an expert technical assistant. I have multiple choice exam. Give me final answer. That's it — short and direct. Save it." |
+| `V4-05-saved.mp3` | "The new prompt appears in your list and is set to active. Close settings — you're ready." |
+| `V4-06-launch.mp3` | "Now launch the Pearson VUE demo test. The exam opens in its own protected browser window." |
+| `V4-07-questions.mp3` | "Here's a multiple-choice question — What colour is the sky on a clear day? Easy. But the next one gets harder." |
+| `V4-08-select.mp3` | "Which elements are metals? Select three. Now open CrackingInterview, click the input source dropdown, and select the Pearson VUE test content tab." |
+| `V4-09-solve.mp3` | "Hit Solve. The app captures the exam content, sends it to Gemini, and the answer comes back instantly — Gold, Magnesium, and Potassium. A, C, D." |
+| `V4-10-outro.mp3` | "Check the answers and move on. Custom prompts, protected exams, instant solutions. CrackingInterview works everywhere." |

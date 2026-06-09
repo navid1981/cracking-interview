@@ -46,33 +46,130 @@ The **Zoom stealth demo** — a split-screen recording showing CrackingInterview
 
 ---
 
-### 1. Reddit (FREE)
+### 1. Reddit (FREE) — REVISED April 30, 2026
 
-**Subreddits to target:**
+> **Reality check (revised April 30, 2026):** The original strategy positioned the big SWE subs as the #1 free channel. After two same-day takedowns documented below, this has been downgraded. **Top-level product posts in the big SWE subs do not work** for a paid LeetCode alternative. Reddit traffic now comes from (a) comments in megathreads of the big SWE subs and (b) top-level posts in indie/SaaS/Mac-app subs that explicitly welcome creator content.
 
-| Subreddit | Members | Why |
-|-----------|---------|-----|
-| r/cscareerquestions | 1.2M+ | People asking "how do I pass coding interviews" |
-| r/leetcode | 300K+ | Exact target audience |
-| r/csMajors | 400K+ | Students prepping for internships/new grad |
-| r/ExperiencedDevs | 100K+ | Senior engineers who need system design help |
-| r/interviews | 50K+ | General interview advice seekers |
-| r/jobsearch | 50K+ | Active job seekers |
+#### Takedown log — what got removed and why
 
-**Content strategy (do NOT post ads — post genuinely helpful content):**
+| Date | Subreddit | Post | Removal reason | Lesson |
+|---|---|---|---|---|
+| Apr 30, 2026 | r/csMajors | "If you're prepping for new-grad / internship loops..." | Auto-removed by AI mod bot for **Rule 15 (no self-promo / advertising)** | Even disclosed, value-first creator posts get auto-nuked. Modmail appeals rarely succeed. |
+| Apr 30, 2026 | r/leetcode | "Built a free AI tool that solves LeetCode problems..." | Removed by mod team for **Rule 5 (no corporate shilling / self-promoting)** with explicit warning that "self promotion will result in a permanent ban" | Rule 5 explicitly bans paid/subscription LeetCode alternatives. **Do not post to r/leetcode again from this account, ever.** |
 
-- **Post 1**: "I built a tool that generates system design diagrams during interviews — here's how it works" with a screen recording GIF
-- **Post 2**: The Zoom stealth split-screen demo — post to r/leetcode as a standalone clip
-- **Post 3**: Reply to weekly threads like "Any tools to help with coding interviews?"
-- **Post 4**: "Free AI coding interview tool — looking for beta testers" to drive initial sign-ups
+#### Subreddits — DO NOT post top-level (high removal/ban risk)
 
-**Rules:**
-- Be transparent that you're the creator
-- Provide value first, link to product second
-- Don't spam — one post per subreddit per week maximum
-- Engage genuinely in comments
+| Subreddit | Members | Why blocked |
+|---|---|---|
+| r/leetcode | 300K+ | Rule 5 explicitly bans paid LC alternatives. Permanent-ban risk. |
+| r/csMajors | 400K+ | Rule 15. AI mod bot auto-removes. |
+| r/cscareerquestions | 1.2M+ | Same anti-promo culture. Untested but very high removal risk. |
+| r/ExperiencedDevs | 100K+ | Strict no-promo rule, extremely active mod team. |
+| r/interviews, r/jobsearch | 50K+ each | Same self-promo rules, lower upside even if it survives. |
 
-**Expected results:** One well-received post on r/cscareerquestions can drive 5,000-10,000 website visits in a single day.
+#### Subreddits — SAFE for top-level disclosed creator posts
+
+These subs explicitly welcome (or tolerate) "I built this" posts when properly disclosed:
+
+| Subreddit | Members | Angle to lead with |
+|---|---|---|
+| r/SideProject | 250K+ | Indie founder journey, "built this in X months" |
+| r/SaaS | 250K+ | Pricing strategy, undercutting incumbents |
+| r/IndieDev | 70K+ | Tech stack (Tauri/Rust), how you built it |
+| r/microsaas | 50K+ | Solo-founder narrative, MRR/users milestones |
+| r/EntrepreneurRideAlong | 300K+ | Founder journey, ask for feedback |
+| r/startups | 1.6M+ | Use the weekly "Share Your Startup" thread only |
+| r/macapps | 200K+ | Lead with native ~17MB Tauri app, free Mac DMG |
+| r/ChatGPTPro / r/ClaudeAI / r/Bard | 200K-700K | "Tools I built using X model" angle |
+
+**Posting rules for safe subs:**
+- Always disclose you're the creator in the first line
+- One post per sub per 2-3 weeks max
+- Don't include UTM params in the URL
+- Reply to every comment in the first 2 hours
+
+#### Strategy for the big SWE subs — comments only, no top-level posts
+
+The only way to get any value from r/cscareerquestions / r/csMajors is via comments in their weekly megathreads:
+
+| Sub | Megathread | Frequency |
+|---|---|---|
+| r/cscareerquestions | "Daily Chat Thread" + "Big N Discussion Thread" | Daily / weekly |
+| r/csMajors | "Weekly Question Thread" | Weekly |
+| r/learnprogramming | "What are you working on?" | Weekly |
+
+Megathread comments are almost never removed for self-promo. Drop a single, genuinely-helpful comment when relevant — disclose you're the creator, mention the product **by name only (no link)**, and let curious users find it via search. Goal: 3-5 megathread comments per week, total time ~30 min.
+
+**Expected results (revised):**
+- Big SWE subs (top-level): **0 traffic** — posts get removed
+- Big SWE subs (megathread comments): 20-100 site visits per high-quality comment
+- Safe subs (top-level): 50-500 visits per post, no ban risk
+
+**Cost:** $0
+
+---
+
+### 1b. Hacker News — Show HN (FREE) — Added April 30, 2026
+
+**Why this was added:** Hacker News fills the role the original strategy gave to Reddit — high-quality SWE-heavy traffic, no anti-promo rules, single-shot but high-impact. Show HN is the canonical place for indie SWE tools to get a launch boost. A successful Show HN post can drive 5,000–30,000 visits in 24 hours and produce dozens of inbound DMs from senior engineers.
+
+**Why it works for CrackingInterview specifically:**
+- HN's audience is overwhelmingly SWE — perfect target
+- They love unusual tech stacks (Tauri/Rust beats Electron, ~17MB native app is a talking point)
+- They love price-disruption stories (you're 2-7x cheaper than every competitor)
+- They love technical differentiators (Mermaid diagrams, browser tab text extraction, custom prompts)
+- Show HN posts are explicitly *expected* to be from creators
+
+#### Posting rules
+
+- **Title format:** `Show HN: CrackingInterview – AI interview prep with system design diagrams ($15/mo)`
+- Must start with `Show HN:` exactly
+- Submit URL: your homepage (`https://crackinginterview.org`)
+- First comment from your account: a brief background of why you built it, your stack, and pricing (HN expects this)
+- **Best time to post:** Tuesday–Thursday, 8–10am ET (US morning hits the front-page peak)
+- Do NOT ask people to upvote — HN bans this aggressively
+- Reply to every comment within the first 4 hours — engagement velocity is the entire algorithm
+
+#### Show HN first comment template
+
+```
+Hi HN — creator here. Quick context:
+
+I built CrackingInterview after paying for Interview Coder ($299/yr) and
+LockedIn AI ($55/mo) during my own job search and being frustrated by
+two things: nobody draws system design diagrams, and the prices are
+wild for a tool you use for 4-8 weeks.
+
+Tech stack: Tauri + Rust on the desktop side, ~17MB native binary
+(vs. 200MB+ for the Electron-based competitors). Routes between 4
+LLMs depending on the question type. Pulls problem text directly
+from your browser tab via a Chrome integration instead of OCR'ing
+screenshots — much more reliable for long LeetCode descriptions.
+
+System design rounds render Mermaid diagrams (load balancers, ER
+models, sequence flows) instead of returning a wall of prose.
+
+Free tier: 3 AI calls. Pro: $15/mo for 150 calls. No card to try.
+
+Happy to answer anything about the architecture, the model router,
+or how I handle browser tab extraction without breaking on SPA
+re-renders.
+```
+
+#### Submission URL
+
+`https://news.ycombinator.com/submit`
+
+#### Expected results
+
+| Outcome | Likelihood | Traffic |
+|---|---|---|
+| Lands on /newest only (most posts) | 60% | 50-200 visits |
+| Hits front page bottom (10-30 ranking) | 25% | 1,000-5,000 visits |
+| Hits front page top 10 | 12% | 5,000-20,000 visits |
+| Hits #1 | 3% | 20,000-50,000 visits + lasting backlinks |
+
+Even the worst-case outcome (stays on /newest) outperforms a removed Reddit post.
 
 **Cost:** $0
 
@@ -112,11 +209,13 @@ One campaign with 4 ad groups, each targeting a different keyword intent type:
 - **Daily budget:** $10/day
 - **Geographic targeting:** United States
 - **Language targeting:** English
-- **Landing page:** https://crackinginterview.org/ads.html (dedicated policy-compliant page — no stealth/invisible language)
+- **Landing page:** https://crackinginterview.org/ads.html (dedicated policy-compliant page — no stealth/invisible language, no flagged words like "real-time" or "every")
+- **Landing page H1:** "Pass Your Job Interview with AI" (revised April 27, 2026 to remove flagged "Real-time AI for Every Interview" wording)
 - **Ad schedule:** All day (interview prep happens at all hours)
 - **Device targeting:** All devices (desktop + mobile)
 - **Free desktop software certificate:** Approved (April 14, 2026)
 - **Google Tag:** AW-18084639735 (installed on all website pages including ads.html)
+- **Google Tag Manager:** GTM-5GB6X6TX (installed on index.html and ads.html, used for download click conversion tracking)
 
 #### Ad Group 1: Competitor Brand Names
 
@@ -300,10 +399,68 @@ Add these to prevent wasting budget on irrelevant clicks:
 
 #### Conversion Tracking Setup
 
-Conversion tracking is live:
+Conversion tracking is live (revised April 20, 2026):
 1. **Google Tag (gtag.js)** installed on all pages: `AW-18084639735`
-2. **Conversion action:** "App Download" (Sign-up category), tracking page load on `crackinginterview.org/ads.html`
-3. Tag verified and active by Google
+2. **Google Tag Manager** container installed on `index.html` and `ads.html`: `GTM-5GB6X6TX`
+3. **Conversion action:** "TechSol - Download Click 6821" — Outbound clicks (Primary action), created 4/20/2026
+4. **What it tracks:** Clicks on the Mac DMG and Windows EXE download buttons on `crackinginterview.org/ads`, fired via a GTM click trigger
+5. **Attribution:** Data-driven, 90-day click-through window, 1-day view-through window
+6. **Cross-page attribution:** Because Google Ads attributes via GCLID, downloads from `index.html` only count as Google Ads conversions if the user originally arrived via an ad click (within the 90-day window). Organic traffic to `index.html` will NOT inflate Google Ads conversion numbers.
+7. Tag verified and active by Google (status: "Recording conversions")
+
+#### Policy Compliance — "Enabling Dishonest Behavior" Lessons Learned
+
+On **April 14, 2026**, Google Ads issued a warning and disapproved 3 of 4 ad groups (Competitor Brand Names, Competitor Alternatives, Product Category) for violating the **"Enabling dishonest behavior"** policy. Only the Problem/Pain Keywords ad group remained eligible (Limited).
+
+**Confirmed flagged words/phrases (per Google Ads support team):**
+- `real-time` (implies live cheating during interviews)
+- `every` / `every interview` (overly broad claim implying universal cheat tool)
+- `stealth` / `invisible` / `undetectable` (implies hiding from interviewer)
+- Any language implying the tool is used DURING a live interview rather than for prep/study
+
+**Compliant rewrites applied April 27, 2026 to `index.html` and `ads.html`:**
+| Original (flagged) | Replacement (compliant) |
+|---|---|
+| "Real-time AI for Every Interview" (H1) | "Pass Your Job Interview with AI" |
+| "Real-time AI solutions for..." (subtitle, meta, OG, Twitter) | "AI-powered solutions for..." |
+| "Built for Every Interview Type" | "Built for Any Job Interview" |
+| "Real-time transcription via Deepgram" | "Transcription powered by Deepgram" |
+| "Same real-time AI. Same stealth mode." | "Same powerful AI. Same features." |
+
+**Rules going forward (apply to all ad copy, headlines, descriptions, sitelinks, callouts, AND landing pages):**
+- Position the product as a **prep/study/practice tool**, never as a live interview aid
+- Banned words: `real-time`, `live`, `every interview`, `stealth`, `invisible`, `undetectable`, `screen-share proof`, `hidden from Zoom`, `won't be detected`
+- Safe words: `prep`, `practice`, `study`, `learn`, `master`, `pass`, `ace`, `AI-powered`, `AI assistant`
+- All four ad groups must be resubmitted for review after deploying the page fixes
+
+#### Actual Results — First 15 Days (Apr 12 – Apr 26, 2026)
+
+| Metric | Value | Verdict |
+|---|---|---|
+| Spend | $152.34 | On budget (~$10/day) |
+| Impressions | 2,963 | Low — 3 of 4 ad groups blocked by policy |
+| Clicks | 177 | OK |
+| CTR | **5.97%** | ✅ Excellent (industry avg ~3-4%) |
+| Avg. CPC | $0.86 | ✅ Healthy |
+| Conversions (download clicks) | 2.00 | 🚨 Very low |
+| Conversion rate | 1.13% | 🚨 Below target |
+| Cost / Conversion | **$76.17** | 🚨 5x target CPA ($10-15) |
+| Optimization score | 68.7% | ⚠️ Mediocre |
+
+**Per-Ad-Group Performance:**
+
+| Ad Group | Status | Clicks | Cost | Conv. | CPA | Notes |
+|---|---|---|---|---|---|---|
+| Problem/Pain Keywords | ✅ Eligible (Limited) | 156 (88%) | $107.26 | 2 | $53.63 | Only group serving + converting |
+| Product Category | ❌ Disapproved | 12 | $22.20 | 0 | — | Blocked by policy |
+| Competitor Brand Names | ❌ Disapproved | 2 | $2.81 | 0 | — | Blocked by policy |
+| Competitor Alternatives | ❌ Disapproved (Poor strength) | 0 | $0 | 0 | — | Also needs more headlines/descriptions |
+
+**Key takeaways:**
+- CTR and CPC are healthy — ad copy is compelling, bidding is efficient
+- Conversion volume is artificially low because 3 of 4 ad groups (including the highest-intent ones) are blocked by policy
+- Real channel validation is **not yet possible** until policy is fixed and all ad groups are running
+- **Do NOT scale to YouTube Ads in Month 3 (per the 90-day plan) until search ads have a validated CPA under $15** across at least Competitor Alternatives + Brand Names ad groups
 
 #### Budget Allocation Strategy
 
