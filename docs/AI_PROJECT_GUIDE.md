@@ -534,9 +534,9 @@ The app includes a full authentication and subscription system using Supabase an
 
 **Pro Tier:**
 - GPT-5.2 Codex (OpenAI)
-- Claude Sonnet 4.5 (Anthropic)
+- Claude Sonnet 5 (Anthropic)
 - Gemini 3 Flash (Google)
-- Grok 4.1 Fast (xAI)
+- Grok 4.3 (xAI)
 
 **Audio Input:**
 - Always uses Gemini 3 Flash (only model supporting audio input)
@@ -547,9 +547,9 @@ The app includes a full authentication and subscription system using Supabase an
 **OpenRouter Model Mapping:**
 - Frontend model IDs → OpenRouter API model IDs:
   - `gpt-5.2-codex` → `openai/gpt-5.2-codex`
-  - `claude-sonnet-4.5` → `anthropic/claude-sonnet-4.5`
+  - `claude-sonnet-5` → `anthropic/claude-sonnet-5`
   - `gemini-3-flash` → `google/gemini-3-flash-preview`
-  - `grok-4.1-fast` → `x-ai/grok-4.1-fast`
+  - `grok-4.3` → `x-ai/grok-4.3`
   - `gemini-2.5-flash` → `google/gemini-2.5-flash` (free tier)
 
 **Model Display Names** (used in stepper info):
@@ -600,9 +600,9 @@ LLM model configurations are defined server-side in a single shared file and fet
 ```typescript
 PRO_MODELS: ModelInfo[] = [
   { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', provider: 'OpenAI' },
-  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic' },
+  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', provider: 'Anthropic' },
   { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google' },
-  { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
+  { id: 'grok-4.3', name: 'Grok 4.3', provider: 'xAI' },
 ];
 FREE_MODEL: { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google' }
 DEFAULT_PRO_MODEL: 'gpt-5.2-codex'
@@ -1087,7 +1087,7 @@ Pro users have a **10-hour/month** audio recording limit and a **90-minute per-s
 Audio input **always** uses `gemini-3-flash` regardless of user's model selection:
 - This is because only certain models support audio input
 - `gemini-3-flash` → OpenRouter model ID: `google/gemini-3-flash-preview`
-- Other Pro models (GPT-5.2, Claude 4.5, Grok 4.1) don't support audio input
+- Other Pro models (GPT-5.2, Claude Sonnet 5, Grok 4.3) don't support audio input
 
 #### Audio Prompt Auto-Selection
 
