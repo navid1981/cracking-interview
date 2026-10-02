@@ -9,13 +9,14 @@ mod transcription;
 mod oauth_server;
 mod google_oauth;
 mod documents;
+mod stealth_hotkey;
 
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::path::PathBuf;
 
-static STEALTH_ENABLED: AtomicBool = AtomicBool::new(false);
+pub(crate) static STEALTH_ENABLED: AtomicBool = AtomicBool::new(false);
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -68,18 +69,18 @@ const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Alt+3";
 const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Ctrl+3";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct HotkeysConfig {
-    text: String,
-    screenshot: String,
-    audio_toggle: String,
-    scroll_up: String,
-    scroll_down: String,
-    move_up: String,
-    move_down: String,
-    move_left: String,
-    move_right: String,
-    toggle_visibility: String,
-    quit_app: String,
+pub(crate) struct HotkeysConfig {
+    pub(crate) text: String,
+    pub(crate) screenshot: String,
+    pub(crate) audio_toggle: String,
+    pub(crate) scroll_up: String,
+    pub(crate) scroll_down: String,
+    pub(crate) move_up: String,
+    pub(crate) move_down: String,
+    pub(crate) move_left: String,
+    pub(crate) move_right: String,
+    pub(crate) toggle_visibility: String,
+    pub(crate) quit_app: String,
 }
 
 struct HotkeysState(Mutex<HotkeysConfig>);
@@ -354,7 +355,7 @@ fn unregister_hotkey_best_effort(app: &tauri::AppHandle, hotkey: &str) {
 /// Reapply screen-capture exclusion after win.show() on Windows.
 /// On Windows, hiding then showing a window can reset the WDA_EXCLUDEFROMCAPTURE flag,
 /// causing a black rectangle in screen sharing instead of full invisibility.
-fn reapply_stealth_after_show(win: &tauri::WebviewWindow) {
+pub(crate) fn reapply_stealth_after_show(win: &tauri::WebviewWindow) {
     if !STEALTH_ENABLED.load(Ordering::Relaxed) {
         return;
     }
@@ -381,7 +382,7 @@ fn reapply_stealth_after_show(win: &tauri::WebviewWindow) {
 /// WDA_EXCLUDEFROMCAPTURE and causes a black rectangle in screen capture.
 /// The window stays "visible" to Windows at all times so the display affinity is preserved.
 #[cfg(target_os = "windows")]
-fn toggle_window_offscreen_win32(win: &tauri::WebviewWindow) {
+pub(crate) fn toggle_window_offscreen_win32(win: &tauri::WebviewWindow) {
     use std::sync::atomic::AtomicBool;
 
     static WINDOW_HIDDEN: AtomicBool = AtomicBool::new(false);
@@ -389,13 +390,24 @@ fn toggle_window_offscreen_win32(win: &tauri::WebviewWindow) {
     static SAVED_Y: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
     if WINDOW_HIDDEN.load(Ordering::Relaxed) {
-        // Restore: move window back to saved position
+        // Restore: move window back to saved position without stealing focus
         let x = SAVED_X.load(Ordering::Relaxed);
         let y = SAVED_Y.load(Ordering::Relaxed);
-        let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
-        let _ = win.set_focus();
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        if let Ok(h) = win.hwnd() {
+            unsafe {
+                let hwnd = HWND(h.0 as *mut _);
+                let _ = SetWindowPos(
+                    hwnd,
+                    HWND_TOPMOST,
+                    x, y, 0, 0,
+                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+            }
+        }
         WINDOW_HIDDEN.store(false, Ordering::Relaxed);
-        println!("🕵️ [toggle-win32] Window restored to ({}, {})", x, y);
+        println!("🕵️ [toggle-win32] Window restored to ({}, {}) without focus", x, y);
     } else {
         // Hide: save current position, move far off-screen
         if let Ok(pos) = win.outer_position() {
@@ -420,11 +432,9 @@ fn register_hotkey(
         .on_shortcut(hotkey, move |_app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 println!("⌨️ Hotkey pressed ({}): {}", label, hk);
-                // Make it obvious something happened: bring the main window to the front.
+                // Bring window to front without stealing focus from Chrome or the active app
                 if let Some(win) = handle.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.unminimize();
-                    let _ = win.set_focus();
+                    stealth_hotkey::bring_to_front_without_focus(&win);
                     reapply_stealth_after_show(&win);
                 }
                 handle.emit(event_name, ()).ok();
@@ -434,6 +444,16 @@ fn register_hotkey(
 }
 
 fn register_hotkeys(app: &tauri::AppHandle, cfg: &HotkeysConfig) -> Result<(), String> {
+    // 1. Setup OS-level stealth hotkeys (key event swallowing + zero focus loss).
+    let swallowing_active = stealth_hotkey::setup_stealth_hotkeys(app, cfg);
+    if swallowing_active {
+        println!("🕵️ [hotkeys] Stealth hotkeys active with OS-level event swallowing & blur prevention.");
+        return Ok(());
+    }
+
+    // 2. Fallback: If OS-level event swallowing isn't active,
+    // register via tauri_plugin_global_shortcut (still using bring_to_front_without_focus to prevent blur).
+    println!("ℹ️ [hotkeys] Registering via global_shortcut fallback (blur prevention active, event swallowing inactive).");
     register_hotkey(app, &cfg.text, "hotkey-solve-text", "text")?;
     register_hotkey(app, &cfg.screenshot, "hotkey-solve-screenshot", "screenshot")?;
     register_hotkey(app, &cfg.audio_toggle, "hotkey-audio-toggle", "audio-toggle")?;
@@ -455,36 +475,7 @@ fn register_toggle_visibility_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Re
         .on_shortcut(hotkey, move |_app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 println!("⌨️ Hotkey pressed (toggle): {}", hk);
-                if let Some(win) = handle.get_webview_window("main") {
-                    // On Windows with stealth mode, use opacity toggle instead of
-                    // hide/show to avoid breaking WDA_EXCLUDEFROMCAPTURE.
-                    // ShowWindow(SW_HIDE/SW_SHOW) corrupts the display affinity,
-                    // causing a black rectangle in screen capture.
-                    #[cfg(target_os = "windows")]
-                    if STEALTH_ENABLED.load(Ordering::Relaxed) {
-                        toggle_window_offscreen_win32(&win);
-                        return;
-                    }
-
-                    // macOS / non-stealth: use normal hide/show
-                    match win.is_visible() {
-                        Ok(true) => {
-                            let _ = win.hide();
-                        }
-                        Ok(false) => {
-                            let _ = win.show();
-                            let _ = win.unminimize();
-                            let _ = win.set_focus();
-                        }
-                        Err(_) => {
-                            let _ = win.show();
-                            let _ = win.unminimize();
-                            let _ = win.set_focus();
-                        }
-                    }
-                } else {
-                    println!("⚠️ Could not find main window to toggle visibility");
-                }
+                stealth_hotkey::toggle_visibility_without_focus(&handle);
             }
         })
         .map_err(|e| e.to_string())
@@ -1998,11 +1989,11 @@ fn apply_windows_stealth(win: &tauri::WebviewWindow) {
             println!("🕵️ [stealth-windows] Window excluded from screen capture");
         }
 
-        // ---- Hide from taskbar + Alt+Tab ----
+        // ---- Hide from taskbar + Alt+Tab + Prevent activation on click ----
         let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        let new_style = (ex_style | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
+        let new_style = (ex_style | WS_EX_TOOLWINDOW.0 as isize | WS_EX_NOACTIVATE.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
-        println!("🕵️ [stealth-windows] Window hidden from taskbar & Alt+Tab");
+        println!("🕵️ [stealth-windows] Window hidden from taskbar, Alt+Tab & set to non-activating");
     }
 }
 
@@ -2020,9 +2011,9 @@ fn remove_windows_stealth(win: &tauri::WebviewWindow) {
         let hwnd = HWND(hwnd_raw.0 as *mut _);
         // WDA_NONE = 0 — re-enable screen capture
         let _ = SetWindowDisplayAffinity(hwnd, WINDOW_DISPLAY_AFFINITY(0));
-        // Remove WS_EX_TOOLWINDOW, add WS_EX_APPWINDOW
+        // Remove WS_EX_TOOLWINDOW and WS_EX_NOACTIVATE, add WS_EX_APPWINDOW
         let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        let new_style = (ex_style & !(WS_EX_TOOLWINDOW.0 as isize)) | (WS_EX_APPWINDOW.0 as isize);
+        let new_style = (ex_style & !(WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_NOACTIVATE.0 as isize)) | (WS_EX_APPWINDOW.0 as isize);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
         println!("[AppSettings] Windows stealth protections removed");
     }
@@ -2094,6 +2085,7 @@ fn main() {
             get_hotkeys,
             set_hotkeys,
             reset_hotkeys_to_default,
+            get_stealth_status,
             move_window_by,
             frontend_log,
         ])
@@ -2277,8 +2269,24 @@ fn get_os() -> Result<String, String> {
 }
 
 // ============================================================================
-// HOTKEY CONFIG COMMANDS
+// HOTKEY CONFIG & STEALTH STATUS COMMANDS
 // ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StealthStatus {
+    pub swallowing_active: bool,
+    pub blur_prevention_active: bool,
+    pub macos_accessibility_granted: bool,
+}
+
+#[tauri::command]
+fn get_stealth_status() -> Result<StealthStatus, String> {
+    Ok(StealthStatus {
+        swallowing_active: stealth_hotkey::is_swallowing_active(),
+        blur_prevention_active: true,
+        macos_accessibility_granted: stealth_hotkey::is_accessibility_granted(),
+    })
+}
 
 #[tauri::command]
 fn get_hotkeys(state: tauri::State<'_, HotkeysState>) -> Result<HotkeysConfig, String> {

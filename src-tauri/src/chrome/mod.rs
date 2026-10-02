@@ -118,13 +118,6 @@ pub async fn activate_tab(tab_id: &str) -> Result<(), String> {
             .map_err(|e| format!("Failed to activate: {}", e))?;
     }
 
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("osascript")
-        .arg("-e")
-        .arg("tell application \"Google Chrome\" to activate")
-        .output()
-        .ok();
-
     Ok(())
 }
 

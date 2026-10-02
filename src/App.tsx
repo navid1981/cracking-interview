@@ -250,6 +250,7 @@ function App() {
 
   const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
+  const [stealthStatus, setStealthStatus] = useState<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean } | null>(null);
   
   // Prompt editing state
   const [promptEditMode, setPromptEditMode] = useState<'list' | 'edit'>('list');
@@ -980,6 +981,12 @@ function App() {
       const cfg = await invoke<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('get_hotkeys');
       setHotkeysDraft(cfg);
       setHotkeysStatus('');
+      try {
+        const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('get_stealth_status');
+        setStealthStatus(status);
+      } catch {
+        // ignore
+      }
     } catch (e) {
       setHotkeysStatus(`Failed to load hotkeys: ${String(e)}`);
     }
@@ -1003,6 +1010,12 @@ function App() {
       });
       setHotkeysDraft(updated);
       setHotkeysStatus('Saved.');
+      try {
+        const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('get_stealth_status');
+        setStealthStatus(status);
+      } catch {
+        // ignore
+      }
     } catch (e) {
       setHotkeysStatus(`❌ ${String(e)}`);
     }
@@ -1014,6 +1027,12 @@ function App() {
       const updated = await invoke<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('reset_hotkeys_to_default');
       setHotkeysDraft(updated);
       setHotkeysStatus('Reset to defaults.');
+      try {
+        const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('get_stealth_status');
+        setStealthStatus(status);
+      } catch {
+        // ignore
+      }
     } catch (e) {
       setHotkeysStatus(`❌ ${String(e)}`);
     }
@@ -2411,6 +2430,32 @@ function App() {
 
               {settingsTab === 'hotkeys' && (
                 <div className="hotkeys-panel">
+                  {/* Anti-Detection Security Status */}
+                  <div style={{
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    marginBottom: '16px',
+                    background: 'rgba(16, 185, 129, 0.08)',
+                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                    fontSize: '12px',
+                    lineHeight: '1.5'
+                  }}>
+                    <div style={{ fontWeight: 600, color: '#10b981', marginBottom: '4px' }}>
+                      🛡️ Anti-Detection Protection Active
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)' }}>
+                      • <strong>Blur Prevention:</strong> Window never steals focus. Test tabs will not fire <code>window.blur</code>.
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      • <strong>Hotkey Swallowing:</strong> {stealthStatus?.swallowing_active
+                        ? <span style={{ color: '#10b981', fontWeight: 600 }}>Active (Keys swallowed at OS level; hidden from Chrome DOM)</span>
+                        : runtimePlatform === 'macos'
+                          ? <span style={{ color: '#f59e0b' }}>Fallback active. Grant Accessibility permission in macOS System Settings to swallow keys from Chrome.</span>
+                          : <span style={{ color: '#10b981', fontWeight: 600 }}>Active</span>
+                      }
+                    </div>
+                  </div>
+
                   {/* Solve Section */}
                   <div className="hotkeys-section">
                     <div className="hotkeys-section-title">🎯 Solve</div>
