@@ -446,12 +446,14 @@ fn register_hotkey(
         .on_shortcut(hotkey, move |_app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 println!("⌨️ Hotkey pressed ({}): {}", label, hk);
-                // Bring window to front without stealing focus from Chrome or the active app
-                if let Some(win) = handle.get_webview_window("main") {
-                    stealth_hotkey::bring_to_front_without_focus(&win);
-                    reapply_stealth_after_show(&win);
-                }
-                handle.emit(event_name, ()).ok();
+                let h = handle.clone();
+                let _ = handle.run_on_main_thread(move || {
+                    if let Some(win) = h.get_webview_window("main") {
+                        stealth_hotkey::bring_to_front_without_focus(&win);
+                        reapply_stealth_after_show(&win);
+                    }
+                    h.emit(event_name, ()).ok();
+                });
             }
         })
         .map_err(|e| e.to_string())
@@ -489,7 +491,10 @@ fn register_toggle_visibility_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Re
         .on_shortcut(hotkey, move |_app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 println!("⌨️ Hotkey pressed (toggle): {}", hk);
-                stealth_hotkey::toggle_visibility_without_focus(&handle);
+                let h = handle.clone();
+                let _ = handle.run_on_main_thread(move || {
+                    stealth_hotkey::toggle_visibility_without_focus(&h);
+                });
             }
         })
         .map_err(|e| e.to_string())

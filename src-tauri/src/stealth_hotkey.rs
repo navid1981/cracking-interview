@@ -203,7 +203,7 @@ pub fn bring_to_front_without_focus(win: &tauri::WebviewWindow) {
             fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
             fn objc_msgSend();
         }
-        type SendNoArg = unsafe extern "C" fn(*mut c_void, *mut c_void);
+        type SendNoArg = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
 
         unsafe {
             if let Ok(ptr) = win.ns_window() {
@@ -213,7 +213,7 @@ pub fn bring_to_front_without_focus(win: &tauri::WebviewWindow) {
                     // (floating/always-on-top) WITHOUT activating NSApp and WITHOUT becoming key.
                     let order_front_sel = sel_registerName(b"orderFrontRegardless\0".as_ptr() as *const _);
                     let send: SendNoArg = std::mem::transmute(objc_msgSend as *const ());
-                    send(ns_win, order_front_sel);
+                    let _ = send(ns_win, order_front_sel);
                 }
             }
         }
@@ -732,10 +732,11 @@ unsafe extern "C" fn macos_event_tap_callback(
                 println!("⌨️ [normal-hotkey-macOS] Key event triggered for {}", action.label());
             }
 
-            // Dispatch on a background thread so the event tap callback returns in microseconds
+            // Dispatch on the MAIN thread so AppKit NSWindow calls never crash
             if let Some(app) = APP_HANDLE.lock().unwrap().clone() {
-                std::thread::spawn(move || {
-                    dispatch_action(&app, action);
+                let app_handle = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    dispatch_action(&app_handle, action);
                 });
             }
 
@@ -752,43 +753,44 @@ unsafe extern "C" fn macos_event_tap_callback(
 
 #[cfg(target_os = "macos")]
 fn init_macos_event_tap() {
-    std::thread::spawn(|| {
-        unsafe {
-            // kCGSessionEventTap = 1, kCGHeadInsertEventTap = 0, kCGEventTapOptionDefault = 0
-            // eventsOfInterest: 1 << 10 (kCGEventKeyDown)
-            let tap = CGEventTapCreate(
-                1,
-                0,
-                0,
-                1 << 10,
-                macos_event_tap_callback,
-                std::ptr::null_mut(),
-            );
+    unsafe {
+        // kCGSessionEventTap = 1, kCGHeadInsertEventTap = 0, kCGEventTapOptionDefault = 0
+        // eventsOfInterest: 1 << 10 (kCGEventKeyDown)
+        let tap = CGEventTapCreate(
+            1,
+            0,
+            0,
+            1 << 10,
+            macos_event_tap_callback,
+            std::ptr::null_mut(),
+        );
 
-            if tap.is_null() {
-                println!("⚠️ [stealth-hotkey-macOS] CGEventTapCreate returned NULL. Check Accessibility permissions in System Settings.");
-                SWALLOWING_ACTIVE.store(false, Ordering::Relaxed);
-                return;
-            }
+        if tap.is_null() {
+            println!("⚠️ [stealth-hotkey-macOS] CGEventTapCreate returned NULL. Check Accessibility permissions in System Settings.");
+            SWALLOWING_ACTIVE.store(false, Ordering::Relaxed);
+            return;
+        }
 
-            MAC_EVENT_TAP.store(tap as isize, Ordering::Relaxed);
-            let loop_source = CFMachPortCreateRunLoopSource(std::ptr::null_mut(), tap, 0);
-            if loop_source.is_null() {
-                println!("⚠️ [stealth-hotkey-macOS] CFMachPortCreateRunLoopSource failed.");
-                SWALLOWING_ACTIVE.store(false, Ordering::Relaxed);
-                return;
-            }
+        MAC_EVENT_TAP.store(tap as isize, Ordering::Relaxed);
+        let loop_source = CFMachPortCreateRunLoopSource(std::ptr::null_mut(), tap, 0);
+        if loop_source.is_null() {
+            println!("⚠️ [stealth-hotkey-macOS] CFMachPortCreateRunLoopSource failed.");
+            SWALLOWING_ACTIVE.store(false, Ordering::Relaxed);
+            return;
+        }
 
+        CGEventTapEnable(tap, true);
+        SWALLOWING_ACTIVE.store(true, Ordering::Relaxed);
+        println!("🕵️ [stealth-hotkey-macOS] ✅ Active CGEventTap installed at kCGHeadInsertEventTap. Key event swallowing ENABLED.");
+
+        let loop_source_isize = loop_source as isize;
+        std::thread::spawn(move || {
             let run_loop = CFRunLoopGetCurrent();
             MAC_RUN_LOOP.store(run_loop as isize, Ordering::Relaxed);
-            CFRunLoopAddSource(run_loop, loop_source, kCFRunLoopCommonModes);
-            CGEventTapEnable(tap, true);
-            SWALLOWING_ACTIVE.store(true, Ordering::Relaxed);
-            println!("🕵️ [stealth-hotkey-macOS] ✅ Active CGEventTap installed at kCGHeadInsertEventTap. Key event swallowing ENABLED.");
-
+            CFRunLoopAddSource(run_loop, loop_source_isize as CFRunLoopSourceRef, kCFRunLoopCommonModes);
             CFRunLoopRun();
-        }
-    });
+        });
+    }
 }
 
 // ── Windows Low-Level Keyboard Hook Implementation ──────────────────────────
@@ -835,8 +837,9 @@ unsafe extern "system" fn windows_keyboard_proc(
                 }
 
                 if let Some(app) = APP_HANDLE.lock().unwrap().clone() {
-                    std::thread::spawn(move || {
-                        dispatch_action(&app, action);
+                    let app_handle = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        dispatch_action(&app_handle, action);
                     });
                 }
 

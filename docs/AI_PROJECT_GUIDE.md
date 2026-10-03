@@ -42,13 +42,14 @@ The primary source code is:
   - `src/components/SignInForm.tsx`: Email/password sign in form
   - `src/components/SignUpForm.tsx`: Email/password sign up form
 - **Backend (Tauri/Rust)**: `src-tauri/src/`
-  - `main.rs`: Tauri commands (IPC) + global hotkey registration
+  - `main.rs`: Tauri commands (IPC), window lifecycle, and global hotkey orchestration
+  - `stealth_hotkey.rs`: OS-level key swallowing (`CGEventTap` on macOS, `WH_KEYBOARD_LL` on Windows), non-activating window raising, and hook lifecycle teardown
   - `chrome/*`: Chrome CDP integration (tabs, activate, execute JS, screenshots)
   - `ai/*`: Gemini + Claude HTTP clients + provider routing
   - `audio.rs`: System audio recording (macOS: ScreenCaptureKit via Swift helper, Windows: WASAPI loopback), MP3 encoding
   - `transcription.rs`: Real-time audio capture → Deepgram WebSocket streaming → live transcript events
   - `documents.rs`: Document text extraction (PDF, DOCX, DOC, TXT) and placeholder persistence
-  - `screenshot.rs`: OS display capture (screenshots crate), thumbnails
+  - `screenshot.rs`: OS display capture (screenshots crate), thumbnails, asynchronous Lanczos downscaling & JPEG compression
 - **Resources**: `src-tauri/resources/`
   - `audio_recorder.swift`: Swift helper for macOS audio recording + live PCM streaming (compiled at runtime)
 - **Supabase Edge Functions**: `supabase/functions/`
@@ -252,8 +253,9 @@ Frontend setting: `useScreenshot` (stored in `localStorage`)
 - **Text mode** (Chrome tab only): `extract_tab_text` command which runs:
   - `chrome::execute_javascript(tab_id, "document.body.innerText")`
 - **Screenshot mode**
-  - Chrome tab: `capture_tab_screenshot` (CDP `Page.captureScreenshot` as JPEG bytes, written to a temp file)
-  - Display: `capture_display_screenshot` (OS capture → encoded as JPEG bytes, written to a temp file)
+  - Chrome tab: `capture_tab_screenshot` (CDP `Page.captureScreenshot` as JPEG bytes; decoded, compressed, and written to a temp file via `spawn_blocking`)
+  - Display: `capture_display_screenshot` (OS display capture via `screenshots` crate → Lanczos3 downscaled and encoded as JPEG bytes via `spawn_blocking`, written to a temp file)
+  - All thumbnail generation (`get_tab_thumbnail`, `get_display_thumbnail`) is similarly offloaded to background thread pools to ensure sub-millisecond hotkey latency on high-DPI (4K/5K Retina) screens.
 - **Audio mode** (system audio):
   - `start_audio_recording` / `stop_audio_recording`
   - Records system audio (interviewer voice from Zoom/Teams/etc.)
@@ -435,20 +437,41 @@ Utility:
 - `open_external_url(url: String) -> ()` (opens URL in default browser, used by announcement link handler)
 - `resize_window(window: Window, width: f64, height: f64) -> ()`
 
-App Settings:
+App Settings & Stealth:
 
 - `set_window_opacity(opacity: f64) -> ()` (sets window transparency, 0.1–1.0)
 - `set_stealth_mode(enabled: bool) -> ()` (toggles stealth protections + saves preference to stealth.json)
+- `get_stealth_status() -> StealthStatus` (returns `{ swallowing_active, blur_prevention_active, macos_accessibility_granted }`)
+- `request_accessibility() -> bool` (triggers native macOS accessibility permission prompt)
+- `refresh_stealth_status() -> StealthStatus` (dynamically attempts to activate event swallowing if user just granted accessibility)
 - `fetch_models(access_token: String) -> Value` (fetches LLM model config from get-models edge function)
 
 Hotkeys:
 
-- `get_hotkeys() -> HotkeyConfig`
-- `set_hotkeys(config: HotkeyConfig) -> ()`
+- `get_hotkeys() -> HotkeysConfig`
+- `set_hotkeys(...) -> HotkeysConfig`
+- `reset_hotkeys_to_default() -> HotkeysConfig`
 
-## Global hotkeys
+## Global hotkeys & Anti-Detection Architecture
 
-Backend registers global hotkeys on startup (customizable in Settings → HotKeys):
+The backend registers global hotkeys on startup (customizable in Settings → HotKeys). In addition to triggering actions, the hotkey subsystem is engineered with an anti-detection architecture designed to operate seamlessly without disturbing active web assessments:
+
+1. **Permanent Blur Prevention (Always Active):**
+   - The app operates as a non-activating floating overlay.
+   - When hotkeys fire, the window is brought forward using `bring_to_front_without_focus`:
+     - macOS: Uses raw AppKit runtime to invoke `orderFrontRegardless` on the `NSWindow`. The window floats to the top without activating `NSApplication` and without becoming key window.
+     - Windows: Uses `ShowWindow(hwnd, SW_SHOWNOACTIVATE)` and `SetWindowPos(hwnd, HWND_TOPMOST, ..., SWP_NOACTIVATE | SWP_SHOWWINDOW)`.
+   - The app **never** calls `set_focus()`. Chrome remains the active OS foreground window at all times, ensuring online assessment pages never fire `window.blur` or `visibilitychange`.
+
+2. **OS-Level Key Event Swallowing (Stealth Mode Only):**
+   - When Stealth Mode is enabled, registered hotkey combinations are intercepted and dropped at the OS level:
+     - macOS: Uses `CGEventTapCreate` at `kCGHeadInsertEventTap` (`kCGSessionEventTap`). When a shortcut matches, the tap callback dispatches the action and returns `NULL` (`std::ptr::null_mut()`), deleting the event before Chrome's event queue receives it. Chrome DOM never fires `keydown` and never switches tabs.
+     - Windows: Uses `SetWindowsHookExW(WH_KEYBOARD_LL, ...)`. The hook callback returns `LRESULT(1)` to halt message dispatch.
+   - CoreGraphics modifier bits are isolated (`CG_FLAG_COMMAND`, `CG_FLAG_SHIFT`, `CG_FLAG_CONTROL`, `CG_FLAG_ALT`), filtering out Caps Lock (`AlphaShift`) and arrow-key NumPad bits.
+   - When Stealth Mode is disabled, hotkeys pass through normally.
+
+3. **Lifecycle Cleanup:**
+   - Both macOS Event Taps and Windows low-level hook threads (`WM_QUIT`) are explicitly torn down on app exit via Tauri's `RunEvent::Exit` handler.
 
 | Action | macOS Default | Windows Default | Linux Default |
 |--------|---------------|-----------------|---------------|
@@ -469,13 +492,13 @@ When pressed, Rust emits events that the frontend listens for:
 - `hotkey-solve-text`
 - `hotkey-solve-screenshot`
 - `hotkey-audio-toggle`
+- `hotkey-scroll-up` / `hotkey-scroll-down`
+- `hotkey-move-up` / `hotkey-move-down` / `hotkey-move-left` / `hotkey-move-right`
 
 Notes / limitations:
 
 - This does **not** auto-detect "currently active Chrome tab"; it runs on the **tab selected in the app**.
-- To fully match LeetCode Wizard, you likely want:
-  - active-tab detection (platform-specific or deeper CDP integration)
-  - an overlay / small always-on-top result panel that doesn't steal focus
+- If Accessibility permission is pending on macOS, the app gracefully falls back to `tauri_plugin_global_shortcut` while keeping focus-blur prevention active.
 
 ## Authentication & Subscription System
 
@@ -1104,15 +1127,25 @@ Implementation in `src/App.tsx`:
 - `hotkey-audio-toggle` listener also triggers auto-selection
 - `showAudioPromptWarning` state controls warning dialog visibility
 
-### Stealth Mode (Screen Capture Protection)
+### Stealth Mode & Anti-Detection Architecture
 
-The app includes a "stealth mode" that makes it invisible to screen capture software (Zoom, Teams, OBS, screenshots, screen recording) and hides it from the Dock/Taskbar. This is designed for real interview scenarios where the user doesn't want the app to appear on shared screens.
+The app includes an advanced **Stealth Mode & Anti-Detection System** that provides three distinct protection layers:
 
-#### Configuration
+1. **Blur Prevention (Always Active):** Prevents browser tabs from losing active window focus, stopping `window.blur` from firing on online assessment platforms.
+2. **Hotkey Hiding (Stealth Mode Only):** Drops/swallows shortcut chords at the OS kernel level so Chrome's DOM and assessment event listeners (`keydown`) never see the keys.
+3. **Screen Capture & System Protection (Stealth Mode Only):** Makes the window invisible to screen-sharing and recording software (Zoom, Teams, Meet, Discord, OBS, OS screenshots) and hides the app from the Dock (macOS) and Taskbar (Windows).
+
+#### Pro Subscription Gating & Defaults
+
+- **Pro Users:** Stealth Mode is unlocked and **defaulted to ON** (`true`).
+- **Free Users:** Stealth Mode is disabled and locked (`Disabled (Pro Only)`). The toggle is rendered with a high-contrast disabled track and a card directing the user to upgrade to Pro. An automated `useEffect` enforces that if a non-Pro user logs in, Stealth Mode is disengaged in both local storage and the backend.
+- **Blur Prevention:** Remains **always active** for both Free and Pro users — the window will never steal OS focus regardless of subscription tier or stealth toggle state.
+
+#### Configuration & Persistence
 
 Stealth mode preference is persisted in a `stealth.json` config file in the app's config directory (alongside `hotkeys.json`). On first launch, it defaults to `true` (stealth enabled).
 
-Users toggle stealth mode in **Settings → App → Stealth Mode**. On macOS, changes take effect after restarting the app (due to macOS activation policy constraints). On Windows, changes take effect immediately.
+Users toggle stealth mode in **Settings → App → Stealth Mode**. On macOS, changes to Dock hiding take effect after restarting the app (due to macOS activation policy constraints). On Windows, changes take effect immediately.
 
 **Config file functions** (`src-tauri/src/main.rs`):
 - `load_stealth_preference(app)` — reads `stealth.json`, returns `Option<bool>`
@@ -1128,18 +1161,27 @@ Stealth mode is applied at app startup in `src-tauri/src/main.rs` → `setup()`:
 **macOS:**
 - `apply_macos_dock_hiding()` — Sets `NSApp.activationPolicy` to `.accessory` (1) via raw ObjC runtime. Hides from Dock and Cmd+Tab.
 - `apply_macos_screen_capture_protection(win)` — Sets `NSWindow.sharingType` to `NSWindowSharingNone` (0). This is the only reliable way to exclude a window from screen capture on macOS.
+- `setup_stealth_hotkeys(app, cfg)` — Installs a low-level `CGEventTap` at `kCGHeadInsertEventTap` (`kCGSessionEventTap`). When a hotkey matches, the callback dispatches the action and returns `NULL`, deleting the keystroke before Chrome receives it.
 - `win.set_content_protected(true)` — Tauri cross-platform fallback.
 - `win.set_skip_taskbar(true)` — Tauri cross-platform fallback.
 
 **Windows:**
 - `apply_windows_stealth(win)` — Uses Win32 API:
   - `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` (0x11) — Excludes window from screen capture (Windows 10 2004+).
-  - Modifies extended window styles: adds `WS_EX_TOOLWINDOW`, removes `WS_EX_APPWINDOW` — Hides from taskbar and Alt+Tab.
+  - Modifies extended window styles: adds `WS_EX_TOOLWINDOW`, removes `WS_EX_APPWINDOW`, and injects `WS_EX_NOACTIVATE` so mouse clicks on the window never steal foreground focus.
+- `setup_stealth_hotkeys(app, cfg)` — Installs a low-level keyboard hook via `SetWindowsHookExW(WH_KEYBOARD_LL, ...)`. The hook procedure returns `LRESULT(1)` to swallow the event.
 - Same Tauri cross-platform fallbacks as macOS.
 
 **When stealth is OFF:**
 - `restore_macos_screen_capture_visibility(win)` — Sets `NSWindow.sharingType` back to `NSWindowSharingReadWrite` (1) to allow screen capture.
 - `win.set_content_protected(false)` and `win.set_skip_taskbar(false)`.
+- Hotkeys pass through to the foreground application normally.
+
+#### Focus & Geometry Management (Always Active)
+
+- **`bring_to_front_without_focus(&win)`**: Replaced all `win.set_focus()` calls with non-activating window methods (`orderFrontRegardless` on macOS, `SW_SHOWNOACTIVATE` & `SWP_NOACTIVATE` on Windows).
+- **`move_window_by()` & `resize_window()`**: On Windows, window position animations and size adjustments use `SetWindowPos` with `SWP_NOACTIVATE` to prevent the Desktop Window Manager (DWM) from shifting active focus away from Chrome.
+- **CDP `activate_tab`**: Removed the AppleScript `tell application "Google Chrome" to activate` subprocess so tab switching occurs purely through CDP WebSocket messages without OS-level focus transitions.
 
 #### Toggle Visibility Hotkey
 
@@ -1152,10 +1194,9 @@ A global hotkey allows quickly hiding/showing the app window (works in both stea
 | Linux | `Ctrl+Shift+H` |
 
 Implementation: `register_toggle_visibility_hotkey()` in `main.rs`:
-- **macOS / non-stealth**: Uses standard `win.hide()` / `win.show()` + `win.unminimize()` + `win.set_focus()`.
-- **Windows with stealth mode**: Uses `toggle_window_offscreen_win32()` instead of `hide()`/`show()`. This moves the window to coordinates (-30000, -30000) to "hide" and restores saved position to "show". Avoids the `ShowWindow(SW_HIDE/SW_SHOW)` cycle which corrupts `WDA_EXCLUDEFROMCAPTURE`, causing a black rectangle in screen capture instead of complete invisibility. Position is saved/restored via static `AtomicI32` variables.
-- **`STEALTH_ENABLED` global flag**: A static `AtomicBool` set during app startup, checked by the toggle handler to decide which approach to use.
-- **`reapply_stealth_after_show()`**: Called after every `win.show()` in non-toggle hotkey handlers (solve, scroll, move) to re-apply `SetWindowDisplayAffinity` as a safety measure.
+- **macOS / non-stealth**: Uses `stealth_hotkey::toggle_visibility_without_focus(&handle)` via `win.hide()` / `bring_to_front_without_focus()`.
+- **Windows with stealth mode**: Uses `toggle_window_offscreen_win32()` instead of `hide()`/`show()`. This moves the window to coordinates (-30000, -30000) to "hide" and restores saved position to "show" using `SWP_NOACTIVATE`. Avoids the `ShowWindow(SW_HIDE/SW_SHOW)` cycle which corrupts `WDA_EXCLUDEFROMCAPTURE`, causing a black rectangle in screen capture instead of complete invisibility.
+- **`reapply_stealth_after_show()`**: Called after every non-toggle hotkey handler (solve, scroll, move) to re-apply `SetWindowDisplayAffinity` as a safety measure.
 
 #### Quit App Hotkey
 
@@ -1167,12 +1208,13 @@ Since stealth mode hides the app from Dock/Taskbar, there's also a quit hotkey:
 | Windows | `Alt+Shift+Q` |
 | Linux | `Ctrl+Shift+Q` |
 
-Both hotkeys are customizable in Settings → HotKeys tab.
+Both hotkeys are customizable in Settings → HotKeys tab. When the app quits, `teardown_stealth_hotkeys()` is executed to cleanly unhook the event taps and stop background hook threads.
 
 #### Key Files
 
-- `src-tauri/src/main.rs`: Stealth mode helpers, `set_stealth_mode` Tauri command, `load_stealth_preference`/`save_stealth_preference` config file I/O, and startup logic
-- `stealth.json` (in app config dir): Persisted user preference `{"enabled": true/false}`
+- `src-tauri/src/main.rs`: Stealth mode helpers, `set_stealth_mode`, `get_stealth_status`, `request_accessibility`, `refresh_stealth_status` Tauri commands, and startup/exit lifecycle logic.
+- `src-tauri/src/stealth_hotkey.rs`: CoreGraphics Event Tap, Win32 Low-Level Keyboard Hook, event swallowing, and non-activating window show routines.
+- `stealth.json` (in app config dir): Persisted user preference `{"enabled": true/false}`.
 
 ### Notification / Announcement System
 
@@ -1671,12 +1713,17 @@ The "App" tab in the Settings modal provides three app-level preferences that pe
 - ~20+ CSS variables extracted from hardcoded colors: `--surface`, `--border`, `--shadow`, `--input-bg`, `--stepper-bg`, `--transcript-bg`, etc.
 - Persisted in `localStorage('app_theme')`, applied on startup
 
-**Stealth Mode Toggle:**
-- Switch control with "Enabled" / "Disabled" label
-- Calls `invoke('set_stealth_mode', { enabled })` which saves to `stealth.json` config file
-- On Windows: applies/removes stealth protections immediately
-- On macOS: saves preference for next app launch (shows note: "On macOS, stealth changes take effect after restarting the app.")
-- Persisted in both `localStorage('stealth_mode')` (for UI state) and `stealth.json` (for Rust startup)
+**Stealth Mode Toggle & Anti-Detection System:**
+- **Pro Gated Feature**: Stealth Mode is available exclusively to Pro users (`isPro === true`).
+  - **Pro Users**: Switch is enabled and defaults to **ON** (`true`).
+  - **Free Users**: Switch is locked to **OFF** (`checked={false}` and `disabled={true}`) with a `PRO ONLY` badge and an upgrade callout.
+- **High-Contrast Theme-Adaptive Switch**: The toggle switch (`.toggle-switch-slider`) features a high-contrast slate track (`#cbd5e1` in light, `#334155` in dark) with distinct slate borders (`#94a3b8` / `#475569`). In the disabled state, the track is clearly defined (`#e2e8f0` / `#1e293b`) with a muted thumb, ensuring the switch is 100% visible across both light and dark themes.
+- **Unified Anti-Detection Slot**: Placed directly underneath the toggle switch:
+  - **When Stealth Active (Pro)**: Green protection card confirming that **Hotkey Hiding** (swallowing shortcuts from Chrome DOM) and **Screen & System Protection** (hidden from Zoom, Teams, Meet, OS screenshots, Dock, Taskbar) are engaged.
+  - **When Stealth Inactive (Pro)**: Amber warning card indicating that Hotkey Hiding and Screen Sharing protection are disengaged.
+  - **When Free Tier**: Blue upgrade card detailing the benefits of Stealth Mode.
+- **Blur Prevention**: Always active across all tiers and states (the window never pulls active OS focus, preventing `window.blur` in online tests).
+- Persisted in both `localStorage('stealth_mode')` (for UI state) and `stealth.json` (for Rust startup).
 
 **Tauri Commands:**
 
@@ -1684,13 +1731,16 @@ The "App" tab in the Settings modal provides three app-level preferences that pe
 |---------|-----------|-------------|
 | `set_window_opacity` | `(opacity: f64) → ()` | Set window transparency (0.1–1.0) |
 | `set_stealth_mode` | `(enabled: bool) → ()` | Toggle stealth protections + save preference |
+| `get_stealth_status` | `() → StealthStatus` | Read live stealth status (`swallowing_active`, `blur_prevention_active`, `macos_accessibility_granted`) |
+| `request_accessibility` | `() → bool` | Trigger native macOS Accessibility permission prompt via `AXIsProcessTrustedWithOptions` |
+| `refresh_stealth_status` | `() → StealthStatus` | Dynamically re-check accessibility and activate event swallowing without restarting the app |
 
 **CSS Classes:**
 - `.app-settings-group` — Setting group with bottom border separator
 - `.app-settings-label` / `.app-settings-desc` — Setting name and description
 - `.opacity-slider-row` / `.opacity-slider` / `.opacity-value` — Transparency slider layout
 - `.theme-toggle-group` / `.theme-toggle-btn` — Light/Dark toggle buttons
-- `.stealth-toggle-row` / `.toggle-switch` / `.toggle-switch-slider` — Stealth on/off switch
+- `.stealth-toggle-row` / `.toggle-switch` / `.toggle-switch-slider` — Theme-adaptive toggle switch with explicit light/dark contrast and `.disabled` states
 
 #### Custom Prompt Management
 

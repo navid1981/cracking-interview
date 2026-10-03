@@ -2690,52 +2690,50 @@ function App() {
 
                   {/* Stealth Mode */}
                   <div className="app-settings-group">
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                      <div className="app-settings-label" style={{ margin: 0 }}>
-                        Stealth Mode
-                        {!isPro && (
-                          <span style={{
-                            marginLeft: '8px',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            color: 'var(--primary-blue)',
-                            background: 'rgba(59, 130, 246, 0.1)',
-                            border: '1px solid rgba(59, 130, 246, 0.3)',
-                            borderRadius: '4px',
-                            padding: '2px 6px',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.5px'
-                          }}>
-                            Pro Only
-                          </span>
-                        )}
-                      </div>
-                      <div className="stealth-toggle-row">
-                        <label className={`toggle-switch ${!isPro ? 'disabled' : ''}`}>
-                          <input
-                            type="checkbox"
-                            checked={isPro && stealthMode}
-                            disabled={!isPro}
-                            onChange={(e) => {
-                              if (!isPro) return;
-                              const enabled = e.target.checked;
-                              setStealthMode(enabled);
-                              localStorage.setItem('stealth_mode', enabled.toString());
-                              invoke('set_stealth_mode', { enabled })
-                                .then(() => {
-                                  invoke('get_stealth_status')
-                                    .then(status => setStealthStatus(status as any))
-                                    .catch(() => {});
-                                })
-                                .catch(console.error);
-                            }}
-                          />
-                          <span className="toggle-switch-slider" />
-                        </label>
-                        <span className="stealth-label">
-                          {isPro ? (stealthMode ? 'Enabled' : 'Disabled') : 'Disabled (Pro Only)'}
+                    <div className="app-settings-label" style={{ marginBottom: '8px' }}>
+                      Stealth Mode
+                      {!isPro && (
+                        <span style={{
+                          marginLeft: '8px',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          color: 'var(--primary-blue)',
+                          background: 'rgba(59, 130, 246, 0.1)',
+                          border: '1px solid rgba(59, 130, 246, 0.3)',
+                          borderRadius: '4px',
+                          padding: '2px 6px',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px'
+                        }}>
+                          Pro Only
                         </span>
-                      </div>
+                      )}
+                    </div>
+                    <div className="stealth-toggle-row" style={{ marginBottom: '12px' }}>
+                      <label className={`toggle-switch ${!isPro ? 'disabled' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={isPro && stealthMode}
+                          disabled={!isPro}
+                          onChange={(e) => {
+                            if (!isPro) return;
+                            const enabled = e.target.checked;
+                            setStealthMode(enabled);
+                            localStorage.setItem('stealth_mode', enabled.toString());
+                            invoke('set_stealth_mode', { enabled })
+                              .then(() => {
+                                invoke('get_stealth_status')
+                                  .then(status => setStealthStatus(status as any))
+                                  .catch(() => {});
+                              })
+                              .catch(console.error);
+                          }}
+                        />
+                        <span className="toggle-switch-slider" />
+                      </label>
+                      <span className="stealth-label">
+                        {isPro ? (stealthMode ? 'Enabled' : 'Disabled') : 'Disabled (Pro Only)'}
+                      </span>
                     </div>
 
                     {/* Anti-Detection Security Status */}
