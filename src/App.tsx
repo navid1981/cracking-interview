@@ -224,6 +224,19 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+
+  // Ensure Stealth Mode is strictly disabled and unswitchable for non-Pro users
+  useEffect(() => {
+    if (!authLoading && !isPro) {
+      if (stealthMode) {
+        setStealthMode(false);
+        localStorage.setItem('stealth_mode', 'false');
+        invoke('set_stealth_mode', { enabled: false }).catch(() => {});
+      }
+    }
+  }, [authLoading, isPro, stealthMode]);
+
   const [previousWindowSize, setPreviousWindowSize] = useState<{width: number, height: number} | null>(null);
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [audioSeconds, setAudioSeconds] = useState(0);
@@ -2658,16 +2671,38 @@ function App() {
 
                   {/* Stealth Mode */}
                   <div className="app-settings-group">
-                    <div className="app-settings-label">Stealth Mode</div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div className="app-settings-label">
+                        Stealth Mode
+                        {!isPro && (
+                          <span style={{
+                            marginLeft: '8px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            color: 'var(--primary-blue)',
+                            background: 'rgba(59, 130, 246, 0.1)',
+                            border: '1px solid rgba(59, 130, 246, 0.3)',
+                            borderRadius: '4px',
+                            padding: '2px 6px',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.5px'
+                          }}>
+                            Pro Only
+                          </span>
+                        )}
+                      </div>
+                    </div>
                     <div className="app-settings-desc">
                       Hidden from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows).
                     </div>
                     <div className="stealth-toggle-row">
-                      <label className="toggle-switch">
+                      <label className={`toggle-switch ${!isPro ? 'disabled' : ''}`}>
                         <input
                           type="checkbox"
-                          checked={stealthMode}
+                          checked={isPro && stealthMode}
+                          disabled={!isPro}
                           onChange={(e) => {
+                            if (!isPro) return;
                             const enabled = e.target.checked;
                             setStealthMode(enabled);
                             localStorage.setItem('stealth_mode', enabled.toString());
@@ -2682,11 +2717,13 @@ function App() {
                         />
                         <span className="toggle-switch-slider" />
                       </label>
-                      <span className="stealth-label">{stealthMode ? 'Enabled' : 'Disabled'}</span>
+                      <span className="stealth-label">
+                        {isPro ? (stealthMode ? 'Enabled' : 'Disabled') : 'Disabled (Pro Only)'}
+                      </span>
                     </div>
 
                     {/* Anti-Detection Security Status */}
-                    {stealthMode ? (
+                    {isPro && stealthMode ? (
                       <div style={{
                         padding: '12px 14px',
                         borderRadius: '8px',
@@ -2700,9 +2737,6 @@ function App() {
                           🛡️ Anti-Detection Protection Active
                         </div>
                         <div style={{ color: 'var(--text-secondary)' }}>
-                          • <strong>Blur Prevention:</strong> Always active — Window never steals focus. Test tabs will not fire <code>window.blur</code>.
-                        </div>
-                        <div style={{ color: 'var(--text-secondary)', marginTop: '3px' }}>
                           • <strong>Hotkey Hiding:</strong> Chrome can never catch your HotKey.
                         </div>
                         <div style={{ color: 'var(--text-secondary)', marginTop: '3px' }}>
@@ -2745,7 +2779,7 @@ function App() {
                           </div>
                         )}
                       </div>
-                    ) : (
+                    ) : isPro ? (
                       <div style={{
                         padding: '12px 14px',
                         borderRadius: '8px',
@@ -2755,19 +2789,33 @@ function App() {
                         fontSize: '12px',
                         lineHeight: '1.5'
                       }}>
-                        <div style={{ fontWeight: 600, color: '#10b981', marginBottom: '6px' }}>
-                          🛡️ Blur Prevention: Always Active
+                        <div style={{ fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                          🛡️ Anti-Detection Protection Inactive
                         </div>
                         <div style={{ color: 'var(--text-secondary)' }}>
-                          • <strong>Blur Prevention:</strong> Always active — Window never steals focus. Test tabs will not fire <code>window.blur</code>.
+                          Enable Stealth Mode above so Chrome cannot catch your HotKey and the window is hidden from screen sharing.
                         </div>
-                        <div style={{ color: 'var(--text-secondary)', marginTop: '3px' }}>
-                          • <strong>Hotkey Hiding & Screen Sharing:</strong> Inactive. Enable Stealth Mode above so Chrome cannot catch your HotKey and the window is hidden from screen sharing.
+                      </div>
+                    ) : (
+                      <div style={{
+                        padding: '12px 14px',
+                        borderRadius: '8px',
+                        marginTop: '14px',
+                        background: 'rgba(59, 130, 246, 0.05)',
+                        border: '1px solid rgba(59, 130, 246, 0.2)',
+                        fontSize: '12px',
+                        lineHeight: '1.5'
+                      }}>
+                        <div style={{ fontWeight: 600, color: 'var(--primary-blue)', marginBottom: '4px' }}>
+                          🔒 Pro Feature: Stealth Mode
+                        </div>
+                        <div style={{ color: 'var(--text-secondary)' }}>
+                          Upgrade to Pro to unlock Stealth Mode (Hotkey Hiding and Screen Sharing Protection).
                         </div>
                       </div>
                     )}
 
-                    {runtimePlatform === 'macos' && (
+                    {runtimePlatform === 'macos' && isPro && (
                       <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px' }}>
                         Stealth changes take effect after restarting the app.
                       </p>

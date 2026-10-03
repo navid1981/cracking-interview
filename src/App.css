@@ -1449,6 +1449,12 @@ span.status-indicator.chrome-user-mode {
   transform: translateX(20px);
 }
 
+.toggle-switch.disabled,
+.toggle-switch input:disabled + .toggle-switch-slider {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .stealth-label {
   font-size: 14px;
   color: var(--text-primary);
