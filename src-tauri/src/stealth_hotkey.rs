@@ -116,7 +116,7 @@ pub struct ParsedHotkey {
 
 /// Returns whether low-level OS event swallowing is currently active.
 pub fn is_swallowing_active() -> bool {
-    SWALLOWING_ACTIVE.load(Ordering::Relaxed)
+    crate::STEALTH_ENABLED.load(Ordering::Relaxed) && SWALLOWING_ACTIVE.load(Ordering::Relaxed)
 }
 
 /// Check if accessibility / input monitoring permission is granted (macOS).
@@ -194,6 +194,7 @@ pub fn request_accessibility_permission() -> bool {
 }
 
 /// Bring the main window to the front without stealing focus from Chrome or the active app.
+/// Blur prevention is ALWAYS active so test tabs never register a window.blur event.
 pub fn bring_to_front_without_focus(win: &tauri::WebviewWindow) {
     #[cfg(target_os = "macos")]
     {
@@ -724,7 +725,12 @@ unsafe extern "C" fn macos_event_tap_callback(
         };
 
         if let Some(action) = matched_action {
-            println!("🕵️ [stealth-hotkey-macOS] Swallowed key event for {}", action.label());
+            let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed);
+            if is_stealth {
+                println!("🕵️ [stealth-hotkey-macOS] Swallowed key event for {}", action.label());
+            } else {
+                println!("⌨️ [normal-hotkey-macOS] Key event triggered for {}", action.label());
+            }
 
             // Dispatch on a background thread so the event tap callback returns in microseconds
             if let Some(app) = APP_HANDLE.lock().unwrap().clone() {
@@ -733,9 +739,11 @@ unsafe extern "C" fn macos_event_tap_callback(
                 });
             }
 
-            // SWALLOW THE KEY EVENT: Returning NULL deletes the event completely.
-            // Chrome never sees keydown, never switches tabs, and DOM listeners never fire.
-            return std::ptr::null_mut();
+            if is_stealth {
+                // SWALLOW THE KEY EVENT: Returning NULL deletes the event completely.
+                // Chrome never sees keydown, never switches tabs, and DOM listeners never fire.
+                return std::ptr::null_mut();
+            }
         }
     }
 
@@ -819,7 +827,12 @@ unsafe extern "system" fn windows_keyboard_proc(
             };
 
             if let Some(action) = matched_action {
-                println!("🕵️ [stealth-hotkey-windows] Swallowed key event for {}", action.label());
+                let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed);
+                if is_stealth {
+                    println!("🕵️ [stealth-hotkey-windows] Swallowed key event for {}", action.label());
+                } else {
+                    println!("⌨️ [normal-hotkey-windows] Key event triggered for {}", action.label());
+                }
 
                 if let Some(app) = APP_HANDLE.lock().unwrap().clone() {
                     std::thread::spawn(move || {
@@ -827,9 +840,11 @@ unsafe extern "system" fn windows_keyboard_proc(
                     });
                 }
 
-                // SWALLOW THE KEY EVENT: Returning 1 halts propagation.
-                // Windows will NOT dispatch WM_KEYDOWN/WM_KEYUP to Chrome.
-                return LRESULT(1);
+                if is_stealth {
+                    // SWALLOW THE KEY EVENT: Returning 1 halts propagation.
+                    // Windows will NOT dispatch WM_KEYDOWN/WM_KEYUP to Chrome.
+                    return LRESULT(1);
+                }
             }
         }
     }

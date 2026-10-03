@@ -970,8 +970,15 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (showSettings && settingsTab === 'hotkeys') {
-      loadHotkeys();
+    if (showSettings) {
+      if (settingsTab === 'hotkeys') {
+        loadHotkeys();
+      }
+      if (settingsTab === 'hotkeys' || settingsTab === 'app') {
+        invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('get_stealth_status')
+          .then(setStealthStatus)
+          .catch(() => {});
+      }
     }
   }, [showSettings, settingsTab]);
 
@@ -2456,68 +2463,6 @@ function App() {
 
               {settingsTab === 'hotkeys' && (
                 <div className="hotkeys-panel">
-                  {/* Anti-Detection Security Status */}
-                  <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    marginBottom: '16px',
-                    background: stealthStatus?.swallowing_active ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)',
-                    border: `1px solid ${stealthStatus?.swallowing_active ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`,
-                    fontSize: '12px',
-                    lineHeight: '1.5'
-                  }}>
-                    <div style={{ fontWeight: 600, color: stealthStatus?.swallowing_active ? '#10b981' : '#f59e0b', marginBottom: '4px' }}>
-                      🛡️ Anti-Detection Protection {stealthStatus?.swallowing_active ? 'Active' : 'Partially Active'}
-                    </div>
-                    <div style={{ color: 'var(--text-secondary)' }}>
-                      • <strong>Blur Prevention:</strong> Window never steals focus. Test tabs will not fire <code>window.blur</code>.
-                    </div>
-                    <div style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>
-                      • <strong>Hotkey Swallowing:</strong> {stealthStatus?.swallowing_active
-                        ? <span style={{ color: '#10b981', fontWeight: 600 }}>Active (Keys swallowed at OS level; hidden from Chrome DOM)</span>
-                        : runtimePlatform === 'macos'
-                          ? <span style={{ color: '#f59e0b' }}>Fallback active. Grant Accessibility permission to swallow keys from Chrome.</span>
-                          : <span style={{ color: '#10b981', fontWeight: 600 }}>Active</span>
-                      }
-                    </div>
-
-                    {runtimePlatform === 'macos' && !stealthStatus?.swallowing_active && (
-                      <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                        <button
-                          type="button"
-                          onClick={handleRequestAccessibility}
-                          style={{
-                            background: '#f59e0b',
-                            color: '#000',
-                            border: 'none',
-                            borderRadius: '5px',
-                            padding: '4px 10px',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          🔑 Request macOS Permission
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleRefreshStealthStatus}
-                          style={{
-                            background: 'rgba(255, 255, 255, 0.1)',
-                            color: 'var(--text-primary)',
-                            border: '1px solid rgba(255, 255, 255, 0.2)',
-                            borderRadius: '5px',
-                            padding: '4px 10px',
-                            fontSize: '11px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          🔄 Re-check Status
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
                   {/* Solve Section */}
                   <div className="hotkeys-section">
                     <div className="hotkeys-section-title">🎯 Solve</div>
@@ -2726,13 +2671,102 @@ function App() {
                             const enabled = e.target.checked;
                             setStealthMode(enabled);
                             localStorage.setItem('stealth_mode', enabled.toString());
-                            invoke('set_stealth_mode', { enabled }).catch(console.error);
+                            invoke('set_stealth_mode', { enabled })
+                              .then(() => {
+                                invoke('get_stealth_status')
+                                  .then(status => setStealthStatus(status as any))
+                                  .catch(() => {});
+                              })
+                              .catch(console.error);
                           }}
                         />
                         <span className="toggle-switch-slider" />
                       </label>
                       <span className="stealth-label">{stealthMode ? 'Enabled' : 'Disabled'}</span>
                     </div>
+
+                    {/* Anti-Detection Security Status */}
+                    {stealthMode ? (
+                      <div style={{
+                        padding: '12px 14px',
+                        borderRadius: '8px',
+                        marginTop: '14px',
+                        background: 'rgba(16, 185, 129, 0.08)',
+                        border: '1px solid rgba(16, 185, 129, 0.25)',
+                        fontSize: '12px',
+                        lineHeight: '1.5'
+                      }}>
+                        <div style={{ fontWeight: 600, color: '#10b981', marginBottom: '6px' }}>
+                          🛡️ Anti-Detection Protection Active
+                        </div>
+                        <div style={{ color: 'var(--text-secondary)' }}>
+                          • <strong>Blur Prevention:</strong> Always active — Window never steals focus. Test tabs will not fire <code>window.blur</code>.
+                        </div>
+                        <div style={{ color: 'var(--text-secondary)', marginTop: '3px' }}>
+                          • <strong>Hotkey Hiding:</strong> Chrome can never catch your HotKey.
+                        </div>
+                        <div style={{ color: 'var(--text-secondary)', marginTop: '3px' }}>
+                          • <strong>Screen Sharing Protection:</strong> Hidden from Zoom, Teams, Meet, screenshots, and screen recordings.
+                        </div>
+
+                        {runtimePlatform === 'macos' && !stealthStatus?.swallowing_active && (
+                          <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                            <button
+                              type="button"
+                              onClick={handleRequestAccessibility}
+                              style={{
+                                background: '#f59e0b',
+                                color: '#000',
+                                border: 'none',
+                                borderRadius: '5px',
+                                padding: '4px 10px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              🔑 Request macOS Permission
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleRefreshStealthStatus}
+                              style={{
+                                background: 'rgba(255, 255, 255, 0.1)',
+                                color: 'var(--text-primary)',
+                                border: '1px solid rgba(255, 255, 255, 0.2)',
+                                borderRadius: '5px',
+                                padding: '4px 10px',
+                                fontSize: '11px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              🔄 Re-check Status
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{
+                        padding: '12px 14px',
+                        borderRadius: '8px',
+                        marginTop: '14px',
+                        background: 'rgba(255, 255, 255, 0.03)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        fontSize: '12px',
+                        lineHeight: '1.5'
+                      }}>
+                        <div style={{ fontWeight: 600, color: '#10b981', marginBottom: '6px' }}>
+                          🛡️ Blur Prevention: Always Active
+                        </div>
+                        <div style={{ color: 'var(--text-secondary)' }}>
+                          • <strong>Blur Prevention:</strong> Always active — Window never steals focus. Test tabs will not fire <code>window.blur</code>.
+                        </div>
+                        <div style={{ color: 'var(--text-secondary)', marginTop: '3px' }}>
+                          • <strong>Hotkey Hiding & Screen Sharing:</strong> Inactive. Enable Stealth Mode above so Chrome cannot catch your HotKey and the window is hidden from screen sharing.
+                        </div>
+                      </div>
+                    )}
+
                     {runtimePlatform === 'macos' && (
                       <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px' }}>
                         Stealth changes take effect after restarting the app.

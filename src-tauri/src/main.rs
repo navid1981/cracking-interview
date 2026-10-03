@@ -2372,8 +2372,9 @@ pub struct StealthStatus {
 
 #[tauri::command]
 fn get_stealth_status() -> Result<StealthStatus, String> {
+    let stealth_enabled = STEALTH_ENABLED.load(Ordering::Relaxed);
     Ok(StealthStatus {
-        swallowing_active: stealth_hotkey::is_swallowing_active(),
+        swallowing_active: stealth_enabled && stealth_hotkey::is_swallowing_active(),
         blur_prevention_active: true,
         macos_accessibility_granted: stealth_hotkey::is_accessibility_granted(),
     })
