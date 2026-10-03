@@ -1038,6 +1038,32 @@ function App() {
     }
   };
 
+  const handleRequestAccessibility = async () => {
+    try {
+      await invoke('request_accessibility');
+      // Wait a moment for System Settings or user toggle, then refresh status
+      setTimeout(async () => {
+        try {
+          const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('refresh_stealth_status');
+          setStealthStatus(status);
+        } catch {
+          // ignore
+        }
+      }, 1000);
+    } catch (e) {
+      console.error('Failed to request accessibility:', e);
+    }
+  };
+
+  const handleRefreshStealthStatus = async () => {
+    try {
+      const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('refresh_stealth_status');
+      setStealthStatus(status);
+    } catch (e) {
+      console.error('Failed to refresh stealth status:', e);
+    }
+  };
+
   const handleOpenSettings = async () => {
     
     try {
@@ -2432,16 +2458,16 @@ function App() {
                 <div className="hotkeys-panel">
                   {/* Anti-Detection Security Status */}
                   <div style={{
-                    padding: '10px 14px',
+                    padding: '12px 14px',
                     borderRadius: '8px',
                     marginBottom: '16px',
-                    background: 'rgba(16, 185, 129, 0.08)',
-                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                    background: stealthStatus?.swallowing_active ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+                    border: `1px solid ${stealthStatus?.swallowing_active ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`,
                     fontSize: '12px',
                     lineHeight: '1.5'
                   }}>
-                    <div style={{ fontWeight: 600, color: '#10b981', marginBottom: '4px' }}>
-                      🛡️ Anti-Detection Protection Active
+                    <div style={{ fontWeight: 600, color: stealthStatus?.swallowing_active ? '#10b981' : '#f59e0b', marginBottom: '4px' }}>
+                      🛡️ Anti-Detection Protection {stealthStatus?.swallowing_active ? 'Active' : 'Partially Active'}
                     </div>
                     <div style={{ color: 'var(--text-secondary)' }}>
                       • <strong>Blur Prevention:</strong> Window never steals focus. Test tabs will not fire <code>window.blur</code>.
@@ -2450,10 +2476,46 @@ function App() {
                       • <strong>Hotkey Swallowing:</strong> {stealthStatus?.swallowing_active
                         ? <span style={{ color: '#10b981', fontWeight: 600 }}>Active (Keys swallowed at OS level; hidden from Chrome DOM)</span>
                         : runtimePlatform === 'macos'
-                          ? <span style={{ color: '#f59e0b' }}>Fallback active. Grant Accessibility permission in macOS System Settings to swallow keys from Chrome.</span>
+                          ? <span style={{ color: '#f59e0b' }}>Fallback active. Grant Accessibility permission to swallow keys from Chrome.</span>
                           : <span style={{ color: '#10b981', fontWeight: 600 }}>Active</span>
                       }
                     </div>
+
+                    {runtimePlatform === 'macos' && !stealthStatus?.swallowing_active && (
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                        <button
+                          type="button"
+                          onClick={handleRequestAccessibility}
+                          style={{
+                            background: '#f59e0b',
+                            color: '#000',
+                            border: 'none',
+                            borderRadius: '5px',
+                            padding: '4px 10px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🔑 Request macOS Permission
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleRefreshStealthStatus}
+                          style={{
+                            background: 'rgba(255, 255, 255, 0.1)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid rgba(255, 255, 255, 0.2)',
+                            borderRadius: '5px',
+                            padding: '4px 10px',
+                            fontSize: '11px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🔄 Re-check Status
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Solve Section */}

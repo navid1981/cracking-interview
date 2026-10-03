@@ -352,6 +352,20 @@ fn unregister_hotkey_best_effort(app: &tauri::AppHandle, hotkey: &str) {
     let _ = app.global_shortcut().unregister(hotkey);
 }
 
+pub(crate) fn unregister_all_fallback_hotkeys(app: &tauri::AppHandle, cfg: &HotkeysConfig) {
+    unregister_hotkey_best_effort(app, &cfg.text);
+    unregister_hotkey_best_effort(app, &cfg.screenshot);
+    unregister_hotkey_best_effort(app, &cfg.audio_toggle);
+    unregister_hotkey_best_effort(app, &cfg.scroll_up);
+    unregister_hotkey_best_effort(app, &cfg.scroll_down);
+    unregister_hotkey_best_effort(app, &cfg.move_up);
+    unregister_hotkey_best_effort(app, &cfg.move_down);
+    unregister_hotkey_best_effort(app, &cfg.move_left);
+    unregister_hotkey_best_effort(app, &cfg.move_right);
+    unregister_hotkey_best_effort(app, &cfg.toggle_visibility);
+    unregister_hotkey_best_effort(app, &cfg.quit_app);
+}
+
 /// Reapply screen-capture exclusion after win.show() on Windows.
 /// On Windows, hiding then showing a window can reset the WDA_EXCLUDEFROMCAPTURE flag,
 /// causing a black rectangle in screen sharing instead of full invisibility.
@@ -587,19 +601,27 @@ async fn activate_tab(tab_id: String) -> Result<(), String> {
 #[tauri::command]
 async fn capture_tab_screenshot(tab_id: String) -> Result<String, String> {
     let screenshot_bytes = chrome::capture_screenshot(&tab_id).await?;
-    let mut screenshot_path = std::env::temp_dir();
-    screenshot_path.push("cracking_interview_screenshot.png");
-    std::fs::write(&screenshot_path, screenshot_bytes)
-        .map_err(|e| format!("Failed to save screenshot: {}", e))?;
-    Ok(screenshot_path.to_str().ok_or("Invalid path")?.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut screenshot_path = std::env::temp_dir();
+        screenshot_path.push("cracking_interview_screenshot.png");
+        std::fs::write(&screenshot_path, screenshot_bytes)
+            .map_err(|e| format!("Failed to save screenshot: {}", e))?;
+        Ok(screenshot_path.to_str().ok_or("Invalid path")?.to_string())
+    })
+    .await
+    .map_err(|e| format!("Save screenshot task error: {}", e))?
 }
 
 #[tauri::command]
 async fn get_tab_thumbnail(tab_id: String) -> Result<String, String> {
     let thumbnail_bytes = chrome::capture_thumbnail(&tab_id).await?;
-    use base64::{Engine as _, engine::general_purpose};
-    let base64_data = general_purpose::STANDARD.encode(&thumbnail_bytes);
-    Ok(format!("data:image/jpeg;base64,{}", base64_data))
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::{Engine as _, engine::general_purpose};
+        let base64_data = general_purpose::STANDARD.encode(&thumbnail_bytes);
+        Ok(format!("data:image/jpeg;base64,{}", base64_data))
+    })
+    .await
+    .map_err(|e| format!("Tab thumbnail task error: {}", e))?
 }
 
 /// Returns a short string describing how Chrome is connected:
@@ -624,17 +646,23 @@ async fn get_chrome_connection_mode() -> Result<String, String> {
 
 #[tauri::command]
 async fn get_displays() -> Result<Vec<screenshot::DisplayInfo>, String> {
-    screenshot::get_all_displays()
+    tauri::async_runtime::spawn_blocking(screenshot::get_all_displays)
+        .await
+        .map_err(|e| format!("Get displays task error: {}", e))?
 }
 
 #[tauri::command]
 async fn capture_display_screenshot(display_id: String) -> Result<String, String> {
-    let screenshot_bytes = screenshot::capture_display_screenshot(&display_id)?;
-    let mut screenshot_path = std::env::temp_dir();
-    screenshot_path.push("cracking_interview_display_screenshot.jpg");
-    std::fs::write(&screenshot_path, screenshot_bytes)
-        .map_err(|e| format!("Failed to save screenshot: {}", e))?;
-    Ok(screenshot_path.to_str().ok_or("Invalid path")?.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let screenshot_bytes = screenshot::capture_display_screenshot(&display_id)?;
+        let mut screenshot_path = std::env::temp_dir();
+        screenshot_path.push("cracking_interview_display_screenshot.jpg");
+        std::fs::write(&screenshot_path, screenshot_bytes)
+            .map_err(|e| format!("Failed to save screenshot: {}", e))?;
+        Ok(screenshot_path.to_str().ok_or("Invalid path")?.to_string())
+    })
+    .await
+    .map_err(|e| format!("Capture display task error: {}", e))?
 }
 
 // ============================================================================
@@ -693,10 +721,14 @@ fn transcribe_audio_file(audio_path: String) -> Result<String, String> {
 
 #[tauri::command]
 async fn get_display_thumbnail(display_id: String) -> Result<String, String> {
-    let thumbnail_bytes = screenshot::capture_display_thumbnail(&display_id)?;
-    use base64::{Engine as _, engine::general_purpose};
-    let base64_data = general_purpose::STANDARD.encode(&thumbnail_bytes);
-    Ok(format!("data:image/jpeg;base64,{}", base64_data))
+    tauri::async_runtime::spawn_blocking(move || {
+        let thumbnail_bytes = screenshot::capture_display_thumbnail(&display_id)?;
+        use base64::{Engine as _, engine::general_purpose};
+        let base64_data = general_purpose::STANDARD.encode(&thumbnail_bytes);
+        Ok(format!("data:image/jpeg;base64,{}", base64_data))
+    })
+    .await
+    .map_err(|e| format!("Display thumbnail task error: {}", e))?
 }
 
 
@@ -1922,6 +1954,7 @@ fn apply_macos_screen_capture_protection(win: &tauri::WebviewWindow) {
 /// macOS: Restore window to normal visibility (allow screen capture)
 /// by setting NSWindow.sharingType = NSWindowSharingReadWrite (1).
 #[cfg(target_os = "macos")]
+#[allow(dead_code)]
 fn restore_macos_screen_capture_visibility(win: &tauri::WebviewWindow) {
     use std::ffi::c_void;
 
@@ -2086,6 +2119,8 @@ fn main() {
             set_hotkeys,
             reset_hotkeys_to_default,
             get_stealth_status,
+            request_accessibility,
+            refresh_stealth_status,
             move_window_by,
             frontend_log,
         ])
@@ -2156,8 +2191,13 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            if let tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } = event {
+                stealth_hotkey::teardown_stealth_hotkeys();
+            }
+        });
 }
 
 
@@ -2196,9 +2236,31 @@ async fn move_window_by(window: tauri::Window, dx: i32, dy: i32) -> Result<(), S
     for i in 1..=steps {
         let x = start_x + (step_dx * i as f64).round() as i32;
         let y = start_y + (step_dy * i as f64).round() as i32;
-        window
-            .set_position(Position::Physical(PhysicalPosition { x, y }))
-            .map_err(|e| e.to_string())?;
+
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::*;
+            if let Ok(h) = window.hwnd() {
+                unsafe {
+                    let hwnd = HWND(h.0 as *mut _);
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND(std::ptr::null_mut()),
+                        x, y, 0, 0,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
+            } else {
+                let _ = window.set_position(Position::Physical(PhysicalPosition { x, y }));
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            window
+                .set_position(Position::Physical(PhysicalPosition { x, y }))
+                .map_err(|e| e.to_string())?;
+        }
         sleep(Duration::from_millis(10)).await;
     }
 
@@ -2211,10 +2273,39 @@ async fn move_window_by(window: tauri::Window, dx: i32, dy: i32) -> Result<(), S
 
 #[tauri::command]
 async fn resize_window(window: tauri::Window, width: f64, height: f64) -> Result<(), String> {
-    use tauri::Size;
     println!("🪟 resize_window called: {}x{}", width, height);
-    window.set_size(Size::Logical(tauri::LogicalSize { width, height }))
-        .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        if let Ok(h) = window.hwnd() {
+            let scale = window.scale_factor().unwrap_or(1.0);
+            let phys_w = (width * scale).round() as i32;
+            let phys_h = (height * scale).round() as i32;
+            unsafe {
+                let hwnd = HWND(h.0 as *mut _);
+                let _ = SetWindowPos(
+                    hwnd,
+                    HWND(std::ptr::null_mut()),
+                    0, 0, phys_w, phys_h,
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+        } else {
+            use tauri::Size;
+            window.set_size(Size::Logical(tauri::LogicalSize { width, height }))
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        use tauri::Size;
+        window.set_size(Size::Logical(tauri::LogicalSize { width, height }))
+            .map_err(|e| e.to_string())?;
+    }
+
     if let (Ok(physical), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
         let logical: tauri::LogicalSize<f64> = physical.to_logical(scale);
         println!(
@@ -2289,6 +2380,22 @@ fn get_stealth_status() -> Result<StealthStatus, String> {
 }
 
 #[tauri::command]
+fn request_accessibility() -> Result<bool, String> {
+    Ok(stealth_hotkey::request_accessibility_permission())
+}
+
+#[tauri::command]
+fn refresh_stealth_status(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, HotkeysState>,
+) -> Result<StealthStatus, String> {
+    if let Ok(guard) = state.0.lock() {
+        stealth_hotkey::refresh_stealth_hotkeys(&app, &guard);
+    }
+    get_stealth_status()
+}
+
+#[tauri::command]
 fn get_hotkeys(state: tauri::State<'_, HotkeysState>) -> Result<HotkeysConfig, String> {
     state
         .0
@@ -2305,17 +2412,7 @@ fn reset_hotkeys_to_default(
     let defaults = default_hotkeys();
     // Unregister current, register defaults
     let current = get_hotkeys(state.clone())?;
-    unregister_hotkey_best_effort(&app, &current.text);
-    unregister_hotkey_best_effort(&app, &current.screenshot);
-    unregister_hotkey_best_effort(&app, &current.audio_toggle);
-    unregister_hotkey_best_effort(&app, &current.scroll_up);
-    unregister_hotkey_best_effort(&app, &current.scroll_down);
-    unregister_hotkey_best_effort(&app, &current.move_up);
-    unregister_hotkey_best_effort(&app, &current.move_down);
-    unregister_hotkey_best_effort(&app, &current.move_left);
-    unregister_hotkey_best_effort(&app, &current.move_right);
-    unregister_hotkey_best_effort(&app, &current.toggle_visibility);
-    unregister_hotkey_best_effort(&app, &current.quit_app);
+    unregister_all_fallback_hotkeys(&app, &current);
 
     register_hotkeys(&app, &defaults)?;
     save_hotkeys_to_disk(&app, &defaults)?;
@@ -2428,17 +2525,7 @@ fn set_hotkeys(
     let previous = get_hotkeys(state.clone())?;
 
     // Remove previous registrations, then attempt to register the new ones.
-    unregister_hotkey_best_effort(&app, &previous.text);
-    unregister_hotkey_best_effort(&app, &previous.screenshot);
-    unregister_hotkey_best_effort(&app, &previous.audio_toggle);
-    unregister_hotkey_best_effort(&app, &previous.scroll_up);
-    unregister_hotkey_best_effort(&app, &previous.scroll_down);
-    unregister_hotkey_best_effort(&app, &previous.move_up);
-    unregister_hotkey_best_effort(&app, &previous.move_down);
-    unregister_hotkey_best_effort(&app, &previous.move_left);
-    unregister_hotkey_best_effort(&app, &previous.move_right);
-    unregister_hotkey_best_effort(&app, &previous.toggle_visibility);
-    unregister_hotkey_best_effort(&app, &previous.quit_app);
+    unregister_all_fallback_hotkeys(&app, &previous);
 
     let next = HotkeysConfig {
         text,

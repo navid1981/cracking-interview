@@ -42,6 +42,16 @@ lazy_static::lazy_static! {
 static SWALLOWING_ACTIVE: AtomicBool = AtomicBool::new(false);
 static HOOK_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+#[cfg(target_os = "macos")]
+static MAC_EVENT_TAP: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+#[cfg(target_os = "macos")]
+static MAC_RUN_LOOP: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+#[cfg(target_os = "windows")]
+static WIN_HOOK_HANDLE: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+#[cfg(target_os = "windows")]
+static WIN_HOOK_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotkeyAction {
     SolveText,
@@ -122,6 +132,59 @@ pub fn is_accessibility_granted() -> bool {
     #[cfg(target_os = "windows")]
     {
         // Windows low-level keyboard hooks do not require special accessibility permissions
+        true
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+/// Trigger native system accessibility permission prompt if not already granted (macOS).
+pub fn request_accessibility_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "ApplicationServices", kind = "framework")]
+        extern "C" {
+            fn AXIsProcessTrustedWithOptions(options: *const std::ffi::c_void) -> bool;
+            static kAXTrustedCheckOptionPrompt: *const std::ffi::c_void;
+        }
+        #[link(name = "CoreFoundation", kind = "framework")]
+        extern "C" {
+            fn CFDictionaryCreate(
+                allocator: *mut std::ffi::c_void,
+                keys: *const *const std::ffi::c_void,
+                values: *const *const std::ffi::c_void,
+                numValues: isize,
+                keyCallBacks: *const std::ffi::c_void,
+                valueCallBacks: *const std::ffi::c_void,
+            ) -> *mut std::ffi::c_void;
+            fn CFRelease(cf: *mut std::ffi::c_void);
+            static kCFBooleanTrue: *const std::ffi::c_void;
+            static kCFTypeDictionaryKeyCallBacks: std::ffi::c_void;
+            static kCFTypeDictionaryValueCallBacks: std::ffi::c_void;
+        }
+
+        unsafe {
+            let key = kAXTrustedCheckOptionPrompt;
+            let val = kCFBooleanTrue;
+            let dict = CFDictionaryCreate(
+                std::ptr::null_mut(),
+                &key,
+                &val,
+                1,
+                &kCFTypeDictionaryKeyCallBacks,
+                &kCFTypeDictionaryValueCallBacks,
+            );
+            let trusted = AXIsProcessTrustedWithOptions(dict);
+            if !dict.is_null() {
+                CFRelease(dict);
+            }
+            trusted
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
         true
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -254,9 +317,53 @@ pub fn dispatch_action(app: &tauri::AppHandle, action: HotkeyAction) {
             toggle_visibility_without_focus(app);
         }
         HotkeyAction::QuitApp => {
+            teardown_stealth_hotkeys();
             app.exit(0);
         }
     }
+}
+
+/// Cleanly tear down OS-level hooks and run-loops on exit.
+pub fn teardown_stealth_hotkeys() {
+    #[cfg(target_os = "macos")]
+    {
+        let tap = MAC_EVENT_TAP.swap(0, Ordering::Relaxed) as CFMachPortRef;
+        if !tap.is_null() {
+            unsafe {
+                CGEventTapEnable(tap, false);
+                CFRelease(tap);
+            }
+        }
+        let rl = MAC_RUN_LOOP.swap(0, Ordering::Relaxed) as CFRunLoopRef;
+        if !rl.is_null() {
+            unsafe {
+                CFRunLoopStop(rl);
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{UnhookWindowsHookEx, PostThreadMessageW, HHOOK, WM_QUIT};
+        use windows::Win32::Foundation::{WPARAM, LPARAM};
+
+        let handle = WIN_HOOK_HANDLE.swap(0, Ordering::Relaxed);
+        if handle != 0 {
+            unsafe {
+                let _ = UnhookWindowsHookEx(HHOOK(handle as *mut _));
+            }
+        }
+        let tid = WIN_HOOK_THREAD_ID.swap(0, Ordering::Relaxed);
+        if tid != 0 {
+            unsafe {
+                let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
+            }
+        }
+    }
+
+    SWALLOWING_ACTIVE.store(false, Ordering::Relaxed);
+    HOOK_INITIALIZED.store(false, Ordering::Relaxed);
+    println!("🕵️ [stealth-hotkeys] Low-level hooks cleanly torn down");
 }
 
 /// Register all configured hotkeys with low-level event swallowing.
@@ -307,6 +414,24 @@ pub fn setup_stealth_hotkeys(app: &tauri::AppHandle, cfg: &crate::HotkeysConfig)
     }
 
     SWALLOWING_ACTIVE.load(Ordering::Relaxed)
+}
+
+/// Dynamic re-check and re-initialization of stealth hotkeys.
+/// Call this when the user grants accessibility permissions while the app is already running.
+pub fn refresh_stealth_hotkeys(app: &tauri::AppHandle, cfg: &crate::HotkeysConfig) -> bool {
+    if SWALLOWING_ACTIVE.load(Ordering::Relaxed) {
+        return true;
+    }
+
+    // Reset init flag to allow a new attempt
+    HOOK_INITIALIZED.store(false, Ordering::Relaxed);
+    let active = setup_stealth_hotkeys(app, cfg);
+    if active {
+        // If low-level swallowing succeeded, unregister fallback shortcuts so they don't fire twice
+        crate::unregister_all_fallback_hotkeys(app, cfg);
+        println!("🕵️ [stealth-hotkeys] Dynamically activated! Fallback shortcuts unregistered.");
+    }
+    active
 }
 
 // ── Hotkey String Parsing ───────────────────────────────────────────────────
@@ -543,11 +668,10 @@ extern "C" {
     fn CFRunLoopGetCurrent() -> CFRunLoopRef;
     fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef);
     fn CFRunLoopRun();
+    fn CFRunLoopStop(rl: CFRunLoopRef);
+    fn CFRelease(cf: *mut std::ffi::c_void);
     static kCFRunLoopCommonModes: CFStringRef;
 }
-
-#[cfg(target_os = "macos")]
-static MAC_EVENT_TAP: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
 #[cfg(target_os = "macos")]
 unsafe extern "C" fn macos_event_tap_callback(
@@ -571,15 +695,22 @@ unsafe extern "C" fn macos_event_tap_callback(
         // kCGKeyboardEventKeycode = 9
         let keycode = CGEventGetIntegerValueField(event, 9) as u32;
 
-        // Modifier masks on macOS:
-        // Command:   0x00100000 (1 << 20)
-        // Shift:     0x00020000 (1 << 17)
-        // Control:   0x00080000 (1 << 19)
-        // Alternate: 0x00040000 (1 << 18)
-        let has_cmd = (flags & 0x00100000) != 0;
-        let has_shift = (flags & 0x00020000) != 0;
-        let has_ctrl = (flags & 0x00080000) != 0;
-        let has_alt = (flags & 0x00040000) != 0;
+        // CoreGraphics Event Flags:
+        // kCGEventFlagMaskCommand   = 0x00100000 (1 << 20)
+        // kCGEventFlagMaskShift     = 0x00020000 (1 << 17)
+        // kCGEventFlagMaskControl   = 0x00080000 (1 << 19)
+        // kCGEventFlagMaskAlternate = 0x00040000 (1 << 18)
+        const CG_FLAG_COMMAND: u64 = 0x00100000;
+        const CG_FLAG_SHIFT: u64 = 0x00020000;
+        const CG_FLAG_CONTROL: u64 = 0x00080000;
+        const CG_FLAG_ALT: u64 = 0x00040000;
+
+        // Only evaluate primary modifier masks, ignoring auxiliary state bits
+        // such as AlphaShift (Caps Lock 0x00010000) or NumericPad (0x00200000)
+        let has_cmd = (flags & CG_FLAG_COMMAND) != 0;
+        let has_shift = (flags & CG_FLAG_SHIFT) != 0;
+        let has_ctrl = (flags & CG_FLAG_CONTROL) != 0;
+        let has_alt = (flags & CG_FLAG_ALT) != 0;
 
         let matched_action = {
             let guard = ACTIVE_HOTKEYS.lock().unwrap();
@@ -641,6 +772,7 @@ fn init_macos_event_tap() {
             }
 
             let run_loop = CFRunLoopGetCurrent();
+            MAC_RUN_LOOP.store(run_loop as isize, Ordering::Relaxed);
             CFRunLoopAddSource(run_loop, loop_source, kCFRunLoopCommonModes);
             CGEventTapEnable(tap, true);
             SWALLOWING_ACTIVE.store(true, Ordering::Relaxed);
@@ -652,9 +784,6 @@ fn init_macos_event_tap() {
 }
 
 // ── Windows Low-Level Keyboard Hook Implementation ──────────────────────────
-
-#[cfg(target_os = "windows")]
-static WIN_HOOK_HANDLE: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn windows_keyboard_proc(
@@ -712,7 +841,11 @@ unsafe extern "system" fn windows_keyboard_proc(
 fn init_windows_hook() {
     std::thread::spawn(|| {
         use windows::Win32::UI::WindowsAndMessaging::*;
+        use windows::Win32::System::Threading::GetCurrentThreadId;
         unsafe {
+            let tid = GetCurrentThreadId();
+            WIN_HOOK_THREAD_ID.store(tid, Ordering::Relaxed);
+
             let hook = SetWindowsHookExW(
                 WH_KEYBOARD_LL,
                 Some(windows_keyboard_proc),

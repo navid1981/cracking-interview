@@ -273,7 +273,10 @@ async fn capture_screenshot_http(tab_id: &str) -> Result<Vec<u8>, String> {
             serde_json::from_str(msg.to_text().map_err(|e| format!("Invalid: {}", e))?)
                 .map_err(|e| format!("Parse: {}", e))?;
         if let Some(data) = resp["result"]["data"].as_str() {
-            return decode_and_maybe_compress(data);
+            let data_str = data.to_string();
+            return tauri::async_runtime::spawn_blocking(move || decode_and_maybe_compress(&data_str))
+                .await
+                .map_err(|e| format!("Task error: {}", e))?;
         }
     }
     Err("No screenshot data".to_string())
@@ -304,7 +307,10 @@ async fn capture_screenshot_ws(
         .await?;
 
     if let Some(data) = resp["result"]["data"].as_str() {
-        return decode_and_maybe_compress(data);
+        let data_str = data.to_string();
+        return tauri::async_runtime::spawn_blocking(move || decode_and_maybe_compress(&data_str))
+            .await
+            .map_err(|e| format!("Task error: {}", e))?;
     }
     Err("No screenshot data in response".to_string())
 }
