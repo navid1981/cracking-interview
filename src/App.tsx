@@ -226,16 +226,35 @@ function App() {
 
   const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
 
-  // Ensure Stealth Mode is strictly disabled and unswitchable for non-Pro users
+  // Ensure Stealth Mode is strictly disabled and unswitchable for non-Pro users.
+  // For Pro users, default Stealth Mode to ON.
   useEffect(() => {
-    if (!authLoading && !isPro) {
+    if (authLoading) return;
+
+    if (!isPro) {
       if (stealthMode) {
         setStealthMode(false);
         localStorage.setItem('stealth_mode', 'false');
         invoke('set_stealth_mode', { enabled: false }).catch(() => {});
       }
+      localStorage.removeItem('pro_stealth_default_applied');
+    } else {
+      // Pro user: default Stealth Mode switch to ON
+      const proDefaultApplied = localStorage.getItem('pro_stealth_default_applied');
+      if (!proDefaultApplied) {
+        localStorage.setItem('pro_stealth_default_applied', 'true');
+        setStealthMode(true);
+        localStorage.setItem('stealth_mode', 'true');
+        invoke('set_stealth_mode', { enabled: true })
+          .then(() => {
+            invoke('get_stealth_status')
+              .then(status => setStealthStatus(status as any))
+              .catch(() => {});
+          })
+          .catch(() => {});
+      }
     }
-  }, [authLoading, isPro, stealthMode]);
+  }, [authLoading, isPro]);
 
   const [previousWindowSize, setPreviousWindowSize] = useState<{width: number, height: number} | null>(null);
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
@@ -2671,8 +2690,8 @@ function App() {
 
                   {/* Stealth Mode */}
                   <div className="app-settings-group">
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div className="app-settings-label">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                      <div className="app-settings-label" style={{ margin: 0 }}>
                         Stealth Mode
                         {!isPro && (
                           <span style={{
@@ -2691,35 +2710,32 @@ function App() {
                           </span>
                         )}
                       </div>
-                    </div>
-                    <div className="app-settings-desc">
-                      Hidden from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows).
-                    </div>
-                    <div className="stealth-toggle-row">
-                      <label className={`toggle-switch ${!isPro ? 'disabled' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={isPro && stealthMode}
-                          disabled={!isPro}
-                          onChange={(e) => {
-                            if (!isPro) return;
-                            const enabled = e.target.checked;
-                            setStealthMode(enabled);
-                            localStorage.setItem('stealth_mode', enabled.toString());
-                            invoke('set_stealth_mode', { enabled })
-                              .then(() => {
-                                invoke('get_stealth_status')
-                                  .then(status => setStealthStatus(status as any))
-                                  .catch(() => {});
-                              })
-                              .catch(console.error);
-                          }}
-                        />
-                        <span className="toggle-switch-slider" />
-                      </label>
-                      <span className="stealth-label">
-                        {isPro ? (stealthMode ? 'Enabled' : 'Disabled') : 'Disabled (Pro Only)'}
-                      </span>
+                      <div className="stealth-toggle-row">
+                        <label className={`toggle-switch ${!isPro ? 'disabled' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={isPro && stealthMode}
+                            disabled={!isPro}
+                            onChange={(e) => {
+                              if (!isPro) return;
+                              const enabled = e.target.checked;
+                              setStealthMode(enabled);
+                              localStorage.setItem('stealth_mode', enabled.toString());
+                              invoke('set_stealth_mode', { enabled })
+                                .then(() => {
+                                  invoke('get_stealth_status')
+                                    .then(status => setStealthStatus(status as any))
+                                    .catch(() => {});
+                                })
+                                .catch(console.error);
+                            }}
+                          />
+                          <span className="toggle-switch-slider" />
+                        </label>
+                        <span className="stealth-label">
+                          {isPro ? (stealthMode ? 'Enabled' : 'Disabled') : 'Disabled (Pro Only)'}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Anti-Detection Security Status */}
@@ -2727,21 +2743,27 @@ function App() {
                       <div style={{
                         padding: '12px 14px',
                         borderRadius: '8px',
-                        marginTop: '14px',
+                        marginTop: '10px',
                         background: 'rgba(16, 185, 129, 0.08)',
-                        border: '1px solid rgba(16, 185, 129, 0.25)',
+                        border: '1px solid rgba(16, 185, 129, 0.3)',
                         fontSize: '12px',
                         lineHeight: '1.5'
                       }}>
-                        <div style={{ fontWeight: 600, color: '#10b981', marginBottom: '6px' }}>
+                        <div style={{ fontWeight: 600, color: '#059669', marginBottom: '6px' }}>
                           🛡️ Anti-Detection Protection Active
                         </div>
                         <div style={{ color: 'var(--text-secondary)' }}>
                           • <strong>Hotkey Hiding:</strong> Chrome can never catch your HotKey.
                         </div>
                         <div style={{ color: 'var(--text-secondary)', marginTop: '3px' }}>
-                          • <strong>Screen Sharing Protection:</strong> Hidden from Zoom, Teams, Meet, screenshots, and screen recordings.
+                          • <strong>Screen & System Protection:</strong> Hidden from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows).
                         </div>
+
+                        {runtimePlatform === 'macos' && (
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px', fontStyle: 'italic', borderTop: '1px solid rgba(16, 185, 129, 0.2)', paddingTop: '6px' }}>
+                            * Stealth changes take effect after restarting the app.
+                          </div>
+                        )}
 
                         {runtimePlatform === 'macos' && !stealthStatus?.swallowing_active && (
                           <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
@@ -2753,7 +2775,7 @@ function App() {
                                 color: '#000',
                                 border: 'none',
                                 borderRadius: '5px',
-                                padding: '4px 10px',
+                                padding: '5px 12px',
                                 fontSize: '11px',
                                 fontWeight: 600,
                                 cursor: 'pointer'
@@ -2765,11 +2787,11 @@ function App() {
                               type="button"
                               onClick={handleRefreshStealthStatus}
                               style={{
-                                background: 'rgba(255, 255, 255, 0.1)',
+                                background: 'rgba(0, 0, 0, 0.05)',
                                 color: 'var(--text-primary)',
-                                border: '1px solid rgba(255, 255, 255, 0.2)',
+                                border: '1px solid var(--border)',
                                 borderRadius: '5px',
-                                padding: '4px 10px',
+                                padding: '5px 12px',
                                 fontSize: '11px',
                                 cursor: 'pointer'
                               }}
@@ -2783,42 +2805,41 @@ function App() {
                       <div style={{
                         padding: '12px 14px',
                         borderRadius: '8px',
-                        marginTop: '14px',
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        marginTop: '10px',
+                        background: 'rgba(245, 158, 11, 0.08)',
+                        border: '1px solid rgba(245, 158, 11, 0.3)',
                         fontSize: '12px',
                         lineHeight: '1.5'
                       }}>
-                        <div style={{ fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                        <div style={{ fontWeight: 600, color: '#d97706', marginBottom: '6px' }}>
                           🛡️ Anti-Detection Protection Inactive
                         </div>
                         <div style={{ color: 'var(--text-secondary)' }}>
-                          Enable Stealth Mode above so Chrome cannot catch your HotKey and the window is hidden from screen sharing.
+                          Enable Stealth Mode above so Chrome cannot catch your HotKey, and the window is hidden from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows).
                         </div>
+                        {runtimePlatform === 'macos' && (
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px', fontStyle: 'italic', borderTop: '1px solid rgba(245, 158, 11, 0.2)', paddingTop: '6px' }}>
+                            * Stealth changes take effect after restarting the app.
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div style={{
                         padding: '12px 14px',
                         borderRadius: '8px',
-                        marginTop: '14px',
+                        marginTop: '10px',
                         background: 'rgba(59, 130, 246, 0.05)',
-                        border: '1px solid rgba(59, 130, 246, 0.2)',
+                        border: '1px solid rgba(59, 130, 246, 0.25)',
                         fontSize: '12px',
                         lineHeight: '1.5'
                       }}>
-                        <div style={{ fontWeight: 600, color: 'var(--primary-blue)', marginBottom: '4px' }}>
+                        <div style={{ fontWeight: 600, color: 'var(--primary-blue)', marginBottom: '6px' }}>
                           🔒 Pro Feature: Stealth Mode
                         </div>
                         <div style={{ color: 'var(--text-secondary)' }}>
-                          Upgrade to Pro to unlock Stealth Mode (Hotkey Hiding and Screen Sharing Protection).
+                          Upgrade to Pro to unlock Stealth Mode (Hotkey Hiding, and hiding from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows)).
                         </div>
                       </div>
-                    )}
-
-                    {runtimePlatform === 'macos' && isPro && (
-                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px' }}>
-                        Stealth changes take effect after restarting the app.
-                      </p>
                     )}
                   </div>
                 </>

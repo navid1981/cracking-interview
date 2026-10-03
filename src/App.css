@@ -1403,7 +1403,7 @@ span.status-indicator.chrome-user-mode {
 .stealth-toggle-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .toggle-switch {
@@ -1411,52 +1411,86 @@ span.status-indicator.chrome-user-mode {
   width: 44px;
   height: 24px;
   flex-shrink: 0;
+  display: inline-block;
 }
 
 .toggle-switch input {
   opacity: 0;
   width: 0;
   height: 0;
+  margin: 0;
 }
 
 .toggle-switch-slider {
   position: absolute;
   inset: 0;
   border-radius: 12px;
-  background: var(--border);
+  background: #cbd5e1;
+  border: 1.5px solid #94a3b8;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s ease-in-out;
+  box-sizing: border-box;
+}
+
+[data-theme="dark"] .toggle-switch-slider {
+  background: #334155;
+  border-color: #475569;
 }
 
 .toggle-switch-slider::before {
   content: '';
   position: absolute;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: white;
-  top: 3px;
-  left: 3px;
-  transition: transform 0.2s;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  background: #ffffff;
+  top: 2.5px;
+  left: 2.5px;
+  transition: transform 0.2s ease-in-out, background 0.2s ease-in-out;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
 .toggle-switch input:checked + .toggle-switch-slider {
   background: var(--primary-blue);
+  border-color: var(--primary-blue);
 }
 
 .toggle-switch input:checked + .toggle-switch-slider::before {
   transform: translateX(20px);
+  background: #ffffff;
 }
 
-.toggle-switch.disabled,
-.toggle-switch input:disabled + .toggle-switch-slider {
-  opacity: 0.4;
+/* Disabled state - clearly visible in both light & dark themes */
+.toggle-switch.disabled {
   cursor: not-allowed;
 }
 
+.toggle-switch.disabled .toggle-switch-slider,
+.toggle-switch input:disabled + .toggle-switch-slider {
+  background: #e2e8f0;
+  border: 1.5px solid #cbd5e1;
+  cursor: not-allowed;
+}
+
+.toggle-switch.disabled .toggle-switch-slider::before,
+.toggle-switch input:disabled + .toggle-switch-slider::before {
+  background: #94a3b8;
+  box-shadow: none;
+}
+
+[data-theme="dark"] .toggle-switch.disabled .toggle-switch-slider,
+[data-theme="dark"] .toggle-switch input:disabled + .toggle-switch-slider {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+[data-theme="dark"] .toggle-switch.disabled .toggle-switch-slider::before,
+[data-theme="dark"] .toggle-switch input:disabled + .toggle-switch-slider::before {
+  background: #475569;
+}
+
 .stealth-label {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-primary);
   font-weight: 500;
 }
