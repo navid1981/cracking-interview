@@ -6,12 +6,9 @@ mod ai;
 mod screenshot;
 pub(crate) mod audio;
 mod transcription;
-mod oauth_server;
-mod google_oauth;
 mod documents;
 mod stealth_hotkey;
 
-use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::path::PathBuf;
@@ -24,10 +21,6 @@ use serde::{Serialize, Deserialize};
 use base64::{Engine as _, engine::general_purpose};
 
 lazy_static::lazy_static! {
-    static ref OAUTH_SERVICE: Arc<google_oauth::GoogleOAuthService> = {
-        Arc::new(google_oauth::GoogleOAuthService::new())
-    };
-    
     // Reusable HTTP client for AI proxy requests (avoids TLS handshake per request)
     static ref AI_PROXY_CLIENT: reqwest::Client = {
         reqwest::Client::builder()
@@ -37,6 +30,8 @@ lazy_static::lazy_static! {
             .build()
             .expect("Failed to create AI proxy HTTP client")
     };
+    // Free-tier site allow-list, populated from the `get-models` response in `fetch_models`.
+    static ref FREE_ALLOWED_DOMAINS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 }
 
 // Two dedicated hotkeys:
@@ -674,18 +669,6 @@ async fn capture_display_screenshot(display_id: String) -> Result<String, String
 // AUDIO RECORDING (SYSTEM AUDIO / LOOPBACK)
 // ============================================================================
 
-#[tauri::command]
-async fn start_audio_recording() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(|| audio::start_system_audio_recording())
-        .await
-        .map_err(|e| format!("Failed to start audio recording task: {e}"))?
-}
-
-#[tauri::command]
-fn stop_audio_recording() -> Result<String, String> {
-    audio::stop_system_audio_recording()
-}
-
 /// Pre-initialize audio capture when user selects Audio tab (instant recording)
 #[tauri::command]
 async fn warm_audio_capture() -> Result<(), String> {
@@ -698,30 +681,6 @@ async fn warm_audio_capture() -> Result<(), String> {
 #[tauri::command]
 fn cooldown_audio_capture() {
     audio::cooldown_audio_capture();
-}
-
-#[tauri::command]
-fn is_audio_recording() -> Result<bool, String> {
-    Ok(audio::is_recording())
-}
-
-/// Stop audio recording and return the file path
-/// Note: Local transcription is disabled - audio is sent directly to AI instead
-#[tauri::command]
-fn stop_audio_recording_and_transcribe() -> Result<String, String> {
-    let audio_path = audio::stop_system_audio_recording()?;
-    println!("[Audio] Recording stopped, file: {}", audio_path);
-    // Return an error format that frontend can detect to use the audio path
-    // Format: "LOCAL_TRANSCRIPTION_DISABLED:<path>" for backward compatibility
-    Err(format!("LOCAL_TRANSCRIPTION_DISABLED:{}", audio_path))
-}
-
-/// Transcribe an existing audio file
-/// Note: Local transcription is disabled - audio is sent directly to AI instead
-#[tauri::command]
-fn transcribe_audio_file(audio_path: String) -> Result<String, String> {
-    // Local transcription disabled - return error with path
-    Err(format!("LOCAL_TRANSCRIPTION_DISABLED:{}", audio_path))
 }
 
 #[tauri::command]
@@ -741,16 +700,23 @@ async fn get_display_thumbnail(display_id: String) -> Result<String, String> {
 // AI COMMANDS
 // ============================================================================
 
-// Allowed domains for free tier and BYO API key users
-const ALLOWED_DOMAINS: &[&str] = &["leetcode.com", "codewars.com", "codeforces.com", "neetcode.io"];
-
-fn validate_source_url(source_url: &Option<String>) -> Result<(), String> {
+/// Domain check for BYO API key users, against the server-provided allow-list.
+async fn validate_source_url(source_url: &Option<String>) -> Result<(), String> {
     if let Some(url) = source_url {
-        let is_allowed = ALLOWED_DOMAINS.iter().any(|domain| url.contains(domain));
-        if !is_allowed {
+        let load = || FREE_ALLOWED_DOMAINS.lock().map(|d| d.clone()).unwrap_or_default();
+        let mut domains = load();
+        if domains.is_empty() {
+            let _ = fetch_models(String::new()).await;
+            domains = load();
+        }
+        if domains.is_empty() {
+            return Err("❌ Could not load limits from the server. Check your connection and try again.".to_string());
+        }
+        // "all" is the server sentinel for no site restriction.
+        if !domains.iter().any(|domain| domain == "all" || url.contains(domain.as_str())) {
             return Err(format!(
                 "Domain restriction: This feature only works on coding practice sites ({}). Upgrade to Pro for unlimited access.",
-                ALLOWED_DOMAINS.join(", ")
+                domains.join(", ")
             ));
         }
     }
@@ -761,7 +727,7 @@ fn validate_source_url(source_url: &Option<String>) -> Result<(), String> {
 #[tauri::command]
 async fn query_ai(prompt: String, config: ai::AIConfig, source_url: Option<String>) -> Result<String, String> {
     // Validate domain for BYO API key users
-    validate_source_url(&source_url)?;
+    validate_source_url(&source_url).await?;
     ai::query_with_text(&prompt, &config).await
 }
 
@@ -773,66 +739,10 @@ async fn query_ai_with_image(
     source_url: Option<String>,
 ) -> Result<String, String> {
     // Validate domain for BYO API key users
-    validate_source_url(&source_url)?;
+    validate_source_url(&source_url).await?;
     let image_data = std::fs::read(&image_path)
         .map_err(|e| format!("Failed to read image: {}", e))?;
     ai::query_with_image(&prompt, &image_data, &config).await
-}
-
-#[tauri::command]
-async fn query_ai_with_audio(
-    prompt: String,
-    audio_path: String,
-    config: ai::AIConfig,
-) -> Result<String, String> {
-    let audio_bytes = std::fs::read(&audio_path)
-        .map_err(|e| format!("Failed to read audio at {}: {}", audio_path, e))?;
-
-    // Validate that we captured actual WAV audio samples.
-    // A header-only file (often ~4KB due to filesystem block size) means we received no audio buffers.
-    let meta_len = std::fs::metadata(&audio_path)
-        .map(|m| m.len() as usize)
-        .unwrap_or(audio_bytes.len());
-    if meta_len < 128 {
-        return Err(format!(
-            "Recorded audio file is too small ({} bytes) at {}. This feature records **system output audio** (sound coming from your speakers/headphones), not your microphone. Play something (e.g., YouTube) or make sure Zoom meeting audio is audible, then record for a few seconds.",
-            meta_len,
-            audio_path
-        ));
-    }
-    match hound::WavReader::open(&audio_path) {
-        Ok(reader) => {
-            let spec = reader.spec();
-            let samples = reader.duration() as u64;
-            if samples == 0 {
-                return Err(format!(
-                    "No audio samples were captured (file is header-only, {} bytes) at {}. This records **system output audio** (other people speaking / app audio), not your microphone. Ensure system audio is playing and record for a few seconds.",
-                    meta_len,
-                    audio_path
-                ));
-            }
-            // If it's extremely short, still allow sending to Gemini, but warn in logs.
-            let channels = spec.channels.max(1) as u64;
-            let frames = samples / channels;
-            if frames < (spec.sample_rate as u64 / 5) {
-                println!(
-                    "🎙️ audio: very short recording: frames={} (~{}ms) spec={{rate={}, ch={}}} path={}",
-                    frames,
-                    (frames * 1000) / (spec.sample_rate as u64).max(1),
-                    spec.sample_rate,
-                    spec.channels,
-                    audio_path
-                );
-            }
-        }
-        Err(e) => {
-            return Err(format!(
-                "Recorded audio is not a valid WAV file at {} ({} bytes). Error: {}",
-                audio_path, meta_len, e
-            ));
-        }
-    }
-    ai::query_with_audio(&prompt, &audio_bytes, &config).await
 }
 
 /// Response from the AI proxy Edge Function
@@ -1145,11 +1055,14 @@ async fn fetch_models(access_token: String) -> Result<serde_json::Value, String>
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
+    // get-models is public config; signed-out screens (sign-up) fetch it with the anon key.
+    let bearer = if access_token.is_empty() { SUPABASE_ANON_KEY } else { access_token.as_str() };
+
     let response = client
-        .post(format!("{}/functions/v1/get-models", SUPABASE_URL))
+        .post(format!("{}/functions/v1/get-models?v=2", SUPABASE_URL))
         .header("Content-Type", "application/json")
         .header("apikey", SUPABASE_ANON_KEY)
-        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Authorization", format!("Bearer {}", bearer))
         .send()
         .await
         .map_err(|e| format!("Failed to fetch models: {}", e))?;
@@ -1157,8 +1070,17 @@ async fn fetch_models(access_token: String) -> Result<serde_json::Value, String>
     let body = response.text().await
         .map_err(|e| format!("Failed to read models response: {}", e))?;
 
-    serde_json::from_str(&body)
-        .map_err(|e| format!("Failed to parse models response: {}", e))
+    let config: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Failed to parse models response: {}", e))?;
+
+    if let Some(list) = config["free_allowed_domains"].as_array() {
+        let domains: Vec<String> = list.iter().filter_map(|d| d.as_str().map(String::from)).collect();
+        if let Ok(mut stored) = FREE_ALLOWED_DOMAINS.lock() {
+            *stored = domains;
+        }
+    }
+
+    Ok(config)
 }
 
 /// Query AI via the Supabase Edge Function proxy
@@ -1192,7 +1114,6 @@ async fn query_ai_via_proxy(
         "model": model,
         "messages": messages,
         "stream": false,
-        "max_tokens": 16384,
         "source_url": source_url
     });
 
@@ -1320,7 +1241,6 @@ async fn query_ai_via_proxy_with_image(
         "model": model,
         "messages": messages,
         "stream": false,
-        "max_tokens": 16384,
         "source_url": source_url
     });
 
@@ -1399,152 +1319,6 @@ async fn query_ai_via_proxy_with_image(
     })
 }
 
-/// Query AI via proxy with audio (base64 encoded)
-/// Audio is sent directly to Gemini model via OpenRouter - no transcription needed
-#[tauri::command]
-async fn query_ai_via_proxy_with_audio(
-    prompt: String,
-    audio_path: String,
-    model: String,
-    access_token: String,
-) -> Result<AIProxyResponse, String> {
-    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
-
-    println!("[Rust AI Proxy Audio] Starting request to ai-proxy...");
-    println!("[Rust AI Proxy Audio] Model: {}", model);
-    println!("[Rust AI Proxy Audio] Prompt length: {} chars", prompt.len());
-    println!("[Rust AI Proxy Audio] Audio path: {}", audio_path);
-
-    // Read and encode audio
-    let audio_data = std::fs::read(&audio_path)
-        .map_err(|e| format!("Failed to read audio file: {}", e))?;
-    
-    // Validate audio file size (must have actual content)
-    if audio_data.len() < 1000 {
-        return Err(format!(
-            "Audio file is too small ({} bytes). Recording may have failed or been too short.",
-            audio_data.len()
-        ));
-    }
-    
-    let mime_type = audio::detect_audio_mime_type(&audio_data)?;
-    let base64_audio = general_purpose::STANDARD.encode(&audio_data);
-    println!("[Rust AI Proxy Audio] Audio size: {} bytes, mime: {}", audio_data.len(), mime_type);
-
-    // Use static client (reuses TLS connections)
-    let client = &*AI_PROXY_CLIENT;
-
-    // Build multimodal message with audio
-    // OpenRouter expects input_audio format per docs:
-    // https://openrouter.ai/docs/guides/overview/multimodal/audio
-    let audio_format = match mime_type {
-        "audio/wav" | "audio/x-wav" => "wav",
-        "audio/mp3" | "audio/mpeg" => "mp3",
-        "audio/ogg" => "ogg",
-        "audio/flac" => "flac",
-        "audio/aac" => "aac",
-        "audio/m4a" => "m4a",
-        _ => "wav", // default to wav
-    };
-    
-    let messages = serde_json::json!([
-        {
-            "role": "user",
-            "content": [
-                { "type": "text", "text": prompt },
-                { 
-                    "type": "input_audio", 
-                    "input_audio": { 
-                        "data": base64_audio,
-                        "format": audio_format
-                    }
-                }
-            ]
-        }
-    ]);
-
-    let payload = serde_json::json!({
-        "model": model,
-        "messages": messages,
-        "stream": false,
-        "max_tokens": 16384
-    });
-
-    println!("[Rust AI Proxy Audio] Sending POST to {}/functions/v1/ai-proxy", SUPABASE_URL);
-    let start = std::time::Instant::now();
-
-    let response = client
-        .post(format!("{}/functions/v1/ai-proxy", SUPABASE_URL))
-        .header("Authorization", format!("Bearer {}", access_token))
-        .header("Content-Type", "application/json")
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| {
-            let elapsed = start.elapsed();
-            println!("[Rust AI Proxy Audio] Request FAILED after {:?}", elapsed);
-            if e.is_timeout() {
-                println!("[Rust AI Proxy Audio] Error type: TIMEOUT");
-                "❌ AI request timed out after 50 seconds. Please try again.".to_string()
-            } else {
-                println!("[Rust AI Proxy Audio] Error type: {}", e);
-                format!("❌ AI Proxy request failed: {}", e)
-            }
-        })?;
-
-    let elapsed = start.elapsed();
-    println!("[Rust AI Proxy Audio] Response received after {:?}", elapsed);
-
-    let status = response.status();
-    println!("[Rust AI Proxy Audio] Response status: {}", status);
-
-    println!("[Rust AI Proxy Audio] Reading response body...");
-    let body_start = std::time::Instant::now();
-    let response_text = response.text().await
-        .map_err(|e| {
-            println!("[Rust AI Proxy Audio] Body read FAILED after {:?}", body_start.elapsed());
-            format!("❌ Failed to read AI Proxy response: {}", e)
-        })?;
-
-    println!("[Rust AI Proxy Audio] Body read in {:?}, length: {} chars", body_start.elapsed(), response_text.len());
-
-    println!("[Rust AI Proxy Audio] Parsing JSON response...");
-    let proxy_response: serde_json::Value = serde_json::from_str(&response_text)
-        .unwrap_or_else(|e| {
-            println!("[Rust AI Proxy Audio] JSON parse error: {}", e);
-            serde_json::json!({ "error": response_text })
-        });
-
-    if !status.is_success() {
-        let error_msg = proxy_response["error"]
-            .as_str()
-            .unwrap_or(&response_text);
-        println!("[Rust AI Proxy Audio] Non-success status, error: {}", error_msg);
-        return Err(format!("❌ AI Proxy Error ({}): {}", status.as_u16(), error_msg));
-    }
-
-    // Parse usage info
-    let usage = proxy_response["usage"].as_object().map(|u| AIProxyUsage {
-        requests_used: u.get("requests_used").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-        requests_limit: u.get("requests_limit").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-        period_end: u.get("period_end").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        is_paid: u.get("is_paid").and_then(|v| v.as_bool()).unwrap_or(false),
-    });
-
-    let ai_response_text = proxy_response["response"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-
-    println!("[Rust AI Proxy Audio] SUCCESS! Response length: {} chars", ai_response_text.len());
-
-    Ok(AIProxyResponse {
-        response: ai_response_text,
-        usage,
-        error: None,
-    })
-}
-
 // ============================================================================
 // LIVE TRANSCRIPTION COMMANDS
 // ============================================================================
@@ -1553,19 +1327,15 @@ async fn query_ai_via_proxy_with_audio(
 async fn start_live_transcription(
     app_handle: tauri::AppHandle,
     deepgram_key: String,
+    model: String,
     language: String,
 ) -> Result<(), String> {
-    transcription::start_live_transcription(app_handle, deepgram_key, language).await
+    transcription::start_live_transcription(app_handle, deepgram_key, model, language).await
 }
 
 #[tauri::command]
 fn stop_live_transcription() -> Result<String, String> {
     transcription::stop_live_transcription()
-}
-
-#[tauri::command]
-fn is_live_transcribing() -> bool {
-    transcription::is_transcribing()
 }
 
 /// Query AI via proxy with multi-turn conversation history.
@@ -1591,8 +1361,7 @@ async fn query_ai_via_proxy_conversation(
     let payload = serde_json::json!({
         "model": model,
         "messages": messages,
-        "stream": false,
-        "max_tokens": 16384
+        "stream": false
     });
 
     let start = std::time::Instant::now();
@@ -1694,60 +1463,6 @@ async fn delete_document_placeholder(app: tauri::AppHandle, id: String) -> Resul
     placeholders.retain(|p| p.id != id);
     documents::save_placeholders(&config_dir, &placeholders)
 }
-
-// ============================================================================
-// GOOGLE OAUTH COMMANDS
-// ============================================================================
-
-#[tauri::command]
-fn start_google_oauth() -> Result<String, String> {
-    let (redirect_uri, code_receiver) = oauth_server::start_oauth_server()?;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let auth_url = rt.block_on(OAUTH_SERVICE.get_auth_url(&redirect_uri));
-    
-    println!("🔐 Auth URL: {}", auth_url);
-    
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("open").arg(&auth_url).spawn().ok();
-    
-    #[cfg(target_os = "windows")]
-    std::process::Command::new("cmd").args(["/C", "start", &auth_url]).spawn().ok();
-    
-    // Wait for code (blocks this thread for up to 120 seconds)
-    let (code, state) = code_receiver.recv_timeout(std::time::Duration::from_secs(120))
-        .map_err(|_| "Authentication timeout - please try again".to_string())?;
-    
-    println!("✅ Got authorization code");
-    
-    // Exchange code for tokens (PKCE desktop flow; no client_secret needed)
-    match rt.block_on(OAUTH_SERVICE.exchange_code(&code, &state, &redirect_uri)) {
-        Ok(tokens) => {
-            println!(
-                "✅ OAuth token exchange success. refresh_token_present={} user_email={}",
-                tokens.refresh_token.is_some(),
-                tokens.user_email.clone().unwrap_or_else(|| "<unknown>".to_string())
-            );
-        }
-        Err(e) => {
-            println!("❌ OAuth token exchange failed: {}", e);
-            return Err(e);
-        }
-    }
-    
-    // Save tokens
-    let token_path = std::env::temp_dir().join("cracking_interview_google_tokens.json");
-    rt.block_on(OAUTH_SERVICE.save_tokens(token_path.to_str().unwrap()))?;
-    
-    println!("✅ Tokens saved");
-    Ok("Google Sign-In successful! Tokens saved.".to_string())
-}
-
-#[tauri::command]
-fn get_google_token_status() -> Result<bool, String> {
-    let token_path = std::env::temp_dir().join("cracking_interview_google_tokens.json");
-    Ok(token_path.exists())
-}
-
 
 // ============================================================================
 // APP SETTINGS – Window opacity & stealth toggle
@@ -2062,14 +1777,6 @@ fn remove_windows_stealth(win: &tauri::WebviewWindow) {
 // ============================================================================
 
 fn main() {
-    // Load environment variables from .env file (must be in project root)
-    if let Err(e) = dotenv::from_filename("../.env") {
-        println!("⚠️  Warning: Could not load .env file: {}", e);
-        println!("💡 Google OAuth will not work without GOOGLE_CLIENT_ID");
-    } else {
-        println!("✅ Loaded environment variables from .env");
-    }
-    
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
@@ -2084,23 +1791,15 @@ fn main() {
             get_displays,
             capture_display_screenshot,
             get_display_thumbnail,
-            start_audio_recording,
-            stop_audio_recording,
             warm_audio_capture,
             cooldown_audio_capture,
-            is_audio_recording,
-            stop_audio_recording_and_transcribe,
-            transcribe_audio_file,
             query_ai,
             query_ai_with_image,
-            query_ai_with_audio,
             query_ai_via_proxy,
             query_ai_via_proxy_with_image,
-            query_ai_via_proxy_with_audio,
             query_ai_via_proxy_conversation,
             start_live_transcription,
             stop_live_transcription,
-            is_live_transcribing,
             extract_document_text,
             save_document_placeholder,
             get_document_placeholders,
@@ -2114,9 +1813,6 @@ fn main() {
             set_window_opacity,
             set_stealth_mode,
             open_external_url,
-            start_google_oauth,
-            get_google_token_status,
-            clear_google_tokens,
             resize_window,
             get_window_inner_size,
             get_os,
@@ -2127,7 +1823,6 @@ fn main() {
             request_accessibility,
             refresh_stealth_status,
             move_window_by,
-            frontend_log,
         ])
         .setup(|app| {
             println!("🚀 CrackingInterview starting...");
@@ -2205,20 +1900,6 @@ fn main() {
         });
 }
 
-
-#[tauri::command]
-fn clear_google_tokens() -> Result<String, String> {
-    let token_path = std::env::temp_dir().join("cracking_interview_google_tokens.json");
-    
-    if token_path.exists() {
-        std::fs::remove_file(token_path)
-            .map_err(|e| format!("Failed to delete tokens: {}", e))?;
-        println!("✅ Google tokens cleared");
-        Ok("Signed out successfully".to_string())
-    } else {
-        Ok("No tokens to clear".to_string())
-    }
-}
 
 // ============================================================================
 // WINDOW MOVE COMMANDS
@@ -2349,13 +2030,6 @@ fn get_window_inner_size(window: tauri::Window) -> Result<WindowInnerSize, Strin
         width: logical.width,
         height: logical.height,
     })
-}
-
-/// Simple logger so frontend can write to Rust stdout (useful for debugging in `tauri dev` terminals).
-#[tauri::command]
-fn frontend_log(message: String) -> Result<(), String> {
-    println!("🖥️ FE: {}", message);
-    Ok(())
 }
 
 /// Used by the Settings UI to show OS-specific hotkeys without requiring a frontend OS plugin.

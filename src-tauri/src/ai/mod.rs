@@ -1,228 +1,50 @@
-// Unified AI Service - coordinates between Gemini and Claude
+// Direct (bring-your-own-key) AI calls. Only Gemini keys are supported.
 // Ported from UnifiedAIService.swift
 
 pub mod gemini;
-pub mod claude;
 
 use serde::{Deserialize, Serialize};
 
+/// Config for direct (bring-your-own-key) provider calls.
+///
+/// `selected_model` (`byo_model`) and `max_output_tokens` are supplied by the server
+/// (`get-models` edge function); the app never hardcodes them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AIConfig {
     pub selected_model: String,
+    #[serde(default)]
     pub gemini_api_key: String,
-    pub claude_api_key: String,
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
 }
 
-/// Available AI models
-#[derive(Debug)]
-pub enum AIModel {
-    Gemini25Flash,
-    Claude4Sonnet,
-    Claude3Haiku,
+fn validate_config(config: &AIConfig) -> Result<(), String> {
+    if config.selected_model.trim().is_empty() {
+        return Err("⚠️ No AI model configured. Please sign in again so the model list can be loaded.".to_string());
+    }
+    if config.gemini_api_key.is_empty() {
+        return Err("⚠️ No API key configured. Add your API key in Settings → AI Models.".to_string());
+    }
+    Ok(())
 }
 
-impl AIModel {
-    pub fn from_string(s: &str) -> Option<Self> {
-        match s {
-            "gemini-2.5-flash" => Some(Self::Gemini25Flash),
-            "claude-sonnet-4-20250514" => Some(Self::Claude4Sonnet),
-            "claude-3-5-haiku-20241022" => Some(Self::Claude3Haiku),
-            _ => None,
-        }
-    }
-    
-    pub fn model_string(&self) -> &str {
-        match self {
-            Self::Gemini25Flash => "gemini-2.5-flash",
-            Self::Claude4Sonnet => "claude-sonnet-4-20250514",
-            Self::Claude3Haiku => "claude-3-5-haiku-20241022",
-        }
-    }
-    
-    pub fn is_gemini(&self) -> bool {
-        matches!(self, Self::Gemini25Flash)
-    }
-}
-
-/// Query AI with text (routes to correct provider)
+/// Query AI with text
 pub async fn query_with_text(
     prompt: &str,
     config: &AIConfig,
 ) -> Result<String, String> {
-    println!("🔍 Received model: '{}'", config.selected_model);
-    
-    let model = AIModel::from_string(&config.selected_model)
-        .ok_or_else(|| {
-            let error = format!("Invalid AI model: '{}'. Valid: gemini-2.5-flash, claude-sonnet-4-20250514, claude-3-5-haiku-20241022", config.selected_model);
-            println!("❌ {}", error);
-            error
-        })?;
-    
-    println!("✅ Model parsed: {:?}", model);
-    
-    if model.is_gemini() {
-        println!("→ Routing to Gemini");
-        
-        // Check for API key or OAuth token
-        let api_key = if !config.gemini_api_key.is_empty() {
-            config.gemini_api_key.clone()
-        } else {
-            // Try to get OAuth token
-            println!("📝 No API key, checking for OAuth token...");
-            match get_google_oauth_token().await {
-                Ok(token) => {
-                    println!("✅ Using OAuth token");
-                    token
-                }
-                Err(e) => {
-                    return Err(format!("⚠️ Gemini API key not configured and OAuth not available: {}", e));
-                }
-            }
-        };
-        
-        gemini::query_with_text(prompt, &api_key, model.model_string()).await
-    } else {
-        println!("→ Routing to Claude");
-        claude::query_with_text(prompt, &config.claude_api_key, model.model_string()).await
-    }
+    validate_config(config)?;
+    gemini::query_with_text(prompt, &config.gemini_api_key, &config.selected_model, config.max_output_tokens).await
 }
 
-/// Query AI with image (routes to correct provider)
+/// Query AI with image
 pub async fn query_with_image(
     prompt: &str,
     image_data: &[u8],
     config: &AIConfig,
 ) -> Result<String, String> {
-    let model = AIModel::from_string(&config.selected_model)
-        .ok_or("Invalid AI model selected")?;
-    
-    if model.is_gemini() {
-        // Check for API key or OAuth token
-        let api_key = if !config.gemini_api_key.is_empty() {
-            config.gemini_api_key.clone()
-        } else {
-            // Try to get OAuth token
-            match get_google_oauth_token().await {
-                Ok(token) => token,
-                Err(e) => {
-                    return Err(format!("⚠️ Gemini API key not configured and OAuth not available: {}", e));
-                }
-            }
-        };
-        
-        gemini::query_with_image(prompt, image_data, &api_key, model.model_string()).await
-    } else {
-        claude::query_with_image(prompt, image_data, &config.claude_api_key, model.model_string()).await
-    }
-}
-
-/// Query AI with audio bytes.
-///
-/// Policy decision (per product): Audio input requires Gemini.
-pub async fn query_with_audio(
-    prompt: &str,
-    audio_data: &[u8],
-    config: &AIConfig,
-) -> Result<String, String> {
-    let model = AIModel::from_string(&config.selected_model)
-        .ok_or("Invalid AI model selected")?;
-
-    if !model.is_gemini() {
-        return Err("⚠️ Audio input requires Gemini. Please select Gemini in Settings → AI Models.".to_string());
-    }
-
-    let api_key = if !config.gemini_api_key.is_empty() {
-        config.gemini_api_key.clone()
-    } else {
-        match get_google_oauth_token().await {
-            Ok(token) => token,
-            Err(e) => {
-                return Err(format!("⚠️ Gemini API key not configured and OAuth not available: {}", e));
-            }
-        }
-    };
-
-    gemini::query_with_audio(prompt, audio_data, &api_key, model.model_string()).await
-}
-
-// Helper to get OAuth token
-async fn get_google_oauth_token() -> Result<String, String> {
-    // Load tokens from file
-    let token_path = std::env::temp_dir().join("cracking_interview_google_tokens.json");
-    
-    if !token_path.exists() {
-        return Err("No OAuth tokens found".to_string());
-    }
-    
-    let json = std::fs::read_to_string(&token_path)
-        .map_err(|e| format!("Failed to read tokens: {}", e))?;
-    
-    let tokens: crate::google_oauth::GoogleTokens = serde_json::from_str(&json)
-        .map_err(|e| format!("Failed to parse tokens: {}", e))?;
-    
-    // Check if expired
-    let now = chrono::Utc::now().timestamp();
-    if now >= tokens.expires_at {
-        // Best-effort refresh (if we have a refresh token + client credentials).
-        if let Some(refresh_token) = tokens.refresh_token.clone() {
-            println!("🔄 OAuth access token expired; attempting refresh...");
-
-            let client_id = std::env::var("GOOGLE_CLIENT_ID")
-                .map_err(|_| "OAuth token expired - missing GOOGLE_CLIENT_ID; please set Gemini API key or configure Google OAuth".to_string())?;
-
-            let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
-                .build()
-                .map_err(|e| format!("Client build failed: {}", e))?;
-            let params = [
-                ("client_id", client_id.as_str()),
-                ("refresh_token", refresh_token.as_str()),
-                ("grant_type", "refresh_token"),
-            ];
-
-            let response = client
-                .post("https://oauth2.googleapis.com/token")
-                .form(&params)
-                .send()
-                .await
-                .map_err(|e| format!("OAuth refresh failed: {}", e))?;
-
-            let token_response: serde_json::Value = response
-                .json()
-                .await
-                .map_err(|e| format!("Failed to parse OAuth refresh response: {}", e))?;
-
-            let access_token = token_response["access_token"]
-                .as_str()
-                .ok_or("OAuth refresh response missing access_token")?
-                .to_string();
-
-            let expires_in = token_response["expires_in"]
-                .as_i64()
-                .unwrap_or(3600);
-
-            let refreshed = crate::google_oauth::GoogleTokens {
-                access_token: access_token.clone(),
-                refresh_token: Some(refresh_token),
-                expires_at: chrono::Utc::now().timestamp() + expires_in,
-                id_token: None,
-                user_email: None,
-            };
-
-            // Persist refreshed token back to file so future calls succeed.
-            let refreshed_json = serde_json::to_string_pretty(&refreshed)
-                .map_err(|e| format!("Failed to serialize refreshed tokens: {}", e))?;
-            std::fs::write(&token_path, refreshed_json)
-                .map_err(|e| format!("Failed to write refreshed tokens: {}", e))?;
-
-            println!("✅ OAuth token refreshed");
-            return Ok(access_token);
-        }
-
-        return Err("OAuth token expired - please sign in again".to_string());
-    }
-    
-    Ok(tokens.access_token)
+    validate_config(config)?;
+    gemini::query_with_image(prompt, image_data, &config.gemini_api_key, &config.selected_model, config.max_output_tokens).await
 }
 
 /// Best-effort MIME sniffing based on file signatures ("magic bytes").

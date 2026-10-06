@@ -1,15 +1,17 @@
 /**
  * deepgram-key Edge Function
  *
- * Generates a temporary Deepgram JWT (30s TTL) for authenticated Pro users.
+ * Generates a temporary Deepgram JWT for authenticated Pro users.
  * The permanent API key never leaves the server — only a short-lived token
- * is returned. The token expires after 30 seconds but an already-opened
- * WebSocket connection stays alive beyond the TTL.
+ * is returned. The token only needs to be valid for the WebSocket handshake;
+ * an already-opened connection stays alive beyond the TTL.
  *
  * @see https://developers.deepgram.com/guides/fundamentals/token-based-authentication
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { PRO_MONTHLY_AUDIO_SECONDS as MONTHLY_AUDIO_LIMIT } from "../_shared/limits.ts";
+import { TRANSCRIPTION_MODEL } from "../_shared/models.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -59,9 +61,6 @@ Deno.serve(async (req) => {
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-
-    // Check audio usage quota (10 hours = 36000 seconds per billing period)
-    const MONTHLY_AUDIO_LIMIT = 36000;
 
     const periodStart = subscription.subscription_start_date
       ? new Date(subscription.subscription_start_date)
@@ -115,16 +114,14 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Request a temporary JWT from Deepgram (default 30s TTL).
-    // The WebSocket only needs the token to be valid during the handshake;
-    // the connection stays open beyond the TTL.
+    const DEEPGRAM_TOKEN_TTL_SECONDS = 3600;
     const grantResp = await fetch('https://api.deepgram.com/v1/auth/grant', {
       method: 'POST',
       headers: {
         'Authorization': `Token ${deepgramKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ ttl_seconds: 3600 }),
+      body: JSON.stringify({ ttl_seconds: DEEPGRAM_TOKEN_TTL_SECONDS }),
     });
 
     if (!grantResp.ok) {
@@ -142,6 +139,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         key: grantData.access_token,
         remaining_seconds: remainingAudioSeconds,
+        model: TRANSCRIPTION_MODEL,
         audio_seconds_used: audioSecondsUsed,
         audio_seconds_limit: MONTHLY_AUDIO_LIMIT,
       }),

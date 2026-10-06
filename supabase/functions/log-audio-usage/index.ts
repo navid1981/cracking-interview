@@ -7,14 +7,15 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  PRO_MONTHLY_AUDIO_SECONDS as MONTHLY_AUDIO_LIMIT,
+  PRO_AUDIO_SESSION_MAX_SECONDS as MAX_SESSION_SECONDS,
+} from "../_shared/limits.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-const MONTHLY_AUDIO_LIMIT = 36000; // 10 hours in seconds
-const MAX_SESSION_SECONDS = 5400;  // 90 minutes cap per session
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -55,7 +56,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Server-side cap: never log more than 90 minutes per session
+    // Server-side cap: never log more than one session's maximum
     const cappedDuration = Math.min(Math.round(durationSeconds), MAX_SESSION_SECONDS);
 
     // Verify Pro subscription

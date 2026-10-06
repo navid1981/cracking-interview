@@ -35,6 +35,13 @@ fn parse_retry_after_seconds(msg: &str) -> Option<f64> {
     num.parse::<f64>().ok()
 }
 
+fn generation_config(max_output_tokens: Option<u32>) -> serde_json::Value {
+    match max_output_tokens {
+        Some(n) => json!({ "maxOutputTokens": n }),
+        None => json!({}),
+    }
+}
+
 fn is_quota_message(msg: &str) -> bool {
     let m = msg.to_lowercase();
     m.contains("quota exceeded") || m.contains("exceeded your current quota") || m.contains("rate limit")
@@ -100,7 +107,7 @@ async fn post_with_retry(request: reqwest::RequestBuilder) -> Result<serde_json:
         if !msg.is_empty() {
             if is_quota_message(msg) {
                 return Err(format!(
-                    "❌ Gemini API quota/rate-limit: {}\n\nTip: If you’re using Google Sign-In (OAuth), you may still hit shared free-tier limits. To use your own quota, paste your own Gemini API key in Settings → AI Models.",
+                    "❌ Gemini API quota/rate-limit: {}\n\nTip: Check the quota for your Gemini API key in Google AI Studio.",
                     msg
                 ));
             }
@@ -117,13 +124,11 @@ pub async fn query_with_text(
     prompt: &str,
     api_key: &str,
     model: &str,
+    max_output_tokens: Option<u32>,
 ) -> Result<String, String> {
     if api_key.is_empty() {
         return Err("⚠️ Gemini API key not configured.".to_string());
     }
-    
-    // Check if this is an OAuth token (starts with "ya29.") or API key
-    let is_oauth = api_key.starts_with("ya29.");
     
     // Note: danger_accept_invalid_certs is used to work around corporate proxy SSL interception
     let client = reqwest::Client::builder()
@@ -135,37 +140,12 @@ pub async fn query_with_text(
         "contents": [{
             "parts": [{"text": prompt}]
         }],
-        "generationConfig": {
-            "maxOutputTokens": 16384
-        }
+        "generationConfig": generation_config(max_output_tokens)
     });
     
-    let request = if is_oauth {
-        // OAuth token - use Authorization header
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            model
-        );
-        
-        println!("🔐 Using OAuth token with Authorization header");
-        
-        client
-            .post(&endpoint)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .json(&payload)
-    } else {
-        // API key - use query parameter
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
-        );
-        
-        println!("🔑 Using API key in query parameter");
-        
-        client
-            .post(&endpoint)
-            .json(&payload)
-    };
+    let request = client
+        .post(generate_content_url(model, api_key))
+        .json(&payload);
     
     let json = post_with_retry(request).await?;
     
@@ -185,13 +165,11 @@ pub async fn query_with_image(
     image_data: &[u8],
     api_key: &str,
     model: &str,
+    max_output_tokens: Option<u32>,
 ) -> Result<String, String> {
     if api_key.is_empty() {
         return Err("⚠️ Gemini API key not configured.".to_string());
     }
-    
-    // Check if this is an OAuth token or API key
-    let is_oauth = api_key.starts_with("ya29.");
     
     // Base64 encode image
     let base64_image = general_purpose::STANDARD.encode(image_data);
@@ -214,33 +192,12 @@ pub async fn query_with_image(
                 }
             ]
         }],
-        "generationConfig": {
-            "maxOutputTokens": 16384
-        }
+        "generationConfig": generation_config(max_output_tokens)
     });
     
-    let request = if is_oauth {
-        // OAuth token - use Authorization header
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            model
-        );
-        
-        client
-            .post(&endpoint)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .json(&payload)
-    } else {
-        // API key - use query parameter
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
-        );
-        
-        client
-            .post(&endpoint)
-            .json(&payload)
-    };
+    let request = client
+        .post(generate_content_url(model, api_key))
+        .json(&payload);
     
     let json = post_with_retry(request).await?;
     
@@ -253,74 +210,9 @@ pub async fn query_with_image(
     }
 }
 
-/// Query Gemini with audio (system audio recording).
-///
-/// Gemini supports audio as inline data, similar to images.
-/// We use `audio/wav` since we record a WAV file on disk.
-pub async fn query_with_audio(
-    prompt: &str,
-    audio_data: &[u8],
-    api_key: &str,
-    model: &str,
-) -> Result<String, String> {
-    if api_key.is_empty() {
-        return Err("⚠️ Gemini API key not configured.".to_string());
-    }
-
-    // OAuth token vs API key
-    let is_oauth = api_key.starts_with("ya29.");
-
-    // Base64 encode audio
-    let base64_audio = general_purpose::STANDARD.encode(audio_data);
-
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| format!("Client build failed: {}", e))?;
-
-    let payload = json!({
-        "contents": [{
-            "parts": [
-                {"text": prompt},
-                {
-                    "inline_data": {
-                        "mime_type": "audio/wav",
-                        "data": base64_audio
-                    }
-                }
-            ]
-        }],
-        "generationConfig": {
-            "maxOutputTokens": 16384
-        }
-    });
-
-    let request = if is_oauth {
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            model
-        );
-        client
-            .post(&endpoint)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .json(&payload)
-    } else {
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
-        );
-        client
-            .post(&endpoint)
-            .json(&payload)
-    };
-
-    let json = post_with_retry(request).await?;
-
-    if let Some(text) = json["candidates"][0]["content"]["parts"][0]["text"].as_str() {
-        Ok(text.to_string())
-    } else if let Some(error) = json["error"]["message"].as_str() {
-        Err(format!("❌ Gemini API Error: {}", error))
-    } else {
-        Err("⚠️ No response from Gemini".to_string())
-    }
+fn generate_content_url(model: &str, api_key: &str) -> String {
+    format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+        model, api_key
+    )
 }

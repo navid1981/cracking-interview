@@ -26,10 +26,6 @@ fn cdp_http_base() -> String {
     format!("http://localhost:{}", get_cdp_port())
 }
 
-fn is_ws_mode() -> bool {
-    get_ws_browser_handle().is_some()
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Tab listing
 // ═══════════════════════════════════════════════════════════════════════════

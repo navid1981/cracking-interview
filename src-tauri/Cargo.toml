@@ -1,6 +1,6 @@
 [package]
 name = "cracking-interview"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
 
 [build-dependencies]
@@ -22,13 +22,8 @@ reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls", "ru
 # Base64 encoding
 base64 = "0.22"
 
-# OAuth and HTTP
-urlencoding = "2.1"
+# Timestamps
 chrono = "0.4"
-rand = "0.8"
-tiny_http = "0.12"
-dotenv = "0.15"
-sha2 = "0.10"
 
 # WebSocket for CDP and Deepgram
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
@@ -39,15 +34,11 @@ lazy_static = "1.5"
 
 # Image processing
 image = "0.25"
-hound = "3.5"
 
 # Document text extraction
 pdf-extract = "0.7"
 zip = "2"
 quick-xml = "0.36"
-
-# MP3 encoding - LAME encoder (high-level wrapper)
-mp3lame-encoder = "0.2"
 
 # Speech recognition - TODO: install libvosk native library and uncomment to enable local transcription
 # vosk = "0.2"

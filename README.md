@@ -74,24 +74,9 @@ Just let me know:
 **Then I'll initialize the project and we begin!** 🚀
 ## 🔐 Security Setup (IMPORTANT!)
 
-**Before running the app, you MUST configure OAuth credentials:**
+The desktop app needs no local secrets. All provider keys (OpenRouter, Deepgram, Stripe) live in Supabase Edge Function secrets — see `docs/AI_PROJECT_GUIDE.md` → "Environment Setup".
 
-1. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Edit `.env` and add your Google OAuth credentials:
-   ```
-   GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-   GOOGLE_CLIENT_SECRET=your-client-secret
-   ```
-
-3. Get credentials from: https://console.cloud.google.com/apis/credentials
-   - Create "Desktop app" OAuth 2.0 Client ID
-   - Copy Client ID and Client Secret to `.env`
-
-**⚠️ NEVER commit `.env` to GitHub!** (already in `.gitignore`)
+AI models are not hardcoded in the app: free, BYO-key, and Pro model lists are served by the `get-models` edge function from `supabase/functions/_shared/models.ts`.
 
 ---
 

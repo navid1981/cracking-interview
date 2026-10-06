@@ -2,8 +2,9 @@
  * SignUpForm - Email/password sign up component
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { signUp } from '../services/supabase';
+import { ModelConfig, loadCachedModels, fetchRemoteModelConfig, allowsAllDomains } from '../services/modelConfig';
 
 interface SignUpFormProps {
   onSuccess: () => void;
@@ -18,6 +19,15 @@ export default function SignUpForm({ onSuccess, onSwitchToSignIn }: SignUpFormPr
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [config, setConfig] = useState<ModelConfig | null>(loadCachedModels);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRemoteModelConfig().then(fresh => {
+      if (!cancelled && fresh) setConfig(fresh);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const validateForm = (): boolean => {
     if (password.length < 6) {
@@ -146,10 +156,10 @@ export default function SignUpForm({ onSuccess, onSwitchToSignIn }: SignUpFormPr
 
       <div className="signup-benefits">
         <p style={{ fontSize: '12px', lineHeight: '1.6', color: '#666', margin: '0 0 8px 0' }}>
-          <strong>Free users:</strong> 3 free AI calls, Limited sites (LeetCode, Codewars,...), Gemini Flash AI model, Chrome tab text & screenshot capture
+          <strong>Free users:</strong> {config ? `${config.free_call_limit} free AI calls` : 'Free AI calls'}, {!config ? 'Limited sites' : allowsAllDomains(config) ? 'Any website' : `Limited sites (${config.free_allowed_domains.join(', ')})`}, Free-tier AI model, Chrome tab text & screenshot capture
         </p>
         <p style={{ fontSize: '12px', lineHeight: '1.6', color: '#666', margin: 0 }}>
-          <strong>Upgrade to Pro:</strong> Unlimited sites, 150 calls/month, Premium AI models, Display screenshot capture & Verbal interviews
+          <strong>Upgrade to Pro:</strong> Unlimited sites, {config ? `${config.pro_request_limit} calls/month` : 'Monthly AI calls'}, Premium AI models, Display screenshot capture & Verbal interviews
         </p>
       </div>
     </form>

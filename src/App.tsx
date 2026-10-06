@@ -21,6 +21,7 @@ import {
   EDGE_FUNCTION_URL,
   SUPABASE_API_KEY,
 } from './services/supabase';
+import { ModelConfig, loadCachedModels, fetchRemoteModelConfig, allowsAllDomains, isFreeTierUrlAllowed } from './services/modelConfig';
 import type { User, Session } from '@supabase/supabase-js';
 import packageJson from '../package.json';
 import './App.css';
@@ -64,48 +65,6 @@ interface AIConfig {
   gemini_api_key?: string;  // BYO API key for free users who exhausted tries
 }
 
-interface ModelInfo {
-  id: string;
-  name: string;
-  provider: string;
-}
-
-interface ModelConfig {
-  pro_models: ModelInfo[];
-  free_model: ModelInfo;
-  default_pro_model: string;
-}
-
-const DEFAULT_MODEL_CONFIG: ModelConfig = {
-  pro_models: [
-    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', provider: 'OpenAI' },
-    { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic' },
-    { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google' },
-    { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
-  ],
-  free_model: { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google' },
-  default_pro_model: 'gpt-5.2-codex',
-};
-
-function loadCachedModels(): ModelConfig {
-  try {
-    const cached = localStorage.getItem('cached_models');
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (parsed.pro_models?.length && parsed.free_model?.id) return parsed;
-    }
-  } catch { /* ignore */ }
-  return DEFAULT_MODEL_CONFIG;
-}
-
-// Allowed domains for free users
-const FREE_TIER_ALLOWED_DOMAINS = [
-  'leetcode.com',
-  'codewars.com',
-  'codeforces.com',
-  'neetcode.io',
-];
-
 interface Announcement {
   id: string;
   title: string;
@@ -125,7 +84,9 @@ function App() {
   const [showAnnouncement, setShowAnnouncement] = useState(true);
   const announcementDismissedRef = useRef(false);
   const [showAudioPromptWarning, setShowAudioPromptWarning] = useState(false);
-  const [modelConfig, setModelConfig] = useState<ModelConfig>(loadCachedModels);
+  const [modelConfig, setModelConfig] = useState<ModelConfig | null>(loadCachedModels);
+  const modelConfigRef = useRef<ModelConfig | null>(modelConfig);
+  useEffect(() => { modelConfigRef.current = modelConfig; }, [modelConfig]);
 
   // ========== APP STATE ==========
   const [cdpStatus, setCdpStatus] = useState('🔴 Chrome Not Running');
@@ -154,15 +115,14 @@ function App() {
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
     const storedModel = localStorage.getItem('ai_model');
     const cached = loadCachedModels();
-    const validIds = [...cached.pro_models.map(m => m.id), cached.free_model.id];
     
     // Reset if stored model is no longer in the available list
-    if (storedModel && !validIds.includes(storedModel)) {
+    if (storedModel && (!cached || !cached.pro_models.some(m => m.id === storedModel))) {
       localStorage.removeItem('ai_model');
     }
     
     return {
-      selected_model: localStorage.getItem('ai_model') || cached.default_pro_model,
+      selected_model: localStorage.getItem('ai_model') || cached?.default_pro_model || '',
       gemini_api_key: localStorage.getItem('gemini_api_key') || undefined,
     };
   });
@@ -276,8 +236,8 @@ function App() {
   const lastTranscriptTimeRef = useRef<number>(0);
   const isLiveTranscribingRef = useRef(false);
   const liveTranscriptFinalRef = useRef('');
-  const MAX_SESSION_SECONDS = 5400; // 90 minutes per session
-  const sessionMaxSecondsRef = useRef(MAX_SESSION_SECONDS);
+  // Set from server config (`audio_session_max_seconds`) and remaining quota when a session starts
+  const sessionMaxSecondsRef = useRef(Infinity);
   const audioSecondsRef = useRef(0);
 
   const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
@@ -322,8 +282,7 @@ function App() {
         lastProcessedUserId = session.user.id;
         const sub = await getUserSubscription(session.user.id);
         setSubscription(sub);
-        const stats = await getUsageStats(session.user.id, sub);
-        setUsageStats(stats);
+        setUsageStats(await loadUsageStats(session.user.id, sub, await ensureModelConfig()));
         
         // Fetch announcement
         await fetchAnnouncement(session.user.email, sub);
@@ -434,7 +393,7 @@ function App() {
     subscriptionRef.current = subscription;
   }, [subscription]);
 
-  // Auto-stop recording when session time limit is reached (90 min or remaining quota)
+  // Auto-stop recording when session time limit is reached (server session cap or remaining quota)
   const sessionStopTriggeredRef = useRef(false);
   useEffect(() => {
     if (isLiveTranscribing && audioSeconds >= sessionMaxSecondsRef.current && !sessionStopTriggeredRef.current) {
@@ -496,7 +455,55 @@ function App() {
     }
   };
 
-  const fetchDeepgramKey = async (): Promise<{ key: string; remaining_seconds: number } | null> => {
+  const fetchModelConfig = async (accessToken: string): Promise<ModelConfig | null> => {
+    const config = await fetchRemoteModelConfig(accessToken);
+    if (!config) return null;
+    setModelConfig(config);
+    modelConfigRef.current = config;
+    const currentModel = localStorage.getItem('ai_model');
+    if (!currentModel || !config.pro_models.some(m => m.id === currentModel)) {
+      setAiConfig(prev => ({ ...prev, selected_model: config.default_pro_model }));
+      localStorage.setItem('ai_model', config.default_pro_model);
+    }
+    return config;
+  };
+
+  /** Returns the server-provided model config, fetching it if it was never loaded. */
+  const ensureModelConfig = async (): Promise<ModelConfig | null> => {
+    if (modelConfigRef.current) return modelConfigRef.current;
+    const accessToken = getAccessToken();
+    if (!accessToken) return null;
+    return fetchModelConfig(accessToken);
+  };
+
+  /** Usage stats need the server-provided Pro limits; without config they stay unknown. */
+  const loadUsageStats = async (
+    userId: string,
+    sub: UserSubscription | null,
+    config: ModelConfig | null,
+  ): Promise<UsageStats | null> => {
+    if (!config) return null;
+    return getUsageStats(userId, sub, {
+      requests: config.pro_request_limit,
+      audioSeconds: config.pro_audio_seconds_limit,
+    });
+  };
+
+  useEffect(() => {
+    if (modelConfig && authUser && !usageStats) {
+      void loadUsageStats(authUser.id, subscriptionRef.current, modelConfig).then(stats => {
+        if (stats) setUsageStats(prev => prev ?? stats);
+      });
+    }
+  }, [modelConfig, authUser]);
+
+  useEffect(() => {
+    if (showSettings && authUser && !modelConfigRef.current) {
+      void ensureModelConfig();
+    }
+  }, [showSettings, authUser]);
+
+  const fetchDeepgramKey = async (): Promise<{ key: string; model: string; remaining_seconds: number } | null> => {
     try {
       const accessToken = getAccessToken();
       if (!accessToken) return null;
@@ -527,7 +534,11 @@ function App() {
           audio_seconds_limit: data.audio_seconds_limit,
         } : prev);
       }
-      return { key: data.key, remaining_seconds: data.remaining_seconds ?? MAX_SESSION_SECONDS };
+      if (!data.model) {
+        setMessage('❌ Transcription model not provided by the server. Please try again later.');
+        return null;
+      }
+      return { key: data.key, model: data.model, remaining_seconds: data.remaining_seconds ?? Infinity };
     } catch (e) {
       setMessage(`❌ Error fetching transcription key: ${e}`);
       return null;
@@ -542,10 +553,15 @@ function App() {
     }
 
     setMessage('🎙️ Starting live transcription…');
+    const models = await ensureModelConfig();
+    if (!models) {
+      setMessage('❌ Could not load limits from the server. Check your connection and try again.');
+      return;
+    }
     const dgResult = await fetchDeepgramKey();
     if (!dgResult) return;
 
-    const effectiveMax = Math.min(MAX_SESSION_SECONDS, dgResult.remaining_seconds);
+    const effectiveMax = Math.min(models.audio_session_max_seconds, dgResult.remaining_seconds);
     if (effectiveMax <= 0) {
       setMessage('❌ Monthly audio limit reached. Check your usage in Settings.');
       return;
@@ -562,6 +578,7 @@ function App() {
 
       await invoke('start_live_transcription', {
         deepgramKey: dgResult.key,
+        model: dgResult.model,
         language: interviewLanguage,
       });
 
@@ -790,7 +807,8 @@ function App() {
         return;
       }
 
-      const model = aiConfig.selected_model;
+      // An empty/unknown model is replaced server-side by DEFAULT_PRO_MODEL.
+      const model = aiConfig.selected_model || modelConfigRef.current?.default_pro_model || '';
 
       // Build messages array with conversation history (use ref to avoid stale closure)
       const currentHistory = conversationHistoryRef.current;
@@ -1237,27 +1255,10 @@ function App() {
         
         // Fetch subscription and usage data
         if (session.user?.id) {
+          const configPromise = fetchModelConfig(session.access_token);
           const sub = await getUserSubscription(session.user.id);
           setSubscription(sub);
-          const stats = await getUsageStats(session.user.id, sub);
-          setUsageStats(stats);
-          
-          // Fetch available models from server (fire-and-forget, don't block login)
-          invoke<ModelConfig>('fetch_models', { accessToken: session.access_token })
-            .then((config) => {
-              if (config?.pro_models?.length && config?.free_model?.id) {
-                setModelConfig(config);
-                localStorage.setItem('cached_models', JSON.stringify(config));
-                // If current model is no longer available, reset to default
-                const validIds = [...config.pro_models.map((m: ModelInfo) => m.id), config.free_model.id];
-                const currentModel = localStorage.getItem('ai_model') || config.default_pro_model;
-                if (!validIds.includes(currentModel)) {
-                  setAiConfig(prev => ({ ...prev, selected_model: config.default_pro_model }));
-                  localStorage.setItem('ai_model', config.default_pro_model);
-                }
-              }
-            })
-            .catch(() => { /* use cached/default models */ });
+          setUsageStats(await loadUsageStats(session.user.id, sub, await configPromise));
 
           // Fetch announcement
           await fetchAnnouncement(session.user.email, sub);
@@ -1321,7 +1322,7 @@ function App() {
 
   // Helper to check if user can use AI proxy (has quota remaining)
   // Returns { allowed, reason, useBYOKey } - useBYOKey indicates free user should use their own Gemini key
-  const canUseAIProxy = (): { allowed: boolean; reason?: string; useBYOKey?: boolean } => {
+  const canUseAIProxy = (freeCallLimit: number): { allowed: boolean; reason?: string; useBYOKey?: boolean } => {
     if (!subscription) {
       return { allowed: false, reason: 'Not signed in' };
     }
@@ -1338,16 +1339,15 @@ function App() {
       }
       return { allowed: true };
     } else {
-      // Free user - check lifetime quota (3 calls)
       const lifetimeUsed = subscription.lifetime_ai_calls || 0;
-      if (lifetimeUsed >= 3) {
+      if (lifetimeUsed >= freeCallLimit) {
         // Check if user has their own Gemini API key
         if (aiConfig.gemini_api_key) {
           return { allowed: true, useBYOKey: true };
         }
         return { 
           allowed: false, 
-          reason: 'Free trial expired (3 lifetime calls used). Add your own Gemini API key or subscribe to continue.'
+          reason: `Free trial expired (${freeCallLimit} lifetime calls used). Add your own Gemini API key or subscribe to continue.`
         };
       }
       return { allowed: true };
@@ -1533,6 +1533,12 @@ function App() {
     // Determine user tier
     const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
 
+    const models = await ensureModelConfig();
+    if (!models) {
+      setMessage('❌ Could not load AI models from the server. Check your connection and try again.');
+      return;
+    }
+
     // Free user restrictions
     if (!isPro) {
       // Free users can only use Chrome tabs (no display capture)
@@ -1545,12 +1551,8 @@ function App() {
       if (!isAudio(sourceToUse)) {
         const tab = sourceToUse as ChromeTab;
         const url = tab.url || '';
-        const isAllowedDomain = FREE_TIER_ALLOWED_DOMAINS.some(domain => 
-          url.includes(domain)
-        );
-        
-        if (!isAllowedDomain) {
-          setMessage(`⚠️ Free tier only works on: ${FREE_TIER_ALLOWED_DOMAINS.join(', ')}. Upgrade to Pro for unlimited access.`);
+        if (!isFreeTierUrlAllowed(models, url)) {
+          setMessage(`⚠️ Free tier only works on: ${models.free_allowed_domains.join(', ')}. Upgrade to Pro for unlimited access.`);
           return;
         }
       }
@@ -1563,7 +1565,7 @@ function App() {
     }
 
     // Check quota before making request
-    const quotaCheck = canUseAIProxy();
+    const quotaCheck = canUseAIProxy(models.free_call_limit);
     if (!quotaCheck.allowed) {
       setMessage(`⚠️ ${quotaCheck.reason}`);
       return;
@@ -1595,8 +1597,9 @@ function App() {
       }
     }
 
-    // Determine which model to use
-    const modelToUse = useBYOKey ? modelConfig.free_model.id : (isPro ? aiConfig.selected_model : modelConfig.free_model.id);
+    const modelToUse = useBYOKey
+      ? models.byo_model.id
+      : (isPro ? (aiConfig.selected_model || models.default_pro_model) : models.free_model.id);
 
     setIsLoading(true);
     setAiResponse('');
@@ -1670,7 +1673,7 @@ function App() {
             config: { 
               selected_model: modelToUse, 
               gemini_api_key: aiConfig.gemini_api_key || '', 
-              claude_api_key: '' 
+              max_output_tokens: models.max_output_tokens,
             },
             sourceUrl: tabUrl,
           });
@@ -1724,7 +1727,7 @@ function App() {
             config: { 
               selected_model: modelToUse, 
               gemini_api_key: aiConfig.gemini_api_key || '', 
-              claude_api_key: '' 
+              max_output_tokens: models.max_output_tokens,
             },
             sourceUrl: tabUrl,
           });
@@ -1793,6 +1796,15 @@ function App() {
   // ========== MAIN APP (LOGGED IN) ==========
   // Pro users include 'active' and 'cancelling' (still have access until period end)
   const isPaidUser = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+  const freeCallLimit = modelConfig?.free_call_limit;
+  const freeCallLimitLabel = freeCallLimit ?? '…';
+  const freeCallsUsed = subscription?.lifetime_ai_calls || 0;
+  const freeCallsExhausted = freeCallLimit !== undefined && freeCallsUsed >= freeCallLimit;
+  const freeSitesRestricted = !modelConfig || !allowsAllDomains(modelConfig);
+  const usingByoKey = !isPaidUser && freeCallsExhausted && !!aiConfig.gemini_api_key;
+  const proRequestLimitLabel = usageStats?.requests_limit ?? modelConfig?.pro_request_limit ?? '…';
+  const proAudioHoursLabel = modelConfig ? +(modelConfig.pro_audio_seconds_limit / 3600).toFixed(1) : '…';
+  const proModelNames = modelConfig?.pro_models.map(m => m.name).join(', ') ?? '';
 
   return (
     <div className="app-container">
@@ -1805,17 +1817,17 @@ function App() {
           {subscription && (
             <span className="quota-badge" title={
               isPaidUser
-                ? `${usageStats?.requests_used ?? '?'} of ${usageStats?.requests_limit ?? 150} AI calls used this month${usageStats?.period_end ? ` · Resets ${usageStats.period_end.toLocaleDateString()}` : ''}`
-                : (subscription.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key
+                ? `${usageStats?.requests_used ?? '?'} of ${proRequestLimitLabel} AI calls used this month${usageStats?.period_end ? ` · Resets ${usageStats.period_end.toLocaleDateString()}` : ''}`
+                : usingByoKey
                   ? 'Using your own Gemini API key (unlimited)'
-                  : `${subscription.lifetime_ai_calls || 0} of 3 lifetime free calls used`
+                  : `${freeCallsUsed} of ${freeCallLimitLabel} lifetime free calls used`
             }>
               {isPaidUser ? (
                 <>📊 {usageStats ? `${usageStats.requests_used}/${usageStats.requests_limit} calls` : '...'}</>
-              ) : (subscription.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key ? (
+              ) : usingByoKey ? (
                 <>🔑 BYO Key</>
               ) : (
-                <>🎁 {subscription.lifetime_ai_calls || 0}/3 calls</>
+                <>🎁 {freeCallsUsed}/{freeCallLimitLabel} calls</>
               )}
             </span>
           )}
@@ -2042,10 +2054,12 @@ function App() {
                 const currentIdx = phaseOrder.indexOf(solvePhase);
 
                 const modelName = (() => {
-                  const actualModelId = isPaidUser ? aiConfig.selected_model : modelConfig.free_model.id;
-                  const allModels = [...modelConfig.pro_models, modelConfig.free_model];
-                  const found = allModels.find(m => m.id === actualModelId);
-                  return found ? found.name : actualModelId;
+                  if (!modelConfig) return '';
+                  if (!isPaidUser) {
+                    return usingByoKey ? modelConfig.byo_model.name : modelConfig.free_model.name;
+                  }
+                  const found = modelConfig.pro_models.find(m => m.id === aiConfig.selected_model);
+                  return found ? found.name : aiConfig.selected_model;
                 })();
                 const promptLabel = getTemplateLabel(selectedTemplate);
 
@@ -2072,8 +2086,12 @@ function App() {
                     </div>
                     {solvePhase === 'asking' && (
                       <div className="stepper-info">
-                        <span className="stepper-info-model">🧠 {modelName}</span>
-                        <span className="stepper-info-divider">·</span>
+                        {modelName && (
+                          <>
+                            <span className="stepper-info-model">🧠 {modelName}</span>
+                            <span className="stepper-info-divider">·</span>
+                          </>
+                        )}
                         <span className="stepper-info-prompt">📋 {promptLabel}</span>
                       </div>
                     )}
@@ -2205,7 +2223,7 @@ function App() {
                       {(() => {
                         const pct = isPaidUser && usageStats
                           ? Math.min(100, (usageStats.requests_used / usageStats.requests_limit) * 100)
-                          : Math.min(100, ((subscription?.lifetime_ai_calls || 0) / 3) * 100);
+                          : freeCallLimit ? Math.min(100, (freeCallsUsed / freeCallLimit) * 100) : 0;
                         const barColor = pct < 50
                           ? `linear-gradient(90deg, #4caf50, #66bb6a)`
                           : pct < 80
@@ -2222,12 +2240,12 @@ function App() {
                     <div className="usage-text">
                       {isPaidUser ? (
                         <>
-                          <span>{usageStats?.requests_used || 0} / {usageStats?.requests_limit || 150} requests</span>
+                          <span>{usageStats?.requests_used || 0} / {proRequestLimitLabel} requests</span>
                           <span className="usage-reset">Resets {usageStats?.period_end?.toLocaleDateString()}</span>
                         </>
                       ) : (
                         <>
-                          <span>{subscription?.lifetime_ai_calls || 0} / 3 lifetime free calls used</span>
+                          <span>{freeCallsUsed} / {freeCallLimitLabel} lifetime free calls used</span>
                         </>
                       )}
                     </div>
@@ -2263,9 +2281,9 @@ function App() {
                     <div className="upgrade-section">
                       <h4>🚀 Upgrade to Pro</h4>
                       <ul className="upgrade-benefits">
-                        <li>✓ 150 AI requests per month</li>
-                        <li>✓ 10 hours audio recording per month</li>
-                        <li>✓ GPT-5.2 Codex, Claude 4.5, Gemini 3, Grok 4.1</li>
+                        <li>✓ {proRequestLimitLabel} AI requests per month</li>
+                        <li>✓ {proAudioHoursLabel} hours audio recording per month</li>
+                        {proModelNames && <li>✓ {proModelNames}</li>}
                         <li>✓ Any website + screen capture</li>
                         <li>✓ Audio input with transcription</li>
                       </ul>
@@ -2324,8 +2342,10 @@ function App() {
                         value={aiConfig.selected_model}
                         onChange={(e) => setAiConfig({...aiConfig, selected_model: e.target.value})}
                         className="input-field"
+                        disabled={!modelConfig}
                       >
-                        {modelConfig.pro_models.map(model => (
+                        {!modelConfig && <option value="">Loading models…</option>}
+                        {modelConfig?.pro_models.map(model => (
                           <option key={model.id} value={model.id}>
                             {model.name} ({model.provider})
                           </option>
@@ -2333,22 +2353,24 @@ function App() {
                       </select>
                     ) : (
                       <div className="input-field" style={{ backgroundColor: 'var(--input-disabled-bg)', cursor: 'not-allowed' }}>
-                        {(subscription?.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key 
-                          ? 'Gemini 2.5 Flash (Google) - Your API Key'
-                          : `${modelConfig.free_model.name} (${modelConfig.free_model.provider}) - Free Tier`}
+                        {!modelConfig
+                          ? 'Loading models…'
+                          : usingByoKey
+                            ? `${modelConfig.byo_model.name} (${modelConfig.byo_model.provider}) - Your API Key`
+                            : `${modelConfig.free_model.name} (${modelConfig.free_model.provider}) - Free Tier`}
                       </div>
                     )}
                   </div>
 
-                  {/* BYO API Key section - shown when free user exhausted 3 tries */}
-                  {!isPaidUser && (subscription?.lifetime_ai_calls || 0) >= 3 && (
+                  {/* BYO API Key section - shown when free user exhausted their free calls */}
+                  {!isPaidUser && freeCallsExhausted && (
                     <div className="form-group" style={{ marginTop: '16px', padding: '16px', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '1px solid #0ea5e9' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#0369a1', fontWeight: 600 }}>
                         🔑 Bring Your Own API Key
                         {aiConfig.gemini_api_key && <span style={{ color: '#16a34a', fontSize: '12px' }}>✓ Active</span>}
                       </label>
                       <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>
-                        Your 3 free tries are used. Add your own Gemini API key to continue using AI (with same domain restrictions).
+                        Your {freeCallLimitLabel} free tries are used. Add your own Gemini API key to continue using AI{freeSitesRestricted ? ' (with same domain restrictions)' : ''}.
                       </p>
                       <input
                         type="password"
@@ -2374,7 +2396,7 @@ function App() {
                       </button>
                       {aiConfig.gemini_api_key && (
                         <p style={{ fontSize: '11px', color: '#16a34a', marginTop: '8px' }}>
-                          ✓ Using Gemini 2.5 Flash with your own key. Domain restrictions still apply.
+                          ✓ Using {modelConfig?.byo_model.name ?? 'the free-tier model'} with your own key.{freeSitesRestricted ? ' Domain restrictions still apply.' : ''}
                         </p>
                       )}
                     </div>
@@ -2384,14 +2406,20 @@ function App() {
                     <div className="info-note" style={{ marginTop: '16px' }}>
                       <h4 style={{ marginBottom: '8px' }}>🔒 Free Tier Limitations</h4>
                       <ul style={{ fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
-                        <li>{(subscription?.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key 
-                          ? 'Gemini 2.5 Flash (with your API key)' 
-                          : 'Grok Code Fast model only'}</li>
-                        <li>{(subscription?.lifetime_ai_calls || 0) >= 3 
-                          ? (aiConfig.gemini_api_key ? 'Unlimited with your API key' : '3 lifetime AI requests (used)')
-                          : `${3 - (subscription?.lifetime_ai_calls || 0)} of 3 free requests remaining`}</li>
+                        {modelConfig && (
+                          <li>{usingByoKey
+                            ? `${modelConfig.byo_model.name} (with your API key)`
+                            : `${modelConfig.free_model.name} model only`}</li>
+                        )}
+                        {freeCallLimit !== undefined && (
+                          <li>{freeCallsExhausted
+                            ? (aiConfig.gemini_api_key ? 'Unlimited with your API key' : `${freeCallLimit} lifetime AI requests (used)`)
+                            : `${freeCallLimit - freeCallsUsed} of ${freeCallLimit} free requests remaining`}</li>
+                        )}
                         <li>Chrome tabs only (no screen capture)</li>
-                        <li>Only works on: {FREE_TIER_ALLOWED_DOMAINS.join(', ')}</li>
+                        {modelConfig && (allowsAllDomains(modelConfig)
+                          ? <li>Works on any website</li>
+                          : <li>Only works on: {modelConfig.free_allowed_domains.join(', ')}</li>)}
                       </ul>
                       <button 
                         className="action-btn primary"
@@ -2408,8 +2436,8 @@ function App() {
                     <div className="info-note" style={{ marginTop: '16px' }}>
                       <h4 style={{ marginBottom: '8px' }}>✨ Pro Features</h4>
                       <ul style={{ fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
-                        <li>All 4 premium AI models</li>
-                        <li>150 requests per month</li>
+                        <li>{modelConfig ? `All ${modelConfig.pro_models.length} premium AI models` : 'All premium AI models'}</li>
+                        <li>{proRequestLimitLabel} requests per month</li>
                         <li>Any Chrome tab or website</li>
                         <li>Display/screen capture</li>
                         <li>Audio input with transcription</li>

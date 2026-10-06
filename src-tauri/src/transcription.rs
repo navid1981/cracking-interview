@@ -44,15 +44,15 @@ struct DeepgramAlternative {
     transcript: String,
 }
 
-pub fn is_transcribing() -> bool {
-    TRANSCRIPTION_ACTIVE.load(Ordering::Relaxed)
-}
-
 pub async fn start_live_transcription(
     app_handle: tauri::AppHandle,
     deepgram_key: String,
+    model: String,
     language: String,
 ) -> Result<(), String> {
+    if model.trim().is_empty() {
+        return Err("No transcription model configured by the server".to_string());
+    }
     if TRANSCRIPTION_ACTIVE.load(Ordering::Relaxed) {
         return Err("Live transcription is already active".to_string());
     }
@@ -67,7 +67,7 @@ pub async fn start_live_transcription(
     let stop_signal = STOP_SIGNAL.clone();
 
     tokio::spawn(async move {
-        if let Err(e) = run_transcription_session(app_handle.clone(), deepgram_key, language, stop_signal).await {
+        if let Err(e) = run_transcription_session(app_handle.clone(), deepgram_key, model, language, stop_signal).await {
             println!("[Transcription] Session error: {}", e);
             let _ = app_handle.emit("live_transcript_error", e.clone());
         }
@@ -101,6 +101,7 @@ pub fn stop_live_transcription() -> Result<String, String> {
 async fn run_transcription_session(
     app_handle: tauri::AppHandle,
     deepgram_key: String,
+    model: String,
     language: String,
     stop_signal: Arc<AtomicBool>,
 ) -> Result<(), String> {
@@ -114,10 +115,10 @@ async fn run_transcription_session(
 
     let url = format!(
         "wss://api.deepgram.com/v1/listen?\
-         model=nova-3&language={}&punctuate=true&smart_format=true\
+         model={}&language={}&punctuate=true&smart_format=true\
          &interim_results=true&utterance_end_ms=3000&vad_events=true\
          &encoding=linear16&sample_rate=16000&channels=1",
-        lang_param
+        model, lang_param
     );
 
     println!("[Transcription] Connecting to Deepgram: {}", url);

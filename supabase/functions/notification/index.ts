@@ -1,6 +1,8 @@
 // Supabase Edge Function: Notification System
 // deno-lint-ignore-file
 
+import { FREE_LIFETIME_CALL_LIMIT, PRO_MONTHLY_REQUEST_LIMIT } from "../_shared/limits.ts";
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -22,7 +24,7 @@ const ANNOUNCEMENTS = {
       <p>Thanks for using CrackingInterview! Here are some quick tips:</p>
       <ul>
         <li>Try <a href="https://leetcode.com" target="_blank">LeetCode</a> problems in stealth mode</li>
-        <li>You have 3 free AI calls to get started</li>
+        <li>You have ${FREE_LIFETIME_CALL_LIMIT} free AI calls to get started</li>
         <li>Upgrade to Pro for any website + screen capture + audio input</li>
       </ul>
       <p><strong>Need help?</strong> Check our <a href="https://crackinginterview.org" target="_blank">documentation</a>.</p>
@@ -35,7 +37,7 @@ const ANNOUNCEMENTS = {
     message: `
       <p>Thanks for subscribing to CrackingInterview Pro!</p>
       <ul>
-        <li>You have 150 AI calls per month</li>
+        <li>You have ${PRO_MONTHLY_REQUEST_LIMIT} AI calls per month</li>
         <li>Access to all premium models (GPT-5, Claude, Gemini)</li>
         <li>Display capture feature unlocked</li>
       </ul>
