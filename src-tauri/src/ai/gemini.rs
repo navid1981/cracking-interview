@@ -74,15 +74,6 @@ async fn post_with_retry(request: reqwest::RequestBuilder) -> Result<serde_json:
 
         // Success path
         if status.is_success() {
-            // RECITATION means Gemini matched its answer too closely to memorized
-            // training content and withheld it. It's non-deterministic across
-            // sampling, so a retry often succeeds; only give up after a few tries.
-            let finish_reason = json["candidates"][0]["finishReason"].as_str().unwrap_or("");
-            if finish_reason == "RECITATION" && attempt < delays_ms.len() - 1 {
-                println!("⏳ Gemini recitation block; retrying in {}ms (attempt {}/{})", delay, attempt + 1, delays_ms.len());
-                tokio::time::sleep(std::time::Duration::from_millis(*delay)).await;
-                continue;
-            }
             return Ok(json);
         }
 
