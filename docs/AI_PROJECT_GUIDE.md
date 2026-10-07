@@ -42,6 +42,13 @@ The primary source code is:
   - `src/components/AuthScreen.tsx` + `.css`: Sign in/sign up container
   - `src/components/SignInForm.tsx`: Email/password sign in form
   - `src/components/SignUpForm.tsx`: Email/password sign up form
+  - `src/components/SetupChecklist.tsx` + `.css`: setup steps (main-screen card + compact Settings → App panel)
+  - `src/components/settings/AppSettingsTab.tsx`: Settings → App (Transparency, Theme, Stealth Mode, Setup & Permissions); Stealth boxes use `.stealth-box.is-active|is-inactive|is-locked` (theme-aware via `--tone` + `color-mix`)
+  - `src/components/settings/HotkeysSettingsTab.tsx`: Settings → HotKeys, data-driven field list (`SECTIONS`)
+  - `src/hooks/useSetupStatus.ts`: setup status state, focus re-check, grant/hide/show, "all set" flash
+  - `src/services/hotkeys.ts`: `HotkeysConfig` type + `formatHotkey` ("Cmd+Shift+1" → "⌘⇧1" on macOS). Solve button and Text/Screenshot segment tooltips show the saved hotkeys (`activeHotkeys`, loaded at startup)
+  - `src/services/messageActions.ts`: maps `❌`/`⚠️` status messages to next-step buttons under the message (Add your API key, Upgrade to Pro, View usage, Open/Download Chrome, Sign in again, Open Screen Recording settings). Add a rule to `RULES` when introducing a new actionable error
+  - Remaining Settings tabs (Account, AI Models, Prompts) are still inline in `App.tsx`
 - **Backend (Tauri/Rust)**: `src-tauri/src/`
   - `main.rs`: Tauri commands (IPC), window lifecycle, and global hotkey orchestration
   - `stealth_hotkey.rs`: OS-level key swallowing (`CGEventTap` on macOS, `WH_KEYBOARD_LL` on Windows), non-activating window raising, and hook lifecycle teardown
@@ -62,7 +69,7 @@ The primary source code is:
   - `create-billing-portal-test/index.ts`: Stripe Customer Portal (test mode, kept for development)
   - `stripe-webhook/index.ts`: Stripe webhook handler (**production** — Stripe calls this)
   - `stripe-webhook-test/index.ts`: Stripe webhook handler (test mode, kept for development)
-  - `notification/index.ts`: Announcement system (returns announcements based on user type + app version)
+  - `notification/index.ts`: Announcement system (returns announcements based on user type + app version). Versions older than `LATEST_APP_VERSION` (numeric semver compare) get "Update Available"; Pro welcome lists `PRO_MODELS` names
   - `get-models/index.ts`: Returns LLM model configuration (pro models, free model, BYO model, default) from shared constants; `?v=2` gets the current shape, no version gets the frozen legacy shape for older releases
   - `log-audio-usage/index.ts`: Logs audio recording duration for usage tracking
   - `_shared/models.ts`: Shared LLM model constants (IDs, names, providers, OpenRouter mapping) used by `ai-proxy` and `get-models`, plus the Deepgram `TRANSCRIPTION_MODEL` (`nova-3`) used by `deepgram-key`
@@ -382,7 +389,7 @@ Setup checklist (`src-tauri/src/setup.rs`, UI in `src/components/SetupChecklist.
 - `get_setup_status() -> { platform, chrome_installed, accessibility_granted?, screen_recording_granted? }` — permission fields are `null` off macOS. Screen Recording uses `CGPreflightScreenCaptureAccess`, which usually reports a new grant only after an app restart
 - `request_screen_recording() -> bool`, `open_privacy_settings(pane: "accessibility" | "screen_recording")`, `restart_app()`
 - Steps: Chrome installed, Chrome connected, Accessibility (macOS), Screen & System Audio Recording (macOS, Pro only). Re-checked on window focus and via "Re-check" (no polling)
-- Shown as a main-screen card and an amber "⚠ Setup n/total" header badge only while a one-time step (install/permission) is missing; "Chrome connected" alone never triggers them because the header already has "Open Chrome". The card can be hidden for the current session (in-memory, returns next launch). Always listed in Settings → App → "Setup & Permissions"
+- Shown as a main-screen card and an amber "⚠ Setup n/total" header badge only while a one-time step (install/permission) is missing; "Chrome connected" alone never triggers them because the header already has "Open Chrome". The card can be hidden for the current session (in-memory, returns next launch). Always listed as a compact 2-column grid at the bottom of Settings → App ("Setup & Permissions"; step descriptions are tooltips) so the whole App tab fits the 750px Settings modal without scrolling
 - After "Grant access" in this session, an ungranted permission shows "Open Settings" + "Restart app"
 AI (Proxy calls - via Supabase Edge Function):
 

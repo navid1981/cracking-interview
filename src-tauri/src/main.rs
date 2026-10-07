@@ -767,10 +767,16 @@ pub struct AIProxyUsage {
     pub is_paid: bool,
 }
 
+/// Checkout and billing-portal URLs are session links, so only the host is logged.
+fn url_host_for_log(url: &str) -> &str {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    rest.split(['/', '?', '#']).next().unwrap_or("")
+}
+
 /// Open a URL in the default system browser
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
-    println!("[OpenURL] Opening: {}", url);
+    println!("[OpenURL] Opening: {}", url_host_for_log(&url));
     
     #[cfg(target_os = "macos")]
     {
@@ -839,7 +845,7 @@ async fn create_checkout_session(
     let response_text = response.text().await
         .map_err(|e| format!("❌ Failed to read checkout response: {}", e))?;
 
-    println!("[Checkout] Response status: {}, body: {}", status, response_text);
+    println!("[Checkout] Response status: {}", status);
 
     if !status.is_success() {
         return Err(format!("❌ Checkout failed ({}): {}", status, response_text));
@@ -854,7 +860,7 @@ async fn create_checkout_session(
         .ok_or("❌ No checkout URL in response")?
         .to_string();
 
-    println!("[Checkout] Got checkout URL: {}", checkout_url);
+    println!("[Checkout] Got checkout URL");
     
     Ok(checkout_url)
 }
@@ -892,7 +898,7 @@ async fn create_billing_portal_session(
     let response_text = response.text().await
         .map_err(|e| format!("❌ Failed to read billing portal response: {}", e))?;
 
-    println!("[Billing Portal] Response status: {}, body: {}", status, response_text);
+    println!("[Billing Portal] Response status: {}", status);
 
     if !status.is_success() {
         return Err(format!("❌ Billing portal failed ({}): {}", status, response_text));
@@ -906,7 +912,7 @@ async fn create_billing_portal_session(
         .ok_or("❌ No portal URL in response")?
         .to_string();
 
-    println!("[Billing Portal] Got portal URL: {}", portal_url);
+    println!("[Billing Portal] Got portal URL");
     
     Ok(portal_url)
 }
@@ -914,7 +920,7 @@ async fn create_billing_portal_session(
 /// Open a URL in the system's default browser
 #[tauri::command]
 async fn open_url(url: String) -> Result<(), String> {
-    println!("[Open URL] Opening: {}", url);
+    println!("[Open URL] Opening: {}", url_host_for_log(&url));
     
     #[cfg(target_os = "macos")]
     {
@@ -978,7 +984,6 @@ async fn supabase_sign_up(
         .map_err(|e| format!("❌ Failed to read sign up response: {}", e))?;
 
     println!("[Auth] Sign up response status: {}", status);
-    println!("[Auth] Sign up response body: {}", response_text);
 
     let data: serde_json::Value = serde_json::from_str(&response_text)
         .map_err(|e| format!("❌ Failed to parse sign up response: {}", e))?;
@@ -1034,7 +1039,6 @@ async fn supabase_sign_in(
         .map_err(|e| format!("❌ Failed to read sign in response: {}", e))?;
 
     println!("[Auth] Sign in response status: {}", status);
-    println!("[Auth] Sign in response body: {}", response_text);
 
     let data: serde_json::Value = serde_json::from_str(&response_text)
         .map_err(|e| format!("❌ Failed to parse sign in response: {}", e))?;

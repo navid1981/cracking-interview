@@ -126,9 +126,9 @@
     "semantic_hash": "8e734ea5be135a77623dec3091fe2439"
   },
   "src-tauri/src/main.rs": {
-    "mtime": 1791351566.5544345,
-    "seen": 1791351599.905804,
-    "ast_hash": "4f1d9b5d72673e01c582e02f4852db88",
+    "mtime": 1791352922.1398046,
+    "seen": 1791353343.9763799,
+    "ast_hash": "17fdd0d57ee1af23a90ed77487cf2403",
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot.rs": {
@@ -156,9 +156,9 @@
     "semantic_hash": ""
   },
   "src/App.tsx": {
-    "mtime": 1791351575.3042774,
-    "seen": 1791351599.9058628,
-    "ast_hash": "8a4550c4d0f25a2f0f2a5b7bf2bb112e",
+    "mtime": 1791354421.1409473,
+    "seen": 1791354432.838699,
+    "ast_hash": "0e970e304310ca7d6b388684aeb60a00",
     "semantic_hash": ""
   },
   "src/components/AIResponseDisplay.tsx": {
@@ -204,9 +204,9 @@
     "semantic_hash": "eff3fdc7f5fadcf0842a19a9bfe5662d"
   },
   "src/components/SignUpForm.tsx": {
-    "mtime": 1791328168.8511863,
-    "seen": 1791328208.9650612,
-    "ast_hash": "0c6a0c1e5dedb4282e47cbb09eae435f",
+    "mtime": 1791352966.345796,
+    "seen": 1791353343.9765718,
+    "ast_hash": "00dc2a9d6639c79a2e5c181ab735362f",
     "semantic_hash": ""
   },
   "src/components/TabDropdown.tsx": {
@@ -288,9 +288,9 @@
     "semantic_hash": ""
   },
   "supabase/functions/notification/index.ts": {
-    "mtime": 1791326914.2661908,
-    "seen": 1791327024.79654,
-    "ast_hash": "80969b2a72da8675e2ac2fe212be04d2",
+    "mtime": 1791352965.0798395,
+    "seen": 1791353343.976825,
+    "ast_hash": "3e7d345c85b8c3ddae7d5f90cb0655b5",
     "semantic_hash": ""
   },
   "supabase/functions/stripe-webhook-test/index.ts": {
@@ -342,9 +342,9 @@
     "semantic_hash": ""
   },
   "docs/AI_PROJECT_GUIDE.md": {
-    "mtime": 1791351577.1110907,
-    "seen": 1791351599.906377,
-    "ast_hash": "ef90a46f06c9befcd99d62576d01adce",
+    "mtime": 1791353321.2249637,
+    "seen": 1791353343.976923,
+    "ast_hash": "cfa456363a4d4a5ce73ac6c5e130369b",
     "semantic_hash": ""
   },
   "index.html": {
@@ -564,9 +564,39 @@
     "semantic_hash": ""
   },
   "src/components/SetupChecklist.tsx": {
-    "mtime": 1791351572.8557436,
-    "seen": 1791351599.905988,
-    "ast_hash": "cbe776d723a320f7b50cb56bc705a29c",
+    "mtime": 1791352325.716534,
+    "seen": 1791352354.835351,
+    "ast_hash": "70b31776383d8b2a015edfdd6bde0dc4",
+    "semantic_hash": ""
+  },
+  "src/components/settings/AppSettingsTab.tsx": {
+    "mtime": 1791352998.5506766,
+    "seen": 1791353343.976587,
+    "ast_hash": "ae3b81a489365583781bffd88c781003",
+    "semantic_hash": ""
+  },
+  "src/components/settings/HotkeysSettingsTab.tsx": {
+    "mtime": 1791353228.823229,
+    "seen": 1791353343.976587,
+    "ast_hash": "b2c5efef1db4cffe8368e9a0d76ce8e8",
+    "semantic_hash": ""
+  },
+  "src/hooks/useSetupStatus.ts": {
+    "mtime": 1791353260.5025613,
+    "seen": 1791353343.976588,
+    "ast_hash": "8adae4cb857b19a347627b7b2e1e8c3a",
+    "semantic_hash": ""
+  },
+  "src/services/hotkeys.ts": {
+    "mtime": 1791353172.3068128,
+    "seen": 1791353343.9766011,
+    "ast_hash": "a7078a5dddfee550cd1e195e09240676",
+    "semantic_hash": ""
+  },
+  "src/services/messageActions.ts": {
+    "mtime": 1791353099.7072265,
+    "seen": 1791353343.976602,
+    "ast_hash": "665c2b4cf5f528357a8e9c876af25d26",
     "semantic_hash": ""
   }
 }

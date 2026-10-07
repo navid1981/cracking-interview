@@ -159,7 +159,7 @@ export default function SignUpForm({ onSuccess, onSwitchToSignIn }: SignUpFormPr
           <strong>Free users:</strong> {config ? `${config.free_call_limit} free AI calls` : 'Free AI calls'}, {!config ? 'Limited sites' : allowsAllDomains(config) ? 'Any website' : `Limited sites (${config.free_allowed_domains.join(', ')})`}, Free-tier AI model, Chrome tab text & screenshot capture
         </p>
         <p style={{ fontSize: '12px', lineHeight: '1.6', color: '#666', margin: 0 }}>
-          <strong>Upgrade to Pro:</strong> Unlimited sites, {config ? `${config.pro_request_limit} calls/month` : 'Monthly AI calls'}, Premium AI models, Display screenshot capture & Verbal interviews
+          <strong>Upgrade to Pro:</strong> Stealth mode, {config ? `${config.pro_request_limit} calls/month` : 'Monthly AI calls'}, Premium AI models, Display screenshot capture & Verbal interviews
         </p>
       </div>
     </form>

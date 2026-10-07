@@ -8,7 +8,12 @@ import PromptEditor from './components/PromptEditor';
 import PromptListView from './components/PromptListView';
 import DocumentManager, { DocumentPlaceholder } from './components/DocumentManager';
 import AuthScreen from './components/AuthScreen';
-import SetupChecklist, { getSetupSteps, SetupStatus, PrivacyPane } from './components/SetupChecklist';
+import SetupChecklist from './components/SetupChecklist';
+import { useSetupStatus } from './hooks/useSetupStatus';
+import AppSettingsTab from './components/settings/AppSettingsTab';
+import HotkeysSettingsTab from './components/settings/HotkeysSettingsTab';
+import { getMessageActions, MESSAGE_ACTION_LABELS, MessageActionKind } from './services/messageActions';
+import { HotkeysConfig, formatHotkey } from './services/hotkeys';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts, StoredDocPlaceholder } from './services/prompts';
 import { 
   onAuthStateChange, 
@@ -110,12 +115,6 @@ function App() {
   const [aiResponse, setAiResponse] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isOpeningChrome, setIsOpeningChrome] = useState(false);
-  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
-  const [setupRequested, setSetupRequested] = useState<Partial<Record<PrivacyPane, boolean>>>({});
-  // Session-only: the card returns on next launch if something is still missing.
-  const [setupHidden, setSetupHidden] = useState(false);
-  const [setupJustCompleted, setSetupJustCompleted] = useState(false);
-  const prevSetupMissingRef = useRef<number | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [message, setMessage] = useState('');
   // Solve progress stepper: tracks which phase we're in
@@ -289,7 +288,9 @@ function App() {
   const sessionMaxSecondsRef = useRef(Infinity);
   const audioSecondsRef = useRef(0);
 
-  const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
+  const [hotkeysDraft, setHotkeysDraft] = useState<HotkeysConfig>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
+  // Saved hotkeys (the draft above may hold unsaved edits from the HotKeys tab).
+  const [activeHotkeys, setActiveHotkeys] = useState<HotkeysConfig | null>(null);
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
   const [stealthStatus, setStealthStatus] = useState<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean } | null>(null);
   
@@ -1163,8 +1164,9 @@ function App() {
 
   const loadHotkeys = async () => {
     try {
-      const cfg = await invoke<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('get_hotkeys');
+      const cfg = await invoke<HotkeysConfig>('get_hotkeys');
       setHotkeysDraft(cfg);
+      setActiveHotkeys(cfg);
       setHotkeysStatus('');
       try {
         const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('get_stealth_status');
@@ -1177,10 +1179,14 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    invoke<HotkeysConfig>('get_hotkeys').then(setActiveHotkeys).catch(() => {});
+  }, []);
+
   const saveHotkeys = async () => {
     try {
       setHotkeysStatus('Saving...');
-      const updated = await invoke<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('set_hotkeys', {
+      const updated = await invoke<HotkeysConfig>('set_hotkeys', {
         textHotkey: hotkeysDraft.text,
         screenshotHotkey: hotkeysDraft.screenshot,
         audioToggleHotkey: hotkeysDraft.audio_toggle,
@@ -1194,6 +1200,7 @@ function App() {
         quitAppHotkey: hotkeysDraft.quit_app,
       });
       setHotkeysDraft(updated);
+      setActiveHotkeys(updated);
       setHotkeysStatus('Saved.');
       try {
         const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('get_stealth_status');
@@ -1209,8 +1216,9 @@ function App() {
   const resetHotkeys = async () => {
     try {
       setHotkeysStatus('Resetting...');
-      const updated = await invoke<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('reset_hotkeys_to_default');
+      const updated = await invoke<HotkeysConfig>('reset_hotkeys_to_default');
       setHotkeysDraft(updated);
+      setActiveHotkeys(updated);
       setHotkeysStatus('Reset to defaults.');
       try {
         const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('get_stealth_status');
@@ -1240,64 +1248,43 @@ function App() {
     }
   };
 
-  const refreshSetupStatus = async () => {
-    try {
-      setSetupStatus(await invoke<SetupStatus>('get_setup_status'));
-    } catch (e) {
-      console.error('Failed to read setup status:', e);
-    }
+  const setup = useSetupStatus(cdpReady, isPro, () => { handleRefreshStealthStatus(); });
+
+  const handleOpacityChange = (opacity: number) => {
+    setWindowOpacity(opacity);
+    localStorage.setItem('window_opacity', opacity.toString());
+    invoke('set_window_opacity', { opacity }).catch(console.error);
   };
 
-  useEffect(() => {
-    refreshSetupStatus();
-    window.addEventListener('focus', refreshSetupStatus);
-    return () => window.removeEventListener('focus', refreshSetupStatus);
-  }, []);
+  const handleThemeChange = (next: 'light' | 'dark') => {
+    setTheme(next);
+    localStorage.setItem('app_theme', next);
+    document.documentElement.setAttribute('data-theme', next);
+  };
 
-  const setupIsPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
-  const setupSteps = getSetupSteps(setupStatus, cdpReady, setupIsPro);
-  const setupOneTimeMissing = setupSteps.filter(s => s.oneTime && !s.done).length;
-
-  useEffect(() => {
-    const prev = prevSetupMissingRef.current;
-    prevSetupMissingRef.current = setupStatus ? setupOneTimeMissing : null;
-    if (prev !== null && prev > 0 && setupOneTimeMissing === 0 && !setupHidden) {
-      setSetupJustCompleted(true);
-      const t = setTimeout(() => setSetupJustCompleted(false), 4000);
-      return () => clearTimeout(t);
-    }
-  }, [setupOneTimeMissing, setupStatus, setupHidden]);
-
-  const handleGrantPermission = async (pane: PrivacyPane) => {
-    try {
-      if (pane === 'accessibility') {
-        await invoke('request_accessibility');
-      } else {
-        await invoke('request_screen_recording');
-      }
-      await invoke('open_privacy_settings', { pane });
-    } catch (e) {
-      console.error(`Failed to request ${pane}:`, e);
-    }
-    setSetupRequested(prev => ({ ...prev, [pane]: true }));
-    refreshSetupStatus();
-    handleRefreshStealthStatus();
+  const handleStealthModeChange = (enabled: boolean) => {
+    setStealthMode(enabled);
+    localStorage.setItem('stealth_mode', enabled.toString());
+    invoke('set_stealth_mode', { enabled })
+      .then(() => invoke<typeof stealthStatus>('get_stealth_status'))
+      .then(status => setStealthStatus(status))
+      .catch(console.error);
   };
 
   const handleShowSetup = () => {
-    setSetupHidden(false);
+    setup.show();
     if (showSettings) handleCloseSettings();
   };
 
   const setupChecklistProps = {
-    steps: setupSteps,
-    requested: setupRequested,
+    steps: setup.steps,
+    requested: setup.requested,
     isOpeningChrome,
     onOpenChrome: () => { openChromeCdp(); },
     onDownloadChrome: () => { invoke('open_url', { url: 'https://www.google.com/chrome/' }); },
-    onGrant: handleGrantPermission,
+    onGrant: setup.grant,
     onRestart: () => { invoke('restart_app'); },
-    onRecheck: () => { refreshSetupStatus(); handleRefreshStealthStatus(); },
+    onRecheck: setup.recheck,
   };
 
   const handleRefreshStealthStatus = async () => {
@@ -1309,7 +1296,9 @@ function App() {
     }
   };
 
-  const handleOpenSettings = async () => {
+  const handleOpenSettings = () => openSettingsAt('models');
+
+  const openSettingsAt = async (tab: typeof settingsTab) => {
     
     try {
       const currentSize = await invoke<{ width: number; height: number }>('get_window_inner_size');
@@ -1337,7 +1326,7 @@ function App() {
     }
 
     // Open modal AFTER resize attempt.
-    setSettingsTab('models');
+    setSettingsTab(tab);
     setShowSettings(true);
   };
 
@@ -1986,6 +1975,31 @@ function App() {
     solveWithAIRef.current = solveWithAI;
   });
 
+  const runMessageAction = (kind: MessageActionKind) => {
+    switch (kind) {
+      case 'add_api_key':
+      case 'fix_api_key':
+        openSettingsAt('models');
+        break;
+      case 'upgrade':
+      case 'view_usage':
+        openSettingsAt('account');
+        break;
+      case 'open_chrome':
+        openChromeCdp();
+        break;
+      case 'download_chrome':
+        invoke('open_url', { url: 'https://www.google.com/chrome/' });
+        break;
+      case 'sign_in':
+        handleSignOut();
+        break;
+      case 'screen_permission':
+        setup.grant('screen_recording');
+        break;
+    }
+  };
+
   // ========== AUTH LOADING STATE ==========
   if (authLoading) {
     return (
@@ -2015,6 +2029,13 @@ function App() {
   const proRequestLimitLabel = usageStats?.requests_limit ?? modelConfig?.pro_request_limit ?? '…';
   const proAudioHoursLabel = modelConfig ? +(modelConfig.pro_audio_seconds_limit / 3600).toFixed(1) : '…';
   const proModelNames = modelConfig?.pro_models.map(m => m.name).join(', ') ?? '';
+  const solveKind = !selectedTab ? null : isAudio(selectedTab) ? 'audio' : (isDisplay(selectedTab) || useScreenshot) ? 'screenshot' : 'text';
+  const solveHotkeyRaw = !activeHotkeys || !solveKind ? '' : solveKind === 'audio' ? activeHotkeys.audio_toggle : activeHotkeys[solveKind];
+  const solveHotkey = formatHotkey(solveHotkeyRaw, runtimePlatform === 'macos');
+  const withHotkey = (label: string, hotkey?: string) =>
+    hotkey ? `${label} · solve now with ${formatHotkey(hotkey, runtimePlatform === 'macos')}` : label;
+  const solveActionLabel = solveKind === 'audio' ? 'Start / stop recording' : solveKind === 'screenshot' ? 'Solve from screenshot' : 'Solve from text';
+  const messageActions = getMessageActions(message, { isPro: isPaidUser, isMac: runtimePlatform === 'macos', cdpReady });
 
   return (
     <div className="app-container">
@@ -2034,7 +2055,7 @@ function App() {
                     ? 'Using your own Gemini API key (unlimited) · Click to manage it in AI Models'
                     : `${freeCallsUsed} of ${freeCallLimitLabel} lifetime free calls used`
               }
-              {...(!isPaidUser && usingByoKey && {
+              {...(!isPaidUser && {
                 role: 'button',
                 tabIndex: 0,
                 style: { cursor: 'pointer' },
@@ -2061,13 +2082,13 @@ function App() {
               🎙️ {(usageStats.audio_seconds_used / 3600).toFixed(1)}/{usageStats.audio_seconds_limit / 3600}h
             </span>
           )}
-          {setupOneTimeMissing > 0 && (
+          {setup.oneTimeMissing > 0 && (
             <button
               className="setup-badge"
               onClick={handleShowSetup}
               title="Some setup steps are missing. Click to see them."
             >
-              ⚠ Setup {setupSteps.length - setupSteps.filter(s => !s.done).length}/{setupSteps.length}
+              ⚠ Setup {setup.steps.filter(s => s.done).length}/{setup.steps.length}
             </button>
           )}
           {cdpReady ? (
@@ -2189,7 +2210,7 @@ function App() {
                   className={`mode-segment-btn ${!screenshotActive ? 'active' : ''}`}
                   onClick={() => setUseScreenshot(false)}
                   disabled={isLoading || displayLocked}
-                  title={displayLocked ? lockedHint : 'Text Extraction'}
+                  title={displayLocked ? lockedHint : withHotkey('Text Extraction', activeHotkeys?.text)}
                 >
                   <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
@@ -2204,7 +2225,7 @@ function App() {
                   className={`mode-segment-btn ${screenshotActive ? 'active' : ''}`}
                   onClick={() => setUseScreenshot(true)}
                   disabled={isLoading || displayLocked}
-                  title={displayLocked ? lockedHint : 'Screenshot Capture'}
+                  title={displayLocked ? lockedHint : withHotkey('Screenshot Capture', activeHotkeys?.screenshot)}
                 >
                   <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M4 8a2 2 0 0 1 2-2h1.5l1.5-2h6l1.5 2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
@@ -2218,6 +2239,8 @@ function App() {
             onClick={() => solveWithAI('auto')}
             disabled={isLoading || !selectedTab}
             className="solve-button"
+            title={solveHotkey ? `${solveActionLabel} (${solveHotkey})` : undefined}
+            aria-keyshortcuts={solveHotkeyRaw || undefined}
           >
             {selectedTab && isAudio(selectedTab)
               ? (isRecordingAudio ? `⏹️ Stop (${audioSeconds}s)` : '🎙️ Record')
@@ -2261,11 +2284,11 @@ function App() {
       <div className="content" ref={contentScrollRef}>
         <div className="main-section">
           
-          {((setupOneTimeMissing > 0 && !setupHidden) || setupJustCompleted) && (
+          {setup.showCard && (
             <SetupChecklist
               variant="card"
               {...setupChecklistProps}
-              onHide={() => { setSetupHidden(true); setSetupJustCompleted(false); }}
+              onHide={setup.hide}
             />
           )}
 
@@ -2395,6 +2418,15 @@ function App() {
           {message && !isRecordingAudio && (solvePhase === 'idle' || solvePhase === 'error') && (
             <div className="message-box">
               {message}
+              {messageActions.length > 0 && (
+                <div className="message-actions">
+                  {messageActions.map(kind => (
+                    <button key={kind} className="message-action-btn" onClick={() => runMessageAction(kind)}>
+                      {MESSAGE_ACTION_LABELS[kind]}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -2737,9 +2769,9 @@ function App() {
                             : `${freeCallLimit - freeCallsUsed} of ${freeCallLimit} free requests remaining`}</li>
                         )}
                         <li>Chrome tabs only (no display screen capture)</li>
-                        {modelConfig && (allowsAllDomains(modelConfig)
-                          ? <li>Works on any website</li>
-                          : <li>Only works on: {modelConfig.free_allowed_domains.join(', ')}</li>)}
+                        {modelConfig && !allowsAllDomains(modelConfig) && (
+                          <li>Only works on: {modelConfig.free_allowed_domains.join(', ')}</li>
+                        )}
                       </ul>
                       <button 
                         className="action-btn primary"
@@ -2756,9 +2788,9 @@ function App() {
                     <div className="info-note" style={{ marginTop: '16px' }}>
                       <h4 style={{ marginBottom: '8px' }}>✨ Pro Features</h4>
                       <ul style={{ fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
+                        <li>Stealth Mode with Anti-Detection Protection</li>
                         <li>{modelConfig ? `All ${modelConfig.pro_models.length} premium AI models` : 'All premium AI models'}</li>
                         <li>{proRequestLimitLabel} requests per month</li>
-                        <li>Any Chrome tab or website</li>
                         <li>Display/screen capture</li>
                         <li>Audio input with transcription</li>
                       </ul>
@@ -2842,355 +2874,31 @@ function App() {
               )}
 
               {settingsTab === 'hotkeys' && (
-                <div className="hotkeys-panel">
-                  {/* Solve Section */}
-                  <div className="hotkeys-section">
-                    <div className="hotkeys-section-title">🎯 Solve</div>
-                    <div className="hotkeys-two-col">
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Extract text → Solve</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.text}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, text: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + 1' : runtimePlatform === 'windows' ? 'Alt + 1' : 'Ctrl + 1'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Screenshot → Solve</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.screenshot}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, screenshot: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + 2' : runtimePlatform === 'windows' ? 'Alt + 2' : 'Ctrl + 2'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Audio Start/Stop → Solve</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.audio_toggle}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, audio_toggle: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + 3' : runtimePlatform === 'windows' ? 'Alt + 3' : 'Ctrl + 3'}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Navigation Section */}
-                  <div className="hotkeys-section">
-                    <div className="hotkeys-section-title">🧭 Navigation</div>
-                    <div className="hotkeys-two-col">
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Scroll up (Explanation)</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.scroll_up}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_up: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Up' : 'Ctrl + Up'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Scroll down (Explanation)</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.scroll_down}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_down: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Down' : 'Ctrl + Down'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Move window up</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.move_up}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_up: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Up' : runtimePlatform === 'windows' ? 'Alt + Shift + Up' : 'Ctrl + Shift + Up'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Move window down</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.move_down}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_down: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Down' : runtimePlatform === 'windows' ? 'Alt + Shift + Down' : 'Ctrl + Shift + Down'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Move window left</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.move_left}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_left: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Left' : runtimePlatform === 'windows' ? 'Alt + Shift + Left' : 'Ctrl + Shift + Left'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Move window right</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.move_right}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_right: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Right' : runtimePlatform === 'windows' ? 'Alt + Shift + Right' : 'Ctrl + Shift + Right'}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* App Section */}
-                  <div className="hotkeys-section">
-                    <div className="hotkeys-section-title">⚙️ App</div>
-                    <div className="hotkeys-two-col">
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Show/Hide app window</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.toggle_visibility}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, toggle_visibility: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + H' : runtimePlatform === 'windows' ? 'Alt + Shift + H' : 'Ctrl + Shift + H'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Quit app</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.quit_app}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, quit_app: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Q' : runtimePlatform === 'windows' ? 'Alt + Shift + Q' : 'Ctrl + Shift + Q'}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{display: 'flex', gap: '8px', marginTop: '10px'}}>
-                    <button className="action-btn primary" style={{flex: 1}} onClick={saveHotkeys}>
-                      Save
-                    </button>
-                    <button className="action-btn secondary" style={{flex: 1}} onClick={resetHotkeys}>
-                      Reset to defaults
-                    </button>
-                  </div>
-
-                  {hotkeysStatus && (
-                    <div style={{marginTop: '8px', fontSize: '11px', color: hotkeysStatus.startsWith('❌') ? '#c62828' : '#666'}}>
-                      {hotkeysStatus}
-                    </div>
-                  )}
-
-                  <p style={{fontSize: '11px', color: '#999', marginTop: '8px', lineHeight: '1.4'}}>
-                    Display Input Source auto-uses Screenshot even with the Extract hotkey. Avoid Shift-only shortcuts (e.g. Shift+L).
-                  </p>
-                </div>
+                <HotkeysSettingsTab
+                  draft={hotkeysDraft}
+                  onDraftChange={setHotkeysDraft}
+                  platform={runtimePlatform}
+                  status={hotkeysStatus}
+                  onSave={saveHotkeys}
+                  onReset={resetHotkeys}
+                />
               )}
 
               {settingsTab === 'app' && (
-                <>
-                  <SetupChecklist variant="panel" {...setupChecklistProps} />
-
-                  {/* Transparency */}
-                  <div className="app-settings-group">
-                    <div className="app-settings-label">Transparency</div>
-                    <div className="app-settings-desc">Adjust the window opacity from fully visible to semi-transparent.</div>
-                    <div className="opacity-slider-row">
-                      <input
-                        type="range"
-                        min="10"
-                        max="100"
-                        value={Math.round(windowOpacity * 100)}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value) / 100;
-                          setWindowOpacity(val);
-                          localStorage.setItem('window_opacity', val.toString());
-                          invoke('set_window_opacity', { opacity: val }).catch(console.error);
-                        }}
-                        className="opacity-slider"
-                      />
-                      <span className="opacity-value">{Math.round(windowOpacity * 100)}%</span>
-                    </div>
-                  </div>
-
-                  {/* Theme */}
-                  <div className="app-settings-group">
-                    <div className="app-settings-label">Theme</div>
-                    <div className="app-settings-desc">Switch between light and dark appearance.</div>
-                    <div className="theme-toggle-group">
-                      <button
-                        className={`theme-toggle-btn ${theme === 'light' ? 'active' : ''}`}
-                        onClick={() => {
-                          setTheme('light');
-                          localStorage.setItem('app_theme', 'light');
-                          document.documentElement.setAttribute('data-theme', 'light');
-                        }}
-                      >
-                        ☀️ Light
-                      </button>
-                      <button
-                        className={`theme-toggle-btn ${theme === 'dark' ? 'active' : ''}`}
-                        onClick={() => {
-                          setTheme('dark');
-                          localStorage.setItem('app_theme', 'dark');
-                          document.documentElement.setAttribute('data-theme', 'dark');
-                        }}
-                      >
-                        🌙 Dark
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Stealth Mode */}
-                  <div className="app-settings-group">
-                    <div className="app-settings-label" style={{ marginBottom: '8px' }}>
-                      Stealth Mode
-                      {!isPro && (
-                        <span style={{
-                          marginLeft: '8px',
-                          fontSize: '11px',
-                          fontWeight: 700,
-                          color: 'var(--primary-blue)',
-                          background: 'rgba(59, 130, 246, 0.1)',
-                          border: '1px solid rgba(59, 130, 246, 0.3)',
-                          borderRadius: '4px',
-                          padding: '2px 6px',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.5px'
-                        }}>
-                          Pro Only
-                        </span>
-                      )}
-                    </div>
-                    <div className="stealth-toggle-row" style={{ marginBottom: '12px' }}>
-                      <label className={`toggle-switch ${!isPro ? 'disabled' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={isPro && stealthMode}
-                          disabled={!isPro}
-                          onChange={(e) => {
-                            if (!isPro) return;
-                            const enabled = e.target.checked;
-                            setStealthMode(enabled);
-                            localStorage.setItem('stealth_mode', enabled.toString());
-                            invoke('set_stealth_mode', { enabled })
-                              .then(() => {
-                                invoke('get_stealth_status')
-                                  .then(status => setStealthStatus(status as any))
-                                  .catch(() => {});
-                              })
-                              .catch(console.error);
-                          }}
-                        />
-                        <span className="toggle-switch-slider" />
-                      </label>
-                      <span className="stealth-label">
-                        {isPro ? (stealthMode ? 'Enabled' : 'Disabled') : 'Disabled (Pro Only)'}
-                      </span>
-                    </div>
-
-                    {/* Anti-Detection Security Status */}
-                    {isPro && stealthMode ? (
-                      <div style={{
-                        padding: '12px 14px',
-                        borderRadius: '8px',
-                        marginTop: '10px',
-                        background: 'rgba(16, 185, 129, 0.08)',
-                        border: '1px solid rgba(16, 185, 129, 0.3)',
-                        fontSize: '12px',
-                        lineHeight: '1.5'
-                      }}>
-                        <div style={{ fontWeight: 600, color: '#059669', marginBottom: '6px' }}>
-                          🛡️ Anti-Detection Protection Active
-                        </div>
-                        <div style={{ color: 'var(--text-secondary)' }}>
-                          • <strong>Hotkey Hiding:</strong> Chrome can never catch your HotKey.
-                        </div>
-                        <div style={{ color: 'var(--text-secondary)', marginTop: '3px' }}>
-                          • <strong>Screen & System Protection:</strong> Hidden from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows).
-                        </div>
-
-                        {runtimePlatform === 'macos' && (
-                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px', fontStyle: 'italic', borderTop: '1px solid rgba(16, 185, 129, 0.2)', paddingTop: '6px' }}>
-                            * Stealth changes take effect after restarting the app.
-                          </div>
-                        )}
-
-                        {runtimePlatform === 'macos' && !stealthStatus?.swallowing_active && (
-                          <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                            <button
-                              type="button"
-                              onClick={handleRequestAccessibility}
-                              style={{
-                                background: '#f59e0b',
-                                color: '#000',
-                                border: 'none',
-                                borderRadius: '5px',
-                                padding: '5px 12px',
-                                fontSize: '11px',
-                                fontWeight: 600,
-                                cursor: 'pointer'
-                              }}
-                            >
-                              🔑 Request macOS Permission
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleRefreshStealthStatus}
-                              style={{
-                                background: 'rgba(0, 0, 0, 0.05)',
-                                color: 'var(--text-primary)',
-                                border: '1px solid var(--border)',
-                                borderRadius: '5px',
-                                padding: '5px 12px',
-                                fontSize: '11px',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              🔄 Re-check Status
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ) : isPro ? (
-                      <div style={{
-                        padding: '12px 14px',
-                        borderRadius: '8px',
-                        marginTop: '10px',
-                        background: 'rgba(245, 158, 11, 0.08)',
-                        border: '1px solid rgba(245, 158, 11, 0.3)',
-                        fontSize: '12px',
-                        lineHeight: '1.5'
-                      }}>
-                        <div style={{ fontWeight: 600, color: '#d97706', marginBottom: '6px' }}>
-                          🛡️ Anti-Detection Protection Inactive
-                        </div>
-                        <div style={{ color: 'var(--text-secondary)' }}>
-                          Enable Stealth Mode above so Chrome cannot catch your HotKey, and the window is hidden from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows).
-                        </div>
-                        {runtimePlatform === 'macos' && (
-                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px', fontStyle: 'italic', borderTop: '1px solid rgba(245, 158, 11, 0.2)', paddingTop: '6px' }}>
-                            * Stealth changes take effect after restarting the app.
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{
-                        padding: '12px 14px',
-                        borderRadius: '8px',
-                        marginTop: '10px',
-                        background: 'rgba(59, 130, 246, 0.05)',
-                        border: '1px solid rgba(59, 130, 246, 0.25)',
-                        fontSize: '12px',
-                        lineHeight: '1.5'
-                      }}>
-                        <div style={{ fontWeight: 600, color: 'var(--primary-blue)', marginBottom: '6px' }}>
-                          🔒 Pro Feature: Stealth Mode
-                        </div>
-                        <div style={{ color: 'var(--text-secondary)' }}>
-                          Upgrade to Pro to unlock Stealth Mode (Undetectable and fully private. Hidden hotkeys, and the window never appears in screen shares, recordings, screenshots, the Dock or the Taskbar).
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </>
+                <AppSettingsTab
+                  windowOpacity={windowOpacity}
+                  onOpacityChange={handleOpacityChange}
+                  theme={theme}
+                  onThemeChange={handleThemeChange}
+                  isPro={isPro}
+                  stealthMode={stealthMode}
+                  onStealthModeChange={handleStealthModeChange}
+                  hotkeySwallowingActive={!!stealthStatus?.swallowing_active}
+                  isMac={runtimePlatform === 'macos'}
+                  onRequestAccessibility={handleRequestAccessibility}
+                  onRefreshStealthStatus={handleRefreshStealthStatus}
+                  setupChecklist={setupChecklistProps}
+                />
               )}
             </div>
           </div>

@@ -1,0 +1,8 @@
+project_id = "cracking-interview"
+
+# Stripe calls these webhooks without a Supabase JWT; they verify the Stripe signature instead.
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.stripe-webhook-test]
+verify_jwt = false

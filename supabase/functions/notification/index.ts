@@ -2,6 +2,20 @@
 // deno-lint-ignore-file
 
 import { FREE_LIFETIME_CALL_LIMIT, PRO_MONTHLY_REQUEST_LIMIT } from "../_shared/limits.ts";
+import { PRO_MODELS } from "../_shared/models.ts";
+
+const LATEST_APP_VERSION = '2.0.0';
+
+/** Numeric semver compare: string compare would put "10.0.0" before "2.0.0". */
+function isOlderVersion(version: string, than: string): boolean {
+  const a = version.split('.').map(n => parseInt(n, 10) || 0);
+  const b = than.split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const diff = (a[i] ?? 0) - (b[i] ?? 0);
+    if (diff !== 0) return diff < 0;
+  }
+  return false;
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,9 +37,9 @@ const ANNOUNCEMENTS = {
     message: `
       <p>Thanks for using CrackingInterview! Here are some quick tips:</p>
       <ul>
-        <li>Try <a href="https://leetcode.com" target="_blank">LeetCode</a> problems in stealth mode</li>
+        <li>Open a problem in Chrome, pick the tab and press Solve</li>
         <li>You have ${FREE_LIFETIME_CALL_LIMIT} free AI calls to get started</li>
-        <li>Upgrade to Pro for any website + screen capture + audio input</li>
+        <li>Upgrade to Pro for stealth mode, display capture and audio input</li>
       </ul>
       <p><strong>Need help?</strong> Check our <a href="https://crackinginterview.org" target="_blank">documentation</a>.</p>
     `,
@@ -38,10 +52,10 @@ const ANNOUNCEMENTS = {
       <p>Thanks for subscribing to CrackingInterview Pro!</p>
       <ul>
         <li>You have ${PRO_MONTHLY_REQUEST_LIMIT} AI calls per month</li>
-        <li>Access to all premium models (GPT-5, Claude, Gemini)</li>
-        <li>Display capture feature unlocked</li>
+        <li>Access to all premium models (${PRO_MODELS.map(m => m.name).join(', ')})</li>
+        <li>Display capture and audio input unlocked</li>
       </ul>
-      <p><strong>Tip:</strong> Use stealth mode for real interviews!</p>
+      <p><strong>Tip:</strong> Turn on Stealth Mode in Settings → App.</p>
     `,
   },
   
@@ -60,8 +74,7 @@ const ANNOUNCEMENTS = {
 function getMatchingAnnouncement(user_type: 'free' | 'pro', app_version: string) {
   // Use if conditions based on user attributes to choose announcement
   
-  // Example: Show update notification to users with version 1.0.x
-  if (app_version >= '0.0.0' && app_version < '1.0.0') {
+  if (isOlderVersion(app_version, LATEST_APP_VERSION)) {
     return ANNOUNCEMENTS.update_available
   }
   
@@ -88,7 +101,7 @@ Deno.serve(async (req) => {
   try {
     const { email, user_type, app_version }: NotificationRequest = await req.json()
 
-    console.log(`[Notification] Request from ${email} (${user_type}, v${app_version})`)
+    console.log(`[Notification] Request (${user_type}, v${app_version})`)
 
     // Validate input
     if (!email || !user_type || !app_version) {

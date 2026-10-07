@@ -1,53 +1,53 @@
 # Graph Report - cracking-interview  (2026-10-07)
 
 ## Corpus Check
-- 77 files · ~644,828 words
+- 82 files · ~645,416 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 23 file(s) not represented in the graph (top: (none) 13, .css 7, .icns 1)
 
 ## Summary
-- 5605 nodes · 16704 edges · 234 communities (168 shown, 66 thin omitted)
+- 5631 nodes · 16761 edges · 256 communities (192 shown, 64 thin omitted)
 - Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 456 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `7aea2a07`
+- Built from commit: `7979c1b4`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - yarn-1.22.19.cjs
 - __webpack_require__
-- Parser
+- .push
 - .subscribe
 - isSymbol
-- baseClone
+- isArray
 - getIteratee
-- PackageResolver
+- .has
 - .call
 - split
 - toInteger
-- MessageError
-- apply
-- .error
-- _load_misc
-- _load_asyncToGenerator
-- then
 - replace
+- apply
+- .add
+- startsWith
+- .join
+- defer
+- truncate
 - glob
-- .getOutdatedPackages
+- .on
 - main.rs
-- Git
-- .validate
+- _load_asyncToGenerator
+- .reduce
 - pack
-- _interopRequireWildcard
+- .execute
 - Scanner
-- __read
-- .resume
-- .render
+- PrivateKey
+- __asyncGenerator
+- .write
 - SSHBuffer
 - audio.rs
-- RetryOperation
+- X9ECParameters
 - isObjectLike
 - .remove
 - nbi
@@ -55,10 +55,10 @@
 - fillInTable
 - .slice
 - .unsubscribe
-- lock
-- .clear
+- .end
+- f
 - write
-- Ajv
+- .copy
 - wrapper
 - .init
 - stealth_hotkey.rs
@@ -66,7 +66,7 @@
 - object
 - .copyModules
 - AudioRecorder
-- createDebug
+- .unshift
 - filter
 - .init
 - ai-proxy/index.ts
@@ -76,24 +76,24 @@
 - throwError
 - Command
 - .constructor
-- default
-- ImportPackageRequest
-- StringDecoder
+- .forEach
+- chrome/mod.rs
+- splice
 - prompts.ts
-- .handleSubmitEvents
+- getChoice
 - ExpandPrompt
 - WindowToggleSubscriber
 - tauri.conf.json
-- ThrottleSubscriber
+- .options
 - ConsoleReporter
-- AuthScreen.tsx
+- react
 - package.json
-- devDependencies
+- crypto_box_beforenm
 - LogicalTree
 - .resolve
-- PasswordPrompt
-- done
-- .join
+- .handleSubmitEvents
+- NGramParser
+- RequestSigner
 - ZipBufferIterator
 - hasOwnProperty
 - JSONReporter
@@ -102,35 +102,35 @@
 - transcription.rs
 - CrackingInterview App (Tauri + React Desktop App)
 - compilerOptions
-- .emit
-- .push
+- debug
+- .concat
 - .match
 - gemini.rs
 - Live Transcription Mode (Deepgram streaming)
-- SignUpForm.tsx
+- AuthScreen.tsx
 - HotkeyAction
 - AppHandle
 - clamp
-- ._run
+- .observe
 - .connect
 - isNumber
 - _load_util
 - Stealth Mode & Anti-Detection Architecture
 - DelayWhenSubscriber
-- .copy
+- .toString
 - AsyncAction
-- .getQuestion
-- getChoice
+- .getCookies
+- .render
 - .activitySet
-- X9ECParameters
-- NoopReporter
-- .has
+- ECFieldElementFp
+- rimraf
+- cache
 - eq
 - WindowSubscriber
 - documents.rs
 - MergeScanSubscriber
 - repeat
-- PromptTemplate
+- fillRange
 - trim
 - BufferWhenSubscriber
 - CheckboxPrompt
@@ -149,83 +149,101 @@
 - AIResponseDisplay.tsx
 - ProgrammingLanguage
 - DelaySubscriber
-- .add
+- BufferTimeSubscriber
 - ExhaustMapSubscriber
 - NohoistResolver
 - ExternalEditor
 - bundle
 - .read
-- PackageReference
+- SampleTimeSubscriber
 - windows
-- rng_get_byte
-- promisifyAll
+- ScreenManager
+- promisify
 - parseOperator
-- .resolve
+- .request
 - MergeMapSubscriber
 - .shift
 - Audit
 - CrackingInterview Marketing Strategy
 - shift
 - chooseScalarStyle
-- TakeLastSubscriber
+- normalizeId
 - DebounceTimeSubscriber
-- SequenceEqualSubscriber
-- DBCSCodec
+- .emit
+- HotkeysSettingsTab.tsx
 - _traverse
-- scripts
+- endsWith
 - build-windows.ps1
 - HarWrapper
-- .getLockfile
-- .parsePatternInfo
+- Lockfile
+- onErrorResumeNext
 - compilerOptions
 - Caseless
 - parseInteger
 - inlineRef
-- parse
+- file
 - Store
 - DocumentManager.tsx
 - FindValueSubscriber
-- SkipUntilSubscriber
+- WsBrowserHandle
 - LruCache
-- quote
+- .[formatSymbol]
 - assertHrtime
 - AGENTS.md
 - CLAUDE.md
 - CountSubscriber
 - BaseFetcher
-- DefaultIfEmptySubscriber
+- co
 - setupSubscription
 - bcrypt_hash
 - ExpandSubscriber
-- _load_executeLifecycleScript
+- operator
 - SkipWhileSubscriber
 - SingleSubscriber
-- doFlattenIter
+- sort
 - Authentication & Subscription System (Supabase + Stripe)
 - screenshot.rs
-- app
+- .pop
 - BitbucketResolver
 - BufferReporter
 - requestFlush
-- _normalizeEncoding
+- validate_source_url
+- dependencies
+- RepeatWhenSubscriber
+- CookieJar
 - TapSubscriber
+- takeWhile
 - .toString
-- useCustomRule
-- loadMissingSchema
-- EditorPrompt
+- getSchema
+- then
+- done
+- MaterializeSubscriber
+- TimeoutWithSubscriber
+- app_config_dir
 - Square310x310Logo.png (Windows Store Large Tile)
+- ai/mod.rs
+- Auth
+- DelayedStream
 - detectEncoding
+- EverySubscriber
 - isDuplex
+- IsEmptySubscriber
 - Square44x44Logo.png (AI Chip App Icon)
 - AI Chip Icon (Square 89x89 Logo)
+- RetryWhenSubscriber
 - onwrite
+- ScanSubscriber
 - InternalDecoderCesu8
 - InternalEncoder
+- BufferSubscriber
 - PrependBOMWrapper
 - SBCSEncoder
 - Utf16BEEncoder
 - Utf16Encoder
+- RequestJar
+- SampleSubscriber
 - restart-app.sh
+- FilterSubscriber
 - create-billing-portal/index.ts
 - create-billing-portal-test/index.ts
 - ISO_2022
@@ -237,6 +255,10 @@
 - App Icon (128x128) - AI Chip Design
 - App Icon (AI Chip)
 - StoreLogo.png (App Icon)
+- rethrow
+- refresh_stealth_status
+- buildRcArgs
+- mark
 
 ## God Nodes (most connected - your core abstractions)
 1. `__webpack_require__()` - 216 edges
@@ -270,183 +292,187 @@
 - **Texas LLC Formation & Tax Registration Document Set** — cracking_interview_llc_entity, docs_certificate_texas_sos_filing, docs_original_document_certificate_of_formation, docs_ein_letter_irs_notice, docs_texas_sales_use_tax_permit, docs_texas_comptroller_franchise_tax_letter, docs_summary_franchise_questionnaire, docs_dun_bradstreet_duns_profile [EXTRACTED 1.00]
 - **Stealth Mode / Anti-Detection Protection Layers** — docs_ai_project_guide_blur_prevention, docs_ai_project_guide_key_event_swallowing, docs_ai_project_guide_screen_capture_protection, docs_ai_project_guide_stealth_hotkey_rs, md_video_scripts_stealth_features_section, md_marketing_strategy_zoom_stealth_demo [INFERRED 0.90]
 
-## Communities (234 total, 66 thin omitted)
+## Communities (256 total, 64 thin omitted)
 
 ### Community 0 - "yarn-1.22.19.cjs"
 Cohesion: 0.00
-Nodes (196): RFC-1034, RFC-1123, RFC-2152, RFC-2617, RFC-3110, RFC-3339, RFC-3501, RFC-3986 (+188 more)
+Nodes (130): RFC-1034, RFC-1123, RFC-2152, RFC-2617, RFC-3110, RFC-3339, RFC-3501, RFC-3986 (+122 more)
 
 ### Community 1 - "__webpack_require__"
-Cohesion: 0.03
-Nodes (107): _interopRequireDefault(), _load_aliases(), _load_audit(), _load_baseFetcher(), _load_baseRegistry(), _load_baseReporter(), _load_baseResolver(), _load_bitbucketResolver() (+99 more)
+Cohesion: 0.02
+Nodes (157): default(), forwardSignalAndExit(), handleSignals(), hasWrapper(), hostedGitFragmentToGitUrl(), _interopRequireDefault(), _interopRequireWildcard(), _load_access() (+149 more)
 
-### Community 2 - "Parser"
-Cohesion: 0.08
-Nodes (12): assert(), defaults(), fixWinEPERM(), fixWinEPERMSync(), isValidPropValueToken(), Parser, rimraf(), rimrafSync() (+4 more)
+### Community 2 - ".push"
+Cohesion: 0.07
+Nodes (18): assert(), baseFilter(), DBCSCodec(), deepCopy(), fixWinEPERMSync(), flat(), getDuplicateReferences(), IconvLiteEncoderStream() (+10 more)
 
 ### Community 3 - ".subscribe"
 Cohesion: 0.02
-Nodes (67): AnonymousSubject(), bufferCount(), BufferCountOperator(), bufferTime(), BufferTimeOperator(), catchError(), CatchOperator(), combineAll() (+59 more)
+Nodes (57): AnonymousSubject(), bufferCount(), BufferCountOperator(), catchError(), CatchOperator(), CatchSubscriber(), combineAll(), defaultIfEmpty() (+49 more)
 
 ### Community 4 - "isSymbol"
-Cohesion: 0.05
-Nodes (61): arraySome(), assignValue(), baseGet(), baseHasIn(), baseInvoke(), baseIsEqual(), baseIsEqualDeep(), baseIsMatch() (+53 more)
+Cohesion: 0.07
+Nodes (45): assignValue(), baseGet(), baseHasIn(), baseInvoke(), baseIsEqual(), baseIsMatch(), baseIteratee(), baseMatches() (+37 more)
 
-### Community 5 - "baseClone"
+### Community 5 - "isArray"
 Cohesion: 0.04
-Nodes (94): arrayEach(), arrayFilter(), assignMergeValue(), __asyncValues(), baseAssign(), baseAssignIn(), baseClone(), baseConforms() (+86 more)
+Nodes (86): arrayFilter(), arrayLikeKeys(), arraySome(), assignMergeValue(), baseAssign(), baseAssignIn(), baseClone(), baseConforms() (+78 more)
 
 ### Community 6 - "getIteratee"
 Cohesion: 0.04
-Nodes (88): arrayAggregator(), arrayEachRight(), arrayLikeKeys(), arrayMap(), arrayReduceRight(), baseAggregator(), baseAssignValue(), baseDifference() (+80 more)
+Nodes (87): arrayAggregator(), arrayEachRight(), arrayMap(), arrayReduceRight(), baseAggregator(), baseAssignValue(), baseDifference(), baseExtremum() (+79 more)
 
-### Community 7 - "PackageResolver"
-Cohesion: 0.09
-Nodes (11): find(), _load_index(), _load_packageReference(), _load_resolutionMap2(), _load_semver(), PackageRequest, PackageResolver, satisfies() (+3 more)
+### Community 7 - ".has"
+Cohesion: 0.07
+Nodes (14): find(), cleanDependencies(), generateDisclaimer(), getNoMatchScore(), getSharedDependencies(), getYesMatchScore(), hashDelete(), hashSet() (+6 more)
 
 ### Community 8 - ".call"
 Cohesion: 0.04
-Nodes (39): Action(), AnimationFrameAction(), AsapAction(), AsyncScheduler(), BehaviorSubject(), BufferCountSubscriber(), BufferSkipCountSubscriber(), CatchSubscriber() (+31 more)
+Nodes (41): Action(), AnimationFrameAction(), AsapAction(), AsyncScheduler(), AsyncSubject(), BehaviorSubject(), BufferCountSubscriber(), BufferSkipCountSubscriber() (+33 more)
 
 ### Community 9 - "split"
 Cohesion: 0.05
-Nodes (54): atAddr(), balance(), balanced(), barrettMulTo(), barrettSqrTo(), braces(), camelCase(), charSet() (+46 more)
+Nodes (61): balance(), balanced(), braceExpand(), braceRegex(), braces(), brackets(), collapse(), disable() (+53 more)
 
 ### Community 10 - "toInteger"
 Cohesion: 0.04
-Nodes (60): arrayPush(), arraySample(), arraySampleSize(), arrayShuffle(), baseClamp(), baseFill(), baseFlatten(), baseInRange() (+52 more)
+Nodes (66): arrayPush(), arraySample(), arraySampleSize(), arrayShuffle(), baseClamp(), baseFill(), baseFlatten(), baseInRange() (+58 more)
 
-### Community 11 - "MessageError"
-Cohesion: 0.08
-Nodes (13): explodeGistFragment(), explodeHostedGitFragment(), extractWorkspaces(), _load_errors(), _load_packageNameUtils(), MessageError, NpmResolver, parseHash() (+5 more)
+### Community 11 - "replace"
+Cohesion: 0.07
+Nodes (28): applyStyle(), cleanup(), cleanUpCode(), colorSeverity(), makeAdvisoryTableRow(), envReplace(), fixCmdWinSlashes(), findQuotes() (+20 more)
 
 ### Community 12 - "apply"
-Cohesion: 0.04
-Nodes (62): after(), AnimationFrameScheduler(), apply(), applyOptions(), AsapScheduler(), AsyncSubject(), baseDelay(), before() (+54 more)
-
-### Community 13 - ".error"
 Cohesion: 0.06
-Nodes (19): bindCallback(), bindNodeCallback(), dispatch(), dispatchError(), generate(), iterate(), MaterializeSubscriber(), maybeCallback() (+11 more)
+Nodes (59): after(), AnimationFrameScheduler(), apply(), applyOptions(), AsapScheduler(), baseDelay(), before(), build() (+51 more)
 
-### Community 14 - "_load_misc"
-Cohesion: 0.10
-Nodes (13): FileResolver, isPathConfigOption(), LinkResolver, _load_extends(), _load_misc(), _load_url(), _load_userHomeDir2(), normalizePath() (+5 more)
-
-### Community 15 - "_load_asyncToGenerator"
+### Community 13 - ".add"
 Cohesion: 0.06
-Nodes (39): add(), checkType(), cleanDependencies(), cleanLockfile(), cleanDepFromLockfile(), CopyFetcher, dirname(), exists() (+31 more)
+Nodes (26): bindCallback(), bindNodeCallback(), dispatch(), dispatchError(), dispatchWindowCreation(), dispatchWindowTimeSpanOnly(), forkJoin(), ForkJoinSubscriber() (+18 more)
 
-### Community 16 - "then"
-Cohesion: 0.12
-Nodes (22): arrayToPromise(), chownr(), then(), cmdShim(), cmdShimIfExists(), concatMap(), empty(), fetchAsyncQuestionProperty() (+14 more)
-
-### Community 17 - "replace"
+### Community 14 - "startsWith"
 Cohesion: 0.05
-Nodes (60): asciiToArray(), baseToString(), brackets(), castSlice(), chalkTag(), clean(), createCaseFirst(), createCompounder() (+52 more)
+Nodes (26): BaseRegistry, ExoticResolver, explodeScopeTeam(), extractConflictVariants(), FileResolver, getName(), isCommitHooksDisabled(), isPathConfigOption() (+18 more)
+
+### Community 15 - ".join"
+Cohesion: 0.06
+Nodes (44): check(), coerceCreatePackageName(), Config, exists(), explodeGistFragment(), explodeHostedGitFragment(), extractWorkspaces(), findProjectRoot() (+36 more)
+
+### Community 16 - "defer"
+Cohesion: 0.16
+Nodes (12): async(), concatMap(), empty(), emptyScheduled(), fetchAsyncQuestionProperty(), from(), defer(), of() (+4 more)
+
+### Community 17 - "truncate"
+Cohesion: 0.13
+Nodes (27): asciiToArray(), baseToString(), castSlice(), codeRegex(), colorizeLines(), createCaseFirst(), createPadding(), hasUnicode() (+19 more)
 
 ### Community 18 - "glob"
-Cohesion: 0.10
-Nodes (11): finish(), glob(), globSync(), ignoreMap(), inflight(), isIgnored(), makeAbs(), ownProp() (+3 more)
+Cohesion: 0.07
+Nodes (16): childrenIgnored(), finish(), glob(), done(), globSync(), hasMore(), ignoreMap(), inflight() (+8 more)
 
-### Community 19 - ".getOutdatedPackages"
-Cohesion: 0.12
-Nodes (3): BaseRegistry, WorkspaceLayout, WorkspaceResolver
+### Community 19 - ".on"
+Cohesion: 0.15
+Nodes (8): checkStream(), CombinedStream(), elementAt(), fromEventPattern(), fromStream(), integrityStream(), setupReadlineOptions(), timeInterval()
 
 ### Community 20 - "main.rs"
 Cohesion: 0.04
-Nodes (36): AIProxyResponse, AIProxyUsage, apply_macos_dock_hiding(), DEFAULT_AUDIO_TOGGLE_HOTKEY, DEFAULT_MOVE_DOWN_HOTKEY, DEFAULT_MOVE_LEFT_HOTKEY, DEFAULT_MOVE_RIGHT_HOTKEY, DEFAULT_MOVE_UP_HOTKEY (+28 more)
+Nodes (27): AIProxyResponse, AIProxyUsage, apply_macos_dock_hiding(), DEFAULT_AUDIO_TOGGLE_HOTKEY, DEFAULT_MOVE_DOWN_HOTKEY, DEFAULT_MOVE_LEFT_HOTKEY, DEFAULT_MOVE_RIGHT_HOTKEY, DEFAULT_MOVE_UP_HOTKEY (+19 more)
 
-### Community 21 - "Git"
-Cohesion: 0.10
-Nodes (7): Git, GitFetcher, HashStream, _load_crypto(), _load_gitRefResolver(), _load_gitSpawn(), LocalTarballFetcher
+### Community 21 - "_load_asyncToGenerator"
+Cohesion: 0.07
+Nodes (13): Git, GitFetcher, HashStream, _load_asyncToGenerator(), _load_crypto(), _load_gitRefResolver(), _load_gitSpawn(), _load_pack() (+5 more)
 
-### Community 22 - ".validate"
-Cohesion: 0.08
-Nodes (22): afterRequest(), beforeRequest(), browser(), checkPropertyChange(), content(), creator(), doPad(), dumpException() (+14 more)
+### Community 22 - ".reduce"
+Cohesion: 0.05
+Nodes (35): afterRequest(), barrettConvert(), barrettMulTo(), barrettSqrTo(), beforeRequest(), browser(), camelCase(), charSet() (+27 more)
 
 ### Community 23 - "pack"
-Cohesion: 0.06
-Nodes (51): A(), car25519(), core_hsalsa20(), core_salsa20(), crypto_box(), crypto_box_beforenm(), crypto_box_keypair(), crypto_box_open() (+43 more)
+Cohesion: 0.12
+Nodes (28): A(), car25519(), crypto_hash(), crypto_hashblocks_hl(), crypto_scalarmult(), crypto_sign_keypair(), crypto_sign_open(), crypto_verify_32() (+20 more)
 
-### Community 24 - "_interopRequireWildcard"
-Cohesion: 0.04
-Nodes (45): fetchBundle(), getBundleAsset(), _interopRequireWildcard(), isOffline(), _load_access(), _load_add(), _load_autoclean(), _load_bin() (+37 more)
+### Community 24 - ".execute"
+Cohesion: 0.16
+Nodes (5): isOffline(), _load_network(), OneTimePasswordError, RequestManager, ResponseError
 
 ### Community 25 - "Scanner"
 Cohesion: 0.07
-Nodes (9): ErrorHandler(), getQualifiedElementName(), hexValue(), JSXParser(), MultiError(), octalValue(), Scanner(), tokenize() (+1 more)
+Nodes (8): ErrorHandler(), getQualifiedElementName(), hexValue(), JSXParser(), MultiError(), Scanner(), tokenize(), Tokenizer()
 
-### Community 26 - "__read"
-Cohesion: 0.12
-Nodes (35): algToKeyType(), ecNormalize(), gTimeToDate(), Local(), parseDSAasn1(), __read(), readBitField(), readBitString() (+27 more)
-
-### Community 27 - ".resume"
+### Community 26 - "PrivateKey"
 Cohesion: 0.15
-Nodes (17): __asyncDelegator(), verb(), __asyncGenerator(), fulfill(), reject(), resume(), settle(), step() (+9 more)
+Nodes (28): parseDSAasn1(), PrivateKey(), readBitField(), readBitString(), readECDSACurve(), Reader(), readExtension(), readMPInt() (+20 more)
 
-### Community 28 - ".render"
-Cohesion: 0.06
-Nodes (23): big5(), BottomBar, clearLine(), clearNthLine(), cliWidth(), contentType(), down(), eucNextChar() (+15 more)
+### Community 27 - "__asyncGenerator"
+Cohesion: 0.23
+Nodes (12): __asyncGenerator(), fulfill(), reject(), resume(), step(), verb(), __asyncValues(), settle() (+4 more)
+
+### Community 28 - ".write"
+Cohesion: 0.09
+Nodes (18): base64End(), BottomBar, clearLine(), clearNthLine(), height(), last(), lastLine(), left() (+10 more)
 
 ### Community 29 - "SSHBuffer"
-Cohesion: 0.10
-Nodes (16): dateToInt64(), first(), fromBuffer(), getAlg(), getCertType(), int64ToDate(), KeyEncryptedError(), onErrorResumeNext() (+8 more)
+Cohesion: 0.12
+Nodes (10): fromBuffer(), getAlg(), int64ToDate(), KeyEncryptedError(), parseDSA(), parseECDSA(), parseOneNum(), readSSHPrivate() (+2 more)
 
 ### Community 30 - "audio.rs"
-Cohesion: 0.17
+Cohesion: 0.18
 Nodes (8): compile_helper_from_source(), ensure_executable(), find_helper_binary(), MAX_RECORDING_SECONDS, prewarm_audio_recorder(), prewarm_helper(), warm_audio_capture(), WarmAudioState
+
+### Community 31 - "X9ECParameters"
+Cohesion: 0.23
+Nodes (15): ECCurveFp(), ECKey(), ECPublic(), fromHex(), generateECDSA(), getSECCurveByName(), secp128r1(), secp160k1() (+7 more)
 
 ### Community 32 - "isObjectLike"
 Cohesion: 0.07
-Nodes (40): baseGetTag(), baseIsArguments(), baseIsArrayBuffer(), baseIsDate(), baseIsMap(), baseIsRegExp(), baseIsSet(), baseIsTypedArray() (+32 more)
+Nodes (42): baseGetTag(), baseIsArguments(), baseIsArrayBuffer(), baseIsDate(), baseIsMap(), baseIsRegExp(), baseIsSet(), baseIsTypedArray() (+34 more)
 
 ### Community 33 - ".remove"
-Cohesion: 0.07
-Nodes (12): AuditOperator(), AuditSubscriber(), DebounceOperator(), DebounceSubscriber(), DoublyLinkedList(), exhaust(), race(), RaceOperator() (+4 more)
+Cohesion: 0.09
+Nodes (10): AuditSubscriber(), DebounceSubscriber(), dispatchWindowClose(), DoublyLinkedList(), exhaust(), race(), RaceOperator(), RaceSubscriber() (+2 more)
 
 ### Community 34 - "nbi"
-Cohesion: 0.05
-Nodes (45): Barrett(), barrettConvert(), bnAdd(), bnAnd(), bnAndNot(), bnBitLength(), bnClearBit(), bnClone() (+37 more)
+Cohesion: 0.07
+Nodes (36): Barrett(), bnAdd(), bnAnd(), bnAndNot(), bnBitLength(), bnClearBit(), bnClone(), bnDivide() (+28 more)
 
 ### Community 35 - "App.tsx"
-Cohesion: 0.09
-Nodes (38): @supabase/supabase-js, @tauri-apps/api, AIConfig, Announcement, App(), AudioSource, ChromeTab, decodeHtmlEntities() (+30 more)
+Cohesion: 0.10
+Nodes (34): @supabase/supabase-js, AIConfig, Announcement, App(), AudioSource, ChromeTab, decodeHtmlEntities(), DisplayInfo (+26 more)
 
 ### Community 36 - "fillInTable"
-Cohesion: 0.40
-Nodes (6): allBlank(), cellsConflict(), conflictExists(), fillInTable(), maxHeight(), maxWidth()
+Cohesion: 0.13
+Nodes (15): addColSpanCells(), addRowSpanCells(), allBlank(), cellsConflict(), ColSpanCell(), conflictExists(), fillInTable(), findDimension() (+7 more)
 
 ### Community 37 - ".slice"
-Cohesion: 0.04
-Nodes (31): applyStyle(), BufferList(), _classCallCheck(), copyFromBuffer(), copyFromBufferString(), customDecodeURIComponent(), DBCSDecoder(), DBCSEncoder() (+23 more)
+Cohesion: 0.03
+Nodes (51): bufferFrom(), BufferList(), bufferSplit(), buildStyle(), _classCallCheck(), constructJavascriptRegExp(), constructYamlTimestamp(), copyFromBuffer() (+43 more)
 
 ### Community 38 - ".unsubscribe"
-Cohesion: 0.06
-Nodes (14): InnerSubscriber(), observeOn(), ObserveOnMessage(), ObserveOnOperator(), ObserveOnSubscriber(), OnErrorResumeNextSubscriber(), SafeSubscriber(), SequenceEqualCompareToSubscriber() (+6 more)
+Cohesion: 0.08
+Nodes (10): InnerSubscriber(), ObserveOnMessage(), ObserveOnSubscriber(), SafeSubscriber(), SequenceEqualCompareToSubscriber(), SubscriptionDelaySubscriber(), switchMap(), SwitchMapOperator() (+2 more)
 
-### Community 39 - "lock"
-Cohesion: 0.22
-Nodes (13): acquireLock(), canonicalPath(), checkSync(), compromisedLock(), getLockFile(), isLockStale(), lock(), lockSync() (+5 more)
+### Community 39 - ".end"
+Cohesion: 0.08
+Nodes (23): acquireLock(), bin(), checkSync(), compromisedLock(), createTimeout(), current(), getLockFile(), isLockStale() (+15 more)
 
-### Community 40 - ".clear"
-Cohesion: 0.13
-Nodes (7): groupBy(), GroupByOperator(), GroupBySubscriber(), GroupDurationSubscriber(), GroupedObservable(), InnerRefCountSubscription(), memoizeCapped()
+### Community 40 - "f"
+Cohesion: 0.25
+Nodes (8): __asyncDelegator(), verb(), settle(), __await(), f(), memoize(), memoizeCapped(), PromiseCapability()
 
 ### Community 41 - "write"
-Cohesion: 0.18
-Nodes (24): write(), writeBitField(), writeBitString(), writeECDSACurve(), writePkcs1(), writePkcs1DSAPrivate(), writePkcs1DSAPublic(), writePkcs1ECDSAPrivate() (+16 more)
+Cohesion: 0.15
+Nodes (27): addRSAMissing(), Context(), createContext(), ecNormalize(), write(), writeBitString(), writeECDSACurve(), writePkcs1() (+19 more)
 
-### Community 42 - "Ajv"
-Cohesion: 0.08
-Nodes (33): addDraft6MetaSchema(), addFormat(), addInitialFormats(), addInitialSchemas(), addMetaSchema(), addSchema(), Ajv(), checkUnique() (+25 more)
+### Community 42 - ".copy"
+Cohesion: 0.20
+Nodes (12): addDraft6MetaSchema(), addInitialSchemas(), addMetaSchema(), addSchema(), Ajv(), checkUnique(), chooseGetId(), copyBuffer() (+4 more)
 
 ### Community 43 - "wrapper"
-Cohesion: 0.08
-Nodes (35): ary(), chain(), composeArgs(), composeArgsRight(), countHolders(), createBind(), createCtor(), createCurry() (+27 more)
+Cohesion: 0.06
+Nodes (45): ary(), chain(), composeArgs(), composeArgsRight(), countHolders(), createBind(), createCtor(), createCurry() (+37 more)
 
 ### Community 44 - ".init"
-Cohesion: 0.09
-Nodes (13): check(), checkOne(), flatten(), GlobalAdd, Import, Install, _load_packageCompatibility(), _load_packageFetcher() (+5 more)
+Cohesion: 0.03
+Nodes (36): add(), checkOne(), flatten(), getOneTimePassword(), getUpdateCommand(), getUpdateInstaller(), GlobalAdd, gt() (+28 more)
 
 ### Community 45 - "stealth_hotkey.rs"
 Cohesion: 0.07
@@ -454,127 +480,147 @@ Nodes (31): bring_to_front_without_focus(), CFMachPortCreateRunLoopSource(), CFR
 
 ### Community 46 - ".parse"
 Cohesion: 0.07
-Nodes (25): calculateMac(), calculatePayloadHash(), canonicalizeResource(), checkData(), constructJavascriptFunction(), constructProxyHeaderWhiteList(), constructProxyHost(), constructTunnelFnName() (+17 more)
+Nodes (27): calculateMac(), calculatePayloadHash(), checkData(), constructJavascriptFunction(), content(), createIntegrity(), every(), fromData() (+19 more)
 
 ### Community 47 - "object"
-Cohesion: 0.13
-Nodes (12): addRSAMissing(), assertCompatible(), Certificate(), countZeros(), DiffieHellman(), ECPrivate(), Fingerprint(), Key() (+4 more)
+Cohesion: 0.09
+Nodes (15): assertCompatible(), Certificate(), countZeros(), dateToInt64(), DiffieHellman(), ECPrivate(), Fingerprint(), getCertType() (+7 more)
 
 ### Community 48 - ".copyModules"
-Cohesion: 0.11
-Nodes (8): Config, fetch(), fetchOne(), isCommitHooksDisabled(), _load_promise(), PackageLinker, queue(), realpath()
+Cohesion: 0.10
+Nodes (7): canonicalPath(), fetch(), _load_promise(), PackageLinker, PackageReference, queue(), realpath()
 
 ### Community 49 - "AudioRecorder"
 Cohesion: 0.08
 Nodes (7): AVFoundation, CoreGraphics, CoreMedia, Foundation, ScreenCaptureKit, AudioRecorder, AudioRecorderApp
 
-### Community 50 - "createDebug"
-Cohesion: 0.29
-Nodes (7): createDebug(), disable(), enable(), enabled(), save(), selectColor(), useColors()
+### Community 50 - ".unshift"
+Cohesion: 0.20
+Nodes (8): CommentHandler(), createDebug(), debug(), link(), prependListener(), selectColor(), useColors(), wrapConversion()
 
 ### Community 51 - "filter"
-Cohesion: 0.21
-Nodes (15): any(), contains(), diff(), filter(), ignoreLinesToRegex(), isMatch(), loadNodeModules(), makeRe() (+7 more)
+Cohesion: 0.20
+Nodes (15): any(), contains(), diff(), filter(), ignoreLinesToRegex(), isMatch(), makeRe(), match() (+7 more)
 
 ### Community 52 - ".init"
-Cohesion: 0.08
-Nodes (19): authorization(), base64End(), Duplex(), elementAt(), filterForNonReserved(), filterOutReservedFunctions(), fromEventPattern(), getProxyFromURI() (+11 more)
+Cohesion: 0.11
+Nodes (9): init(), isReadStream(), Multipart(), paramsHaveRequestBody(), Redirect(), request(), safeStringify(), Tunnel() (+1 more)
 
 ### Community 53 - "ai-proxy/index.ts"
 Cohesion: 0.08
-Nodes (35): AIRequest, corsHeaders, processRequest(), UserSubscription, corsHeaders, corsHeaders, corsHeaders, corsHeaders (+27 more)
+Nodes (37): AIRequest, corsHeaders, processRequest(), UserSubscription, corsHeaders, corsHeaders, corsHeaders, corsHeaders (+29 more)
 
 ### Community 54 - "SemVer"
 Cohesion: 0.08
-Nodes (23): cmp(), Comparator(), compare(), compareIdentifiers(), compareLoose(), distinctUntilKeyChanged(), gt(), gte() (+15 more)
+Nodes (24): bytes(), cmp(), Comparator(), compare(), compareIdentifiers(), compareLoose(), distinctUntilKeyChanged(), format() (+16 more)
 
 ### Community 55 - "_load_normalizePattern"
-Cohesion: 0.16
-Nodes (8): hostedGitFragmentToGitUrl(), ImportResolver, _load_gistResolver2(), _load_hostedGitResolver(), _load_hostedGitResolver2(), _load_logicalDependencyTree(), _load_normalizePattern(), LogicalDependencyTree
+Cohesion: 0.09
+Nodes (12): cleanDepFromLockfile(), ImportResolver, _load_gistResolver2(), _load_hostedGitResolver2(), _load_index(), _load_logicalDependencyTree(), _load_normalizePattern(), _load_version() (+4 more)
 
 ### Community 57 - "throwError"
-Cohesion: 0.10
-Nodes (45): captureSegment(), charFromCodepoint(), _class(), compileMap(), compileStyleAliases(), composeNode(), detectType(), escapedHexLen() (+37 more)
+Cohesion: 0.12
+Nodes (39): captureSegment(), charFromCodepoint(), _class(), composeNode(), detectType(), escapedHexLen(), fromDecimalCode(), fromHexCode() (+31 more)
 
 ### Community 58 - "Command"
 Cohesion: 0.10
-Nodes (7): Command(), humanReadableArgName(), Option(), outputHelpIfNecessary(), pad(), run(), setFlags()
+Nodes (7): Command(), humanReadableArgName(), isValidBin(), loadNodeModules(), Option(), outputHelpIfNecessary(), pad()
 
 ### Community 59 - ".constructor"
-Cohesion: 0.13
-Nodes (21): addMapEntry(), addSetEntry(), allocUnsafe(), arrayReduce(), baseToPairs(), baseWrapperValue(), cloneArrayBuffer(), cloneBuffer() (+13 more)
+Cohesion: 0.10
+Nodes (23): addMapEntry(), addSetEntry(), allocUnsafe(), arrayReduce(), baseToPairs(), baseWrapperValue(), cloneArrayBuffer(), cloneBuffer() (+15 more)
 
-### Community 60 - "default"
-Cohesion: 0.14
-Nodes (9): bytes(), default(), format(), hasWrapper(), _load_fileResolver(), _load_invariant(), _load_semver2(), _load_validate() (+1 more)
+### Community 60 - ".forEach"
+Cohesion: 0.09
+Nodes (22): abort(), _capitalize(), chownrSync(), cleanLockfile(), compileList(), compileMap(), compileStyleAliases(), constructYamlFloat() (+14 more)
+
+### Community 61 - "chrome/mod.rs"
+Cohesion: 0.20
+Nodes (17): activate_tab(), capture_screenshot(), capture_screenshot_http(), capture_screenshot_ws(), capture_thumbnail(), capture_thumbnail_http(), capture_thumbnail_inner(), capture_thumbnail_ws() (+9 more)
+
+### Community 62 - "splice"
+Cohesion: 0.15
+Nodes (11): ForeverAgent(), formatArgs(), getConnectionName(), httpOverHttp(), httpOverHttps(), httpsOverHttp(), httpsOverHttps(), onRejectionHandled() (+3 more)
 
 ### Community 63 - "prompts.ts"
-Cohesion: 0.21
-Nodes (18): PromptEditor(), PromptEditorProps, PromptListView(), buildPrompt(), CustomPrompt, CustomPromptsManager, DEEPGRAM_LANGUAGES, DEFAULT_SYSTEM_PROMPTS (+10 more)
+Cohesion: 0.14
+Nodes (26): PromptEditor(), PromptEditorProps, PromptListView(), buildPrompt(), CustomPrompt, CustomPromptsManager, DEEPGRAM_LANGUAGES, DEFAULT_SYSTEM_PROMPTS (+18 more)
 
-### Community 64 - ".handleSubmitEvents"
-Cohesion: 0.23
-Nodes (4): Notification(), Prompt, takeUntil(), TakeUntilOperator()
+### Community 64 - "getChoice"
+Cohesion: 0.27
+Nodes (4): getCheckbox(), getChoice(), RawListPrompt, renderChoices()
+
+### Community 65 - "ExpandPrompt"
+Cohesion: 0.19
+Nodes (6): ExpandPrompt, pluck(), plucker(), pluckv(), uniq(), where()
 
 ### Community 66 - "WindowToggleSubscriber"
-Cohesion: 0.08
-Nodes (9): dispatchWindowClose(), distinct(), DistinctOperator(), DistinctSubscriber(), Subscriber(), windowToggle(), WindowToggleOperator(), WindowToggleSubscriber() (+1 more)
+Cohesion: 0.10
+Nodes (7): distinct(), DistinctOperator(), DistinctSubscriber(), Subscriber(), windowToggle(), WindowToggleOperator(), WindowToggleSubscriber()
 
 ### Community 67 - "tauri.conf.json"
-Cohesion: 0.22
-Nodes (8): build, beforeBuildCommand, beforeDevCommand, devUrl, frontendDist, productName, $schema, version
+Cohesion: 0.14
+Nodes (13): app, security, windows, withGlobalTauri, build, beforeBuildCommand, beforeDevCommand, devUrl (+5 more)
+
+### Community 68 - ".options"
+Cohesion: 0.15
+Nodes (14): debounce(), debounced(), flush(), invokeFunc(), leadingEdge(), remainingWait(), shouldInvoke(), timerExpired() (+6 more)
 
 ### Community 69 - "ConsoleReporter"
-Cohesion: 0.13
+Cohesion: 0.15
 Nodes (3): ConsoleReporter, toIndex(), _load_treeHelper()
 
-### Community 70 - "AuthScreen.tsx"
-Cohesion: 0.21
-Nodes (11): react, react-dom, AuthScreen(), AuthScreenProps, AuthView, ForgotPasswordForm(), ForgotPasswordFormProps, SignInForm() (+3 more)
+### Community 70 - "react"
+Cohesion: 0.18
+Nodes (13): react, react-dom, AppSettingsTab(), Props, Theme, getSetupSteps(), PrivacyPane, Props (+5 more)
 
 ### Community 71 - "package.json"
-Cohesion: 0.08
-Nodes (23): author, dependencies, mermaid, react, react-dom, react-syntax-highlighter, @supabase/supabase-js, @tauri-apps/api (+15 more)
+Cohesion: 0.06
+Nodes (30): author, description, devDependencies, @tauri-apps/cli, @types/react, @types/react-dom, @types/react-syntax-highlighter, typescript (+22 more)
 
-### Community 72 - "devDependencies"
-Cohesion: 0.25
-Nodes (8): devDependencies, @tauri-apps/cli, @types/react, @types/react-dom, @types/react-syntax-highlighter, typescript, vite, @vitejs/plugin-react
+### Community 72 - "crypto_box_beforenm"
+Cohesion: 0.14
+Nodes (17): core_hsalsa20(), core_salsa20(), crypto_box(), crypto_box_beforenm(), crypto_box_open(), crypto_core_hsalsa20(), crypto_core_salsa20(), crypto_onetimeauth() (+9 more)
 
 ### Community 73 - "LogicalTree"
 Cohesion: 0.21
-Nodes (5): addChild(), lockTree(), LogicalTree, makeNode(), promiseMap()
+Nodes (6): addChild(), atAddr(), lockTree(), LogicalTree, makeNode(), reqAddr()
 
 ### Community 74 - ".resolve"
-Cohesion: 0.05
-Nodes (39): __awaiter(), fulfilled(), rejected(), step(), BaseResolver, chownrSync(), co(), next() (+31 more)
+Cohesion: 0.06
+Nodes (35): __awaiter(), fulfilled(), rejected(), step(), BaseResolver, chownr(), createCallback(), dirname() (+27 more)
 
-### Community 76 - "done"
-Cohesion: 0.20
-Nodes (6): IconvLiteDecoderStream(), IconvLiteEncoderStream(), done(), onError(), onLine(), signAsync()
+### Community 75 - ".handleSubmitEvents"
+Cohesion: 0.16
+Nodes (6): flatMap(), InputPrompt, mask(), PasswordPrompt, takeUntil(), TakeUntilOperator()
 
-### Community 77 - ".join"
-Cohesion: 0.08
-Nodes (22): coerceCreatePackageName(), encodeRfc3986(), generateBase(), getCacheDir(), getConfigDir(), getDataDir(), getLocalAppDataDir(), getPreferredCacheDirectories() (+14 more)
+### Community 76 - "NGramParser"
+Cohesion: 0.19
+Nodes (7): big5(), contentType(), eucNextChar(), gb_18030(), NGramParser(), sbcs(), sjis()
+
+### Community 77 - "RequestSigner"
+Cohesion: 0.18
+Nodes (5): authorization(), encodeRfc3986(), RequestSigner(), rfc1123(), validateAlgorithm()
 
 ### Community 78 - "ZipBufferIterator"
 Cohesion: 0.10
-Nodes (5): StaticArrayIterator(), StaticIterator(), ZipBufferIterator(), ZipOperator(), ZipSubscriber()
+Nodes (6): StaticArrayIterator(), StaticIterator(), zip(), ZipBufferIterator(), ZipOperator(), ZipSubscriber()
 
 ### Community 79 - "hasOwnProperty"
-Cohesion: 0.08
-Nodes (20): cache(), deepEqual(), __exportStar(), factory(), getShallowProperty(), hasShallowProperty(), set(), FormData() (+12 more)
+Cohesion: 0.13
+Nodes (12): __exportStar(), factory(), getShallowProperty(), hasShallowProperty(), set(), FormData(), getKey(), hasOwnProperty() (+4 more)
 
 ### Community 81 - "launcher.rs"
-Cohesion: 0.08
-Nodes (39): BrowserCmd, CDP_CHROME_PID, CDP_PORT, ChromeSource, AppChrome, UserChrome, detect_user_chrome_port(), get_cdp_port() (+31 more)
+Cohesion: 0.14
+Nodes (18): CDP_CHROME_PID, CDP_PORT, ChromeSource, AppChrome, UserChrome, detect_user_chrome_port(), get_cdp_port(), get_cdp_status() (+10 more)
 
 ### Community 82 - "indexOf"
-Cohesion: 0.04
-Nodes (52): addColSpanCells(), addRowSpanCells(), canonicalDomain(), _capitalize(), collapse(), collect(), ColSpanCell(), compileList() (+44 more)
+Cohesion: 0.07
+Nodes (31): checkForGypIfNeeded(), constructYamlBinary(), dotdir(), dotSplit(), encode(), encoderForArrayFormat(), extraProperties(), filterForNonReserved() (+23 more)
 
 ### Community 83 - "transcription.rs"
-Cohesion: 0.12
-Nodes (11): AIConfig, query_with_image(), query_with_text(), validate_config(), capture_audio_to_channel(), DeepgramAlternative, DeepgramChannel, DeepgramResponse (+3 more)
+Cohesion: 0.15
+Nodes (7): capture_audio_to_channel(), DeepgramAlternative, DeepgramChannel, DeepgramResponse, run_transcription_session(), start_live_transcription(), TranscriptEvent
 
 ### Community 84 - "CrackingInterview App (Tauri + React Desktop App)"
 Cohesion: 0.12
@@ -584,17 +630,17 @@ Nodes (18): AI Provider Routing (Gemini/Claude/GPT/Grok via OpenRouter), Notific
 Cohesion: 0.11
 Nodes (18): compilerOptions, allowImportingTsExtensions, isolatedModules, jsx, lib, module, moduleResolution, noEmit (+10 more)
 
-### Community 86 - ".emit"
-Cohesion: 0.03
-Nodes (53): addChunk(), afterTransform(), Auth(), callFinal(), checkStream(), chunkInvalid(), CombinedStream(), debug() (+45 more)
-
-### Community 88 - ".push"
+### Community 86 - "debug"
 Cohesion: 0.06
-Nodes (41): bufferSplit(), canonicalizeHeaders(), childrenIgnored(), combineLatest(), colorSeverity(), makeAdvisoryTableRow(), cookieCompare(), dependenciesObjectToPatterns() (+33 more)
+Nodes (29): addChunk(), chunkInvalid(), ctor(), debug(), destroy(), DestroyableTransform(), Duplex(), emitErrorNT() (+21 more)
+
+### Community 88 - ".concat"
+Cohesion: 0.14
+Nodes (11): checkObj(), checkProp(), addError(), checkType(), coerce(), flattenUnsubscriptionErrors(), getType(), HoistManifest (+3 more)
 
 ### Community 89 - ".match"
-Cohesion: 0.09
-Nodes (27): asciiWords(), braceExpand(), buildRcArgs(), checkObj(), checkProp(), addError(), coerce(), debug() (+19 more)
+Cohesion: 0.07
+Nodes (34): algToKeyType(), asciiWords(), bigintToMpBuf(), buffer(), calculateDSAPublic(), calculateED25519Public(), calculateX25519Public(), date() (+26 more)
 
 ### Community 90 - "gemini.rs"
 Cohesion: 0.19
@@ -604,29 +650,33 @@ Nodes (11): error_message(), generate_content_url(), generation_config(), is_ove
 Cohesion: 0.14
 Nodes (15): AIResponseDisplay.tsx Component, App.tsx (Main UI Orchestration), Legacy Audio Recording Flow (record to MP3 to Gemini), deepgram-key Edge Function (temporary JWT), Deepgram Real-time Transcription Architecture, LiveTranscript.tsx Component, Live Transcription Mode (Deepgram streaming), main.rs (Tauri Commands / IPC / Hotkeys) (+7 more)
 
-### Community 92 - "SignUpForm.tsx"
-Cohesion: 0.31
-Nodes (11): SignUpForm(), SignUpFormProps, allowsAllDomains(), fetchRemoteModelConfig(), isFreeTierUrlAllowed(), isNonNegativeInt(), isValidModelConfig(), loadCachedModels() (+3 more)
+### Community 92 - "AuthScreen.tsx"
+Cohesion: 0.14
+Nodes (23): @tauri-apps/api, AuthScreen(), AuthScreenProps, AuthView, ForgotPasswordForm(), ForgotPasswordFormProps, SignInForm(), SignInFormProps (+15 more)
 
 ### Community 93 - "HotkeyAction"
 Cohesion: 0.14
 Nodes (12): HotkeyAction, AudioToggle, MoveDown, MoveLeft, MoveRight, MoveUp, QuitApp, ScrollDown (+4 more)
 
 ### Community 94 - "AppHandle"
-Cohesion: 0.13
-Nodes (30): app_config_dir(), default_hotkeys(), delete_document_placeholder(), get_document_placeholders(), get_hotkeys(), hotkeys_config_path(), HotkeysConfig, HotkeysState (+22 more)
+Cohesion: 0.18
+Nodes (23): default_hotkeys(), get_hotkeys(), hotkeys_config_path(), HotkeysConfig, HotkeysState, load_hotkeys_from_disk(), main(), normalize_hotkey() (+15 more)
 
 ### Community 95 - "clamp"
 Cohesion: 0.12
 Nodes (16): barrettReduce(), bnpAddTo(), bnpBitwiseTo(), bnpDMultiply(), bnpFromRadix(), bnpFromString(), bnpLShiftTo(), bnpMultiplyLowerTo() (+8 more)
 
+### Community 96 - ".observe"
+Cohesion: 0.22
+Nodes (3): ConfirmPrompt, DeMaterializeSubscriber(), Notification()
+
 ### Community 97 - ".connect"
-Cohesion: 0.15
-Nodes (9): ConnectableObservable(), createConnectionSSL(), createSecureSocket(), defaultOptions(), mergeOptions(), refCount(), RefCountOperator(), RefCountSubscriber() (+1 more)
+Cohesion: 0.20
+Nodes (6): ConnectableObservable(), createConnectionSSL(), createSecureSocket(), refCount(), RefCountOperator(), RefCountSubscriber()
 
 ### Community 98 - "isNumber"
-Cohesion: 0.22
-Nodes (5): findIndex(), isNaN(), isNumber(), Paginator, randomatic()
+Cohesion: 0.21
+Nodes (6): findIndex(), isNaN(), isNumber(), Paginator, Prompt, randomatic()
 
 ### Community 100 - "Stealth Mode & Anti-Detection Architecture"
 Cohesion: 0.17
@@ -636,40 +686,36 @@ Nodes (15): App Settings Tab (Transparency, Theme, Stealth Toggle), Permanent Bl
 Cohesion: 0.26
 Nodes (4): delayWhen(), DelayWhenOperator(), DelayWhenSubscriber(), SubscriptionDelayObservable()
 
-### Community 102 - ".copy"
+### Community 102 - ".toString"
+Cohesion: 0.06
+Nodes (28): base64Text(), createCompounder(), curveFpEncodePointHex(), deburr(), decodePax(), dnssecTimestamp(), doPad(), dumpException() (+20 more)
+
+### Community 104 - ".getCookies"
+Cohesion: 0.24
+Nodes (5): canonicalDomain(), domainMatch(), getCookieContext(), MemoryCookieStore(), pathMatch()
+
+### Community 105 - ".render"
+Cohesion: 0.16
+Nodes (7): binarySearch(), hide(), IteratedChar(), ListPrompt, mbcs(), show(), toggle()
+
+### Community 107 - "ECFieldElementFp"
 Cohesion: 0.10
-Nodes (14): bigintToMpBuf(), buffer(), calculateDSAPublic(), calculateED25519Public(), calculateX25519Public(), copyBuffer(), dnssecTimestamp(), formats() (+6 more)
+Nodes (23): BigInteger(), bnOr(), bnpFromNumber(), bnSetBit(), curveFpDecodePointHex(), curveFpFromBigInteger(), ECFieldElementFp(), ECPointFp() (+15 more)
 
-### Community 104 - ".getQuestion"
-Cohesion: 0.20
-Nodes (4): binarySearch(), InputPrompt, IteratedChar(), mbcs()
+### Community 108 - "rimraf"
+Cohesion: 0.16
+Nodes (10): defaultOptions(), defaults(), doDraw(), fixWinEPERM(), mergeOptions(), rimraf(), afterGlob(), rmdir() (+2 more)
 
-### Community 105 - "getChoice"
-Cohesion: 0.17
-Nodes (7): flatMap(), getChoice(), hide(), ListPrompt, RawListPrompt, show(), toggle()
-
-### Community 107 - "X9ECParameters"
-Cohesion: 0.09
-Nodes (34): BigInteger(), curveFpDecodePointHex(), curveFpFromBigInteger(), ECCurveFp(), ECFieldElementFp(), ECKey(), ECPointFp(), feFpAdd() (+26 more)
-
-### Community 108 - "NoopReporter"
-Cohesion: 0.07
-Nodes (8): bin(), current(), getOneTimePassword(), NoopReporter, patchLchmod(), patchLutimes(), killSockets(), useDeprecatedSynchronousErrorHandling()
-
-### Community 109 - ".has"
-Cohesion: 0.15
-Nodes (10): baseAt(), for(), generateDisclaimer(), getNoMatchScore(), getYesMatchScore(), hashDelete(), hashSet(), httpify() (+2 more)
+### Community 109 - "cache"
+Cohesion: 0.33
+Nodes (3): cache(), httpify(), _removeAllSchemas()
 
 ### Community 110 - "eq"
-Cohesion: 0.13
-Nodes (16): assocIndexOf(), baseSortedIndex(), baseSortedUniq(), customDefaultsAssignIn(), diffWithUnstable(), eq(), listCacheDelete(), listCacheGet() (+8 more)
-
-### Community 111 - "WindowSubscriber"
-Cohesion: 0.14
-Nodes (5): dispatchWindowTimeSpanOnly(), WindowSubscriber(), windowTime(), WindowTimeOperator(), WindowTimeSubscriber()
+Cohesion: 0.10
+Nodes (22): assocIndexOf(), baseSortedIndex(), baseSortedUniq(), baseValues(), chalkTag(), customDefaultsAssignIn(), diffWithUnstable(), eq() (+14 more)
 
 ### Community 112 - "documents.rs"
-Cohesion: 0.30
+Cohesion: 0.27
 Nodes (11): DocumentPlaceholder, documents_config_path(), extract_doc(), extract_docx(), extract_pdf(), extract_text_from_bytes(), extract_text_from_ooxml(), extract_txt() (+3 more)
 
 ### Community 113 - "MergeScanSubscriber"
@@ -677,24 +723,24 @@ Cohesion: 0.28
 Nodes (3): mergeScan(), MergeScanOperator(), MergeScanSubscriber()
 
 ### Community 114 - "repeat"
-Cohesion: 0.29
+Cohesion: 0.23
 Nodes (4): baseRepeat(), Cell(), repeat(), sumPlusOne()
 
-### Community 115 - "PromptTemplate"
-Cohesion: 0.29
-Nodes (7): PromptTemplate, AlgorithmBeginner, AlgorithmOptimal, CodeReview, ExplainConcept, SystemDesign, VerbalInterviewAudio
+### Community 115 - "fillRange"
+Cohesion: 0.15
+Nodes (13): detectSeparator(), fillRange(), formatPadding(), formatStep(), hasBoth(), isCharClass(), isInvalidChar(), noAlphaNum() (+5 more)
 
 ### Community 116 - "trim"
-Cohesion: 0.10
-Nodes (25): extractDescription(), hyphenReplace(), intersects(), isQuoted(), isX(), maxSatisfying(), minSatisfying(), normalizePerson() (+17 more)
+Cohesion: 0.11
+Nodes (22): extractDescription(), hyphenReplace(), intersects(), isQuoted(), isX(), parseComparator(), parseDate(), parseDigits() (+14 more)
 
 ### Community 117 - "BufferWhenSubscriber"
 Cohesion: 0.24
 Nodes (3): bufferWhen(), BufferWhenOperator(), BufferWhenSubscriber()
 
 ### Community 119 - "lastIndexOf"
-Cohesion: 0.17
-Nodes (13): arrayIncludes(), baseFindIndex(), baseIndexOf(), baseIsNaN(), charsEndIndex(), charsStartIndex(), filterTree(), findLastIndex() (+5 more)
+Cohesion: 0.13
+Nodes (16): arrayEach(), arrayIncludes(), baseFindIndex(), baseIndexOf(), baseIsNaN(), charsEndIndex(), charsStartIndex(), defaultPath() (+8 more)
 
 ### Community 120 - "Cracking Interview LLC (Legal Entity)"
 Cohesion: 0.27
@@ -708,13 +754,13 @@ Nodes (11): Build Configuration (tauri.conf.json, .taurignore), macOS Code Signi
 Cohesion: 0.30
 Nodes (11): AudioSource, ChromeTab, decodeHtmlEntities(), DisplayInfo, getSourceSubtitle(), getSourceTitle(), InputSource, isAudio() (+3 more)
 
-### Community 123 - "cookie"
-Cohesion: 0.07
-Nodes (15): cookie(), CookieJar(), defaultPath(), formatDate(), fromJSON(), getCookieContext(), jar(), jsonParse() (+7 more)
+### Community 124 - "CombineLatestSubscriber"
+Cohesion: 0.25
+Nodes (3): combineLatest(), CombineLatestOperator(), CombineLatestSubscriber()
 
 ### Community 125 - "addKeyword"
-Cohesion: 0.29
-Nodes (7): identifier, addKeyword(), _addRule(), checkDataType(), checkDataTypes(), customRuleCode(), toHash()
+Cohesion: 0.40
+Nodes (5): identifier, addKeyword(), checkDataType(), checkDataTypes(), toHash()
 
 ### Community 126 - "setup.rs"
 Cohesion: 0.29
@@ -725,8 +771,8 @@ Cohesion: 0.23
 Nodes (14): compile(), addLocalRef(), localCompile(), removeLocalRef(), replaceLocalRef(), resolvedRef(), resolveRef(), useDefault() (+6 more)
 
 ### Community 129 - "WebviewWindow"
-Cohesion: 0.33
-Nodes (6): apply_macos_screen_capture_protection(), apply_windows_stealth(), remove_windows_stealth(), restore_macos_screen_capture_visibility(), set_stealth_mode(), toggle_window_offscreen_win32()
+Cohesion: 0.25
+Nodes (8): apply_macos_screen_capture_protection(), apply_windows_stealth(), reapply_stealth_after_show(), remove_windows_stealth(), restore_macos_screen_capture_visibility(), save_stealth_preference(), set_stealth_mode(), toggle_window_offscreen_win32()
 
 ### Community 130 - "build-macos.sh"
 Cohesion: 0.25
@@ -744,53 +790,57 @@ Nodes (11): PromptListViewProps, ProgrammingLanguage, Cpp, Go, Java, JavaScript,
 Cohesion: 0.27
 Nodes (4): delay(), DelayMessage(), DelayOperator(), DelaySubscriber()
 
-### Community 134 - ".add"
-Cohesion: 0.07
-Nodes (24): BufferOperator(), BufferSubscriber(), BufferTimeSubscriber(), dispatchBufferClose(), dispatchBufferCreation(), dispatchBufferTimeSpanOnly(), dispatchNotification(), dispatchWindowCreation() (+16 more)
+### Community 134 - "BufferTimeSubscriber"
+Cohesion: 0.27
+Nodes (6): bufferTime(), BufferTimeOperator(), BufferTimeSubscriber(), dispatchBufferClose(), dispatchBufferCreation(), dispatchBufferTimeSpanOnly()
 
 ### Community 135 - "ExhaustMapSubscriber"
 Cohesion: 0.22
 Nodes (3): ExhauseMapOperator(), exhaustMap(), ExhaustMapSubscriber()
 
 ### Community 137 - "ExternalEditor"
-Cohesion: 0.40
-Nodes (3): edit(), editAsync(), ExternalEditor()
+Cohesion: 0.28
+Nodes (5): edit(), editAsync(), ExternalEditor(), guessName(), guessNameFallback()
 
 ### Community 138 - "bundle"
 Cohesion: 0.20
 Nodes (10): bundle, active, icon, longDescription, macOS, resources, shortDescription, targets (+2 more)
 
 ### Community 139 - ".read"
-Cohesion: 0.07
-Nodes (19): BitSet, cartesianProduct(), Context(), createContext(), documentRef(), evaluate(), expectIdstring(), Identifier() (+11 more)
+Cohesion: 0.16
+Nodes (6): nReadingNextTick(), ReadStream$open(), [preformatSymbol](), ShellStringUnquoted, skipWhitespace(), Win32Context
+
+### Community 140 - "SampleTimeSubscriber"
+Cohesion: 0.17
+Nodes (5): dispatchNotification(), sampleTime(), SampleTimeOperator(), SampleTimeSubscriber(), WithLatestFromSubscriber()
 
 ### Community 141 - "windows"
 Cohesion: 0.29
 Nodes (7): windows, installerIcon, installMode, certificateThumbprint, digestAlgorithm, nsis, timestampUrl
 
-### Community 142 - "rng_get_byte"
-Cohesion: 0.33
-Nodes (6): Arcfour(), prng_newstate(), rng_get_byte(), rng_get_bytes(), rng_seed_int(), rng_seed_time()
+### Community 142 - "ScreenManager"
+Cohesion: 0.23
+Nodes (6): clean(), cliWidth(), down(), inferLicense(), normalizeOpts(), ScreenManager
 
-### Community 143 - "promisifyAll"
-Cohesion: 0.33
-Nodes (6): createWrapper(), deprecated(), promisifyAll(), thenify(), thenifyAll(), withCallback()
+### Community 143 - "promisify"
+Cohesion: 0.29
+Nodes (7): createWrapper(), deprecated(), promisify(), promisifyAll(), thenify(), thenifyAll(), withCallback()
 
 ### Community 144 - "parseOperator"
-Cohesion: 0.33
-Nodes (10): hasMore(), makeBinaryOpParser(), next(), parseAtom(), parseLicense(), parseLicenseRef(), parseOperator(), parseParenthesizedExpression() (+2 more)
+Cohesion: 0.46
+Nodes (8): makeBinaryOpParser(), parseAtom(), parseLicense(), parseLicenseRef(), parseOperator(), parseParenthesizedExpression(), parseWith(), token()
 
-### Community 145 - ".resolve"
-Cohesion: 0.17
-Nodes (7): explodeHashedUrl(), GitLabResolver, GitResolver, _load_git(), _load_gitResolver(), _load_version(), TarballResolver
+### Community 145 - ".request"
+Cohesion: 0.15
+Nodes (3): fetchBundle(), GitLabResolver, HostedGitResolver
 
 ### Community 146 - "MergeMapSubscriber"
 Cohesion: 0.27
 Nodes (3): mergeMap(), MergeMapOperator(), MergeMapSubscriber()
 
 ### Community 148 - "Audit"
-Cohesion: 0.29
-Nodes (3): Audit, _load_getTransitiveDevDependencies(), _load_hoistedTreeBuilder()
+Cohesion: 0.23
+Nodes (4): Audit, AuditOperator(), _load_getTransitiveDevDependencies(), _load_hoistedTreeBuilder()
 
 ### Community 149 - "CrackingInterview Marketing Strategy"
 Cohesion: 0.25
@@ -798,27 +848,31 @@ Nodes (7): Website crackinginterview.org, Competitive Landscape (Interview Coder
 
 ### Community 150 - "shift"
 Cohesion: 0.08
-Nodes (12): bufferToggle(), BufferToggleOperator(), BufferToggleSubscriber(), getStateLength(), OnErrorResumeNextOperator(), onErrorResumeNextStatic(), ReplayEvent(), ReplaySubject() (+4 more)
+Nodes (13): bufferToggle(), BufferToggleOperator(), BufferToggleSubscriber(), dependenciesObjectToPatterns(), getStateLength(), getTransitiveDependencies(), getTransitiveDevDependencies(), normalizePattern() (+5 more)
 
 ### Community 151 - "chooseScalarStyle"
 Cohesion: 0.31
 Nodes (9): blockHeader(), chooseScalarStyle(), encodeHex(), escapeString(), isPlainSafe(), isPlainSafeFirst(), isPrintable(), isWhitespace() (+1 more)
 
-### Community 152 - "TakeLastSubscriber"
-Cohesion: 0.33
-Nodes (3): takeLast(), TakeLastOperator(), TakeLastSubscriber()
+### Community 152 - "normalizeId"
+Cohesion: 0.27
+Nodes (12): escapeFragment(), getFullPath(), _getId(), getJsonPointer(), _getSchemaObj(), MissingRefError(), normalizeId(), removeSchema() (+4 more)
 
 ### Community 153 - "DebounceTimeSubscriber"
 Cohesion: 0.17
 Nodes (7): debounceTime(), DebounceTimeOperator(), DebounceTimeSubscriber(), dispatchNext(), throttleTime(), ThrottleTimeOperator(), ThrottleTimeSubscriber()
 
-### Community 154 - "SequenceEqualSubscriber"
-Cohesion: 0.28
-Nodes (3): sequenceEqual(), SequenceEqualOperator(), SequenceEqualSubscriber()
+### Community 154 - ".emit"
+Cohesion: 0.06
+Nodes (24): afterTransform(), callFinal(), done(), emit(), endWritable(), EventReporter, extract(), finishMaybe() (+16 more)
 
-### Community 157 - "scripts"
-Cohesion: 0.29
-Nodes (7): scripts, build, dev, preview, tauri, tauri:build, tauri:dev
+### Community 155 - "HotkeysSettingsTab.tsx"
+Cohesion: 0.27
+Nodes (9): Field, HotkeysSettingsTab(), placeholder(), Platform, Props, SECTIONS, formatHotkey(), HotkeysConfig (+1 more)
+
+### Community 157 - "endsWith"
+Cohesion: 0.18
+Nodes (7): addSuffix(), endsWith(), explodeHashedUrl(), GitResolver, queryWhy(), removeSuffix(), TarballResolver
 
 ### Community 158 - "build-windows.ps1"
 Cohesion: 0.25
@@ -828,13 +882,9 @@ Nodes (3): CodeSignTool CLI, SSL.com eSigner Cloud Code Signing, eSigner TOTP Se
 Cohesion: 0.33
 Nodes (4): appendPostData(), buildHarHeaders(), HarWrapper(), toMs()
 
-### Community 161 - ".getLockfile"
-Cohesion: 0.22
-Nodes (6): blankObjectUndefined(), explodeEntry(), getName(), implodeEntry(), keyForRemote(), Lockfile
-
-### Community 162 - ".parsePatternInfo"
-Cohesion: 0.33
-Nodes (3): _load_parsePackagePath2(), _load_resolvers(), ResolutionMap
+### Community 162 - "onErrorResumeNext"
+Cohesion: 0.25
+Nodes (5): first(), onErrorResumeNext(), OnErrorResumeNextOperator(), onErrorResumeNextStatic(), OnErrorResumeNextSubscriber()
 
 ### Community 163 - "compilerOptions"
 Cohesion: 0.25
@@ -848,9 +898,9 @@ Nodes (7): forEachKey(), hasKey(), isSpace(), mergeObjects(), parseInteger(), pr
 Cohesion: 0.50
 Nodes (4): checkNoRef(), countKeys(), inlineRef(), resolve()
 
-### Community 167 - "parse"
-Cohesion: 0.07
-Nodes (31): CommentHandler(), dir(), dirSync(), extract(), file(), fileSync(), _generateTmpName(), globUnescape() (+23 more)
+### Community 167 - "file"
+Cohesion: 0.18
+Nodes (14): dir(), dirSync(), file(), fileSync(), _generateTmpName(), isEBADF(), isENOENT(), isExpectedError() (+6 more)
 
 ### Community 169 - "DocumentManager.tsx"
 Cohesion: 0.38
@@ -860,13 +910,13 @@ Nodes (6): DocumentManager(), DocumentManagerProps, DocumentPlaceholder, emptySl
 Cohesion: 0.38
 Nodes (3): find(), FindValueOperator(), FindValueSubscriber()
 
-### Community 171 - "SkipUntilSubscriber"
-Cohesion: 0.29
-Nodes (3): skipUntil(), SkipUntilOperator(), SkipUntilSubscriber()
+### Community 171 - "WsBrowserHandle"
+Cohesion: 0.36
+Nodes (4): BrowserCmd, spawn_ws_browser_connection(), try_ws_connect_and_verify(), WsBrowserHandle
 
-### Community 173 - "quote"
-Cohesion: 0.40
-Nodes (5): declare(), Formatter(), quote(), quoteForCmd(), quoteForShell()
+### Community 173 - ".[formatSymbol]"
+Cohesion: 0.20
+Nodes (7): at(), declare(), Formatter(), quote(), quoteForCmd(), quoteForShell(), ShellStringText
 
 ### Community 174 - "assertHrtime"
 Cohesion: 0.33
@@ -876,17 +926,21 @@ Nodes (7): assertHrtime(), hrtimeAccum(), hrtimeAdd(), hrtimeDiff(), hrtimeMicro
 Cohesion: 0.33
 Nodes (3): count(), CountOperator(), CountSubscriber()
 
-### Community 179 - "DefaultIfEmptySubscriber"
-Cohesion: 0.33
-Nodes (3): defaultIfEmpty(), DefaultIfEmptyOperator(), DefaultIfEmptySubscriber()
+### Community 179 - "co"
+Cohesion: 0.27
+Nodes (10): arrayToPromise(), co(), next(), onFulfilled(), onRejected(), isGenerator(), isGeneratorFunction(), isPromise() (+2 more)
 
 ### Community 180 - "setupSubscription"
-Cohesion: 0.14
-Nodes (14): detect(), detectAll(), detectFile(), detectFileAll(), detectFileAllSync(), detectFileSync(), fromEvent(), handler() (+6 more)
+Cohesion: 0.17
+Nodes (12): detect(), detectAll(), detectFile(), detectFileAll(), detectFileAllSync(), detectFileSync(), fromEvent(), handler() (+4 more)
 
 ### Community 181 - "bcrypt_hash"
 Cohesion: 0.48
 Nodes (3): bcrypt_hash(), bcrypt_pbkdf(), stream2word()
+
+### Community 183 - "operator"
+Cohesion: 0.22
+Nodes (10): baseToNumber(), createMathOperation(), createRelationalOperation(), documentRef(), expectIdstring(), Identifier(), idstring(), licenseRef() (+2 more)
 
 ### Community 184 - "SkipWhileSubscriber"
 Cohesion: 0.40
@@ -896,37 +950,81 @@ Nodes (3): skipWhile(), SkipWhileOperator(), SkipWhileSubscriber()
 Cohesion: 0.43
 Nodes (3): single(), SingleOperator(), SingleSubscriber()
 
+### Community 186 - "sort"
+Cohesion: 0.20
+Nodes (10): blankObjectUndefined(), canonicalizeHeaders(), canonicalizeResource(), implodeEntry(), rcompare(), rsort(), serializeIntegrity(), sort() (+2 more)
+
 ### Community 187 - "Authentication & Subscription System (Supabase + Stripe)"
 Cohesion: 0.33
 Nodes (5): Auth Flow (Sign-in required every launch), Authentication & Subscription System (Supabase + Stripe), Supabase Database Schema (users, api_usage, audio_usage), Stripe Webhook Events Handling, Subscription Tiers (Free / Free+BYO / Pro)
 
-### Community 189 - "app"
-Cohesion: 0.40
-Nodes (5): app, security, windows, withGlobalTauri, csp
+### Community 189 - ".pop"
+Cohesion: 0.20
+Nodes (7): buildGraph(), cookieCompare(), deriveBFS(), endWith(), startWith(), withLatestFrom(), WithLatestFromOperator()
 
 ### Community 192 - "requestFlush"
 Cohesion: 0.50
 Nodes (4): asap(), rawAsap(), RawTask(), requestFlush()
 
+### Community 193 - "validate_source_url"
+Cohesion: 0.29
+Nodes (6): fetch_models(), query_ai(), query_ai_with_image(), supabase_sign_in(), supabase_sign_up(), validate_source_url()
+
+### Community 194 - "dependencies"
+Cohesion: 0.25
+Nodes (8): dependencies, mermaid, react, react-dom, react-syntax-highlighter, @supabase/supabase-js, @tauri-apps/api, @tauri-apps/plugin-shell
+
+### Community 195 - "RepeatWhenSubscriber"
+Cohesion: 0.25
+Nodes (3): repeatWhen(), RepeatWhenOperator(), RepeatWhenSubscriber()
+
+### Community 196 - "CookieJar"
+Cohesion: 0.38
+Nodes (3): CookieJar(), fromJSON(), jsonParse()
+
 ### Community 202 - "TapSubscriber"
 Cohesion: 0.29
 Nodes (3): DoOperator(), tap(), TapSubscriber()
+
+### Community 203 - "takeWhile"
+Cohesion: 0.33
+Nodes (3): takeWhile(), TakeWhileOperator(), TakeWhileSubscriber()
 
 ### Community 204 - ".toString"
 Cohesion: 0.40
 Nodes (4): addColons(), base64Strip(), FingerprintFormatError(), sshBase64Format()
 
-### Community 205 - "useCustomRule"
-Cohesion: 1.00
-Nodes (3): useCustomRule(), errorsText(), validateSchema()
+### Community 205 - "getSchema"
+Cohesion: 0.50
+Nodes (5): useCustomRule(), defaultMeta(), errorsText(), getSchema(), validateSchema()
 
-### Community 206 - "loadMissingSchema"
-Cohesion: 0.40
-Nodes (4): compileAsync(), _compileAsync(), loadMissingSchema(), loadMetaSchemaOf()
+### Community 206 - "then"
+Cohesion: 0.19
+Nodes (12): chmodShim(), then(), cmdShim(), cmdShimIfExists(), compileAsync(), _compileAsync(), loadMissingSchema(), loadMetaSchemaOf() (+4 more)
+
+### Community 207 - "done"
+Cohesion: 0.16
+Nodes (7): collect(), EditorPrompt, IconvLiteDecoderStream(), done(), onError(), signAsync(), timer()
+
+### Community 208 - "MaterializeSubscriber"
+Cohesion: 0.29
+Nodes (3): materialize(), MaterializeOperator(), MaterializeSubscriber()
+
+### Community 209 - "TimeoutWithSubscriber"
+Cohesion: 0.33
+Nodes (3): timeoutWith(), TimeoutWithOperator(), TimeoutWithSubscriber()
+
+### Community 210 - "app_config_dir"
+Cohesion: 0.33
+Nodes (5): app_config_dir(), delete_document_placeholder(), get_document_placeholders(), load_stealth_preference(), save_document_placeholder()
 
 ### Community 211 - "Square310x310Logo.png (Windows Store Large Tile)"
 Cohesion: 0.67
 Nodes (4): cracking-interview (Tauri App), AI Chip Icon Design, Blue-to-Magenta Gradient Styling, Square310x310Logo.png (Windows Store Large Tile)
+
+### Community 212 - "ai/mod.rs"
+Cohesion: 0.67
+Nodes (4): AIConfig, query_with_image(), query_with_text(), validate_config()
 
 ### Community 217 - "isDuplex"
 Cohesion: 0.67
@@ -940,29 +1038,49 @@ Nodes (3): AI Chip Icon Motif, Blue-Purple-Magenta Gradient Palette, Square44x44
 Cohesion: 0.67
 Nodes (3): AI Chip Icon (Square 89x89 Logo), Blue-Purple-Magenta Gradient Color Scheme, Windows Store Tile Asset (89x89)
 
+### Community 221 - "RetryWhenSubscriber"
+Cohesion: 0.33
+Nodes (3): retryWhen(), RetryWhenOperator(), RetryWhenSubscriber()
+
 ### Community 222 - "onwrite"
 Cohesion: 0.15
 Nodes (11): afterWrite(), clearBuffer(), CorkedRequest(), decodeChunk(), doWrite(), needFinish(), onwrite(), onwriteDrain() (+3 more)
 
+### Community 223 - "ScanSubscriber"
+Cohesion: 0.40
+Nodes (3): scan(), ScanOperator(), ScanSubscriber()
+
+### Community 252 - "rethrow"
+Cohesion: 0.67
+Nodes (4): maybeCallback(), rethrow(), debugCallback(), missingCallback()
+
+### Community 253 - "refresh_stealth_status"
+Cohesion: 1.00
+Nodes (3): get_stealth_status(), refresh_stealth_status(), StealthStatus
+
+### Community 254 - "buildRcArgs"
+Cohesion: 0.67
+Nodes (3): buildRcArgs(), extractCwdArg(), getRcArgs()
+
 ## Knowledge Gaps
-- **225 isolated node(s):** `YarnResolver`, `RFC-5234`, `RFC-3110`, `RFC-3986`, `RFC-5280` (+220 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 997 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **66 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **229 isolated node(s):** `YarnResolver`, `RFC-5234`, `RFC-3110`, `RFC-3986`, `RFC-5280` (+224 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1001 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **64 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Parser` connect `Parser` to `yarn-1.22.19.cjs`, `Scanner`, `MessageError`, `parse`?**
-  _High betweenness centrality (0.043) - this node is a cross-community bridge._
+- **Why does `_addRule()` connect `App.tsx` to `.push`, `addKeyword`?**
+  _High betweenness centrality (0.073) - this node is a cross-community bridge._
 - **What connects `YarnResolver`, `RFC-5234`, `RFC-3110` to the rest of the system?**
-  _225 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _229 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `yarn-1.22.19.cjs` be split into smaller, more focused modules?**
-  _Cohesion score 0.0038738582638184116 - nodes in this community are weakly interconnected._
-- **Why does `JSXParser()` connect `Scanner` to `yarn-1.22.19.cjs`, `.call`, `parse`?**
-  _High betweenness centrality (0.027) - this node is a cross-community bridge._
+  _Cohesion score 0.00445137937316341 - nodes in this community are weakly interconnected._
+- **Why does `Parser` connect `.push` to `yarn-1.22.19.cjs`, `split`, `replace`, `.init`, `.join`, `Scanner`?**
+  _High betweenness centrality (0.043) - this node is a cross-community bridge._
 - **Should `__webpack_require__` be split into smaller, more focused modules?**
-  _Cohesion score 0.03346924906557934 - nodes in this community are weakly interconnected._
-- **Why does `identifier` connect `addKeyword` to `Ajv`, `tauri.conf.json`?**
-  _High betweenness centrality (0.013) - this node is a cross-community bridge._
-- **Should `Parser` be split into smaller, more focused modules?**
-  _Cohesion score 0.08111077814404155 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.022703818369453045 - nodes in this community are weakly interconnected._
+- **Should `.push` be split into smaller, more focused modules?**
+  _Cohesion score 0.07088502894954508 - nodes in this community are weakly interconnected._
+- **Should `.subscribe` be split into smaller, more focused modules?**
+  _Cohesion score 0.023415191319246145 - nodes in this community are weakly interconnected._
