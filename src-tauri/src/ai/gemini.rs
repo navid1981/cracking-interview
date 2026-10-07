@@ -103,27 +103,73 @@ async fn post_with_retry(request: reqwest::RequestBuilder) -> Result<serde_json:
             continue;
         }
 
-        // Non-retryable error
-        if !msg.is_empty() {
-            if is_quota_message(msg) {
-                return Err(format!(
-                    "❌ Gemini API quota/rate-limit: {}\n\nTip: Check the quota for your Gemini API key in Google AI Studio.",
-                    msg
-                ));
-            }
-            return Err(format!("❌ Gemini API Error: {}", msg));
-        }
-        // Google always returns JSON errors; an HTML body means a firewall/proxy answered instead.
-        if json.get("raw").is_some() && text.trim_start().starts_with('<') {
-            return Err(format!(
-                "❌ Gemini API blocked by your network (HTTP {}). A firewall or corporate proxy is blocking generativelanguage.googleapis.com. Try a different network.",
-                status.as_u16()
-            ));
-        }
-        return Err(format!("❌ Gemini API Error: HTTP {} {}", status.as_u16(), status.canonical_reason().unwrap_or("")));
+        return Err(error_message(status, &json, &text));
     }
 
     Err("❌ Gemini API Error: The model is overloaded. Please try again later.".to_string())
+}
+
+fn error_message(status: reqwest::StatusCode, json: &serde_json::Value, text: &str) -> String {
+    let msg = json["error"]["message"].as_str().unwrap_or("");
+    if !msg.is_empty() {
+        if is_quota_message(msg) {
+            return format!(
+                "❌ Gemini API quota/rate-limit: {}\n\nTip: Check the quota for your Gemini API key in Google AI Studio.",
+                msg
+            );
+        }
+        return format!("❌ Gemini API Error: {}", msg);
+    }
+    // Google always returns JSON errors; an HTML body means a firewall/proxy answered instead.
+    if text.trim_start().starts_with('<') {
+        return format!(
+            "❌ Gemini API blocked by your network (HTTP {}). A firewall or corporate proxy is blocking generativelanguage.googleapis.com. Try a different network.",
+            status.as_u16()
+        );
+    }
+    format!("❌ Gemini API Error: HTTP {} {}", status.as_u16(), status.canonical_reason().unwrap_or(""))
+}
+
+/// Checks that `api_key` is valid and can access `model`, without generating content (no quota use).
+pub async fn validate_key(api_key: &str, model: &str) -> Result<(), String> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err("⚠️ Please enter an API key.".to_string());
+    }
+    if model.trim().is_empty() {
+        return Err("⚠️ No AI model configured. Please sign in again so the model list can be loaded.".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))?;
+
+    let resp = client
+        .get(format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}?key={}",
+            model, api_key
+        ))
+        .send()
+        .await
+        .map_err(|e| format!("❌ Could not reach Google to verify the key: {}", e))?;
+
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    let text = resp.text().await.unwrap_or_default();
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    let msg = json["error"]["message"].as_str().unwrap_or("").to_lowercase();
+
+    if msg.contains("api key not valid") || msg.contains("api_key_invalid") {
+        return Err("❌ Invalid API key. Copy it again from Google AI Studio.".to_string());
+    }
+    if status.as_u16() == 404 {
+        return Err(format!("❌ This key can't access the required model ({}).", model));
+    }
+    Err(error_message(status, &json, &text))
 }
 
 /// Query Gemini with text only

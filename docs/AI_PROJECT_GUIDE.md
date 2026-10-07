@@ -374,6 +374,7 @@ AI (Direct calls - user's own API key):
 - `query_ai(prompt: String, config: AIConfig, source_url: Option<String>) -> String`
 - `query_ai_with_image(prompt: String, image_path: String, config: AIConfig, source_url: Option<String>) -> String`
 - `AIConfig = { selected_model, gemini_api_key?, max_output_tokens? }` — `selected_model` is `modelConfig.byo_model.id`, `max_output_tokens` is `modelConfig.max_output_tokens` (both from the server)
+- `validate_gemini_key(api_key: String, model: String) -> ()` — `GET models/{byo_model}?key=…` (no generation, no quota use). The AI Models tab's "Save & Verify" button (or Enter) only stores the key and shows "✓ Active" after this succeeds
 - `source_url` is checked against `free_allowed_domains`, which Rust stores from the `fetch_models` response (and fetches itself with the anon key if not loaded yet)
 
 AI (Proxy calls - via Supabase Edge Function):

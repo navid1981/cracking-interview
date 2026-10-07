@@ -745,6 +745,11 @@ async fn query_ai_with_image(
     ai::query_with_image(&prompt, &image_data, &config).await
 }
 
+#[tauri::command]
+async fn validate_gemini_key(api_key: String, model: String) -> Result<(), String> {
+    ai::gemini::validate_key(&api_key, &model).await
+}
+
 /// Response from the AI proxy Edge Function
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AIProxyResponse {
@@ -1795,6 +1800,7 @@ fn main() {
             cooldown_audio_capture,
             query_ai,
             query_ai_with_image,
+            validate_gemini_key,
             query_ai_via_proxy,
             query_ai_via_proxy_with_image,
             query_ai_via_proxy_conversation,

@@ -140,6 +140,38 @@ function App() {
       // Silent fail - non-critical
     }
   }, [aiConfig.selected_model, aiConfig.gemini_api_key]);
+
+  // The BYO key is only stored in aiConfig (and shown as Active) after Google accepts it.
+  const [byoKeyDraft, setByoKeyDraft] = useState('');
+  const [byoKeyVerifying, setByoKeyVerifying] = useState(false);
+  const [byoKeyError, setByoKeyError] = useState('');
+
+  const handleSaveByoKey = async () => {
+    const key = byoKeyDraft.trim();
+    if (!key || byoKeyVerifying) return;
+    setByoKeyError('');
+    const models = await ensureModelConfig();
+    if (!models) {
+      setByoKeyError('❌ Could not load AI models from the server. Check your connection and try again.');
+      return;
+    }
+    setByoKeyVerifying(true);
+    try {
+      await invoke('validate_gemini_key', { apiKey: key, model: models.byo_model.id });
+      setAiConfig(prev => ({ ...prev, gemini_api_key: key }));
+      setByoKeyDraft('');
+    } catch (e) {
+      setByoKeyError(String(e));
+    } finally {
+      setByoKeyVerifying(false);
+    }
+  };
+
+  const handleRemoveByoKey = () => {
+    setAiConfig(prev => ({ ...prev, gemini_api_key: undefined }));
+    setByoKeyDraft('');
+    setByoKeyError('');
+  };
   
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'account' | 'models' | 'prompts' | 'hotkeys' | 'app'>('models');
@@ -1815,13 +1847,28 @@ function App() {
         <div className="header-right">
           {/* Quota Display */}
           {subscription && (
-            <span className="quota-badge" title={
-              isPaidUser
-                ? `${usageStats?.requests_used ?? '?'} of ${proRequestLimitLabel} AI calls used this month${usageStats?.period_end ? ` · Resets ${usageStats.period_end.toLocaleDateString()}` : ''}`
-                : usingByoKey
-                  ? 'Using your own Gemini API key (unlimited)'
-                  : `${freeCallsUsed} of ${freeCallLimitLabel} lifetime free calls used`
-            }>
+            <span
+              className="quota-badge"
+              title={
+                isPaidUser
+                  ? `${usageStats?.requests_used ?? '?'} of ${proRequestLimitLabel} AI calls used this month${usageStats?.period_end ? ` · Resets ${usageStats.period_end.toLocaleDateString()}` : ''}`
+                  : usingByoKey
+                    ? 'Using your own Gemini API key (unlimited) · Click to manage it in AI Models'
+                    : `${freeCallsUsed} of ${freeCallLimitLabel} lifetime free calls used`
+              }
+              {...(!isPaidUser && usingByoKey && {
+                role: 'button',
+                tabIndex: 0,
+                style: { cursor: 'pointer' },
+                onClick: handleOpenSettings,
+                onKeyDown: (e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleOpenSettings();
+                  }
+                },
+              })}
+            >
               {isPaidUser ? (
                 <>📊 {usageStats ? `${usageStats.requests_used}/${usageStats.requests_limit} calls` : '...'}</>
               ) : usingByoKey ? (
@@ -2281,10 +2328,11 @@ function App() {
                     <div className="upgrade-section">
                       <h4>🚀 Upgrade to Pro</h4>
                       <ul className="upgrade-benefits">
+                        <li>✓ Stealth mode: Undetectable and fully private plus hidden hotkeys</li>
                         <li>✓ {proRequestLimitLabel} AI requests per month</li>
                         <li>✓ {proAudioHoursLabel} hours audio recording per month</li>
                         {proModelNames && <li>✓ {proModelNames}</li>}
-                        <li>✓ Any website + screen capture</li>
+                        <li>✓ Screen capture</li>
                         <li>✓ Audio input with transcription</li>
                       </ul>
                       <button 
@@ -2372,14 +2420,43 @@ function App() {
                       <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>
                         Your {freeCallLimitLabel} free tries are used. Add your own Gemini API key to continue using AI{freeSitesRestricted ? ' (with same domain restrictions)' : ''}.
                       </p>
-                      <input
-                        type="password"
-                        value={aiConfig.gemini_api_key || ''}
-                        onChange={(e) => setAiConfig({...aiConfig, gemini_api_key: e.target.value || undefined})}
-                        placeholder="Enter your Gemini API key"
-                        className="input-field"
-                        style={{ marginBottom: '8px' }}
-                      />
+                      <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                        <input
+                          type="password"
+                          value={byoKeyDraft}
+                          onChange={(e) => { setByoKeyDraft(e.target.value); setByoKeyError(''); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSaveByoKey(); } }}
+                          placeholder={aiConfig.gemini_api_key
+                            ? `Saved key ••••${aiConfig.gemini_api_key.slice(-4)} · paste a new key to replace`
+                            : 'Paste your Gemini API key'}
+                          className="input-field"
+                          style={{ flex: 1, margin: 0 }}
+                          disabled={byoKeyVerifying}
+                        />
+                        <button
+                          className="action-btn primary"
+                          onClick={handleSaveByoKey}
+                          disabled={!byoKeyDraft.trim() || byoKeyVerifying}
+                          style={{ whiteSpace: 'nowrap' }}
+                        >
+                          {byoKeyVerifying ? '⏳ Verifying…' : 'Save & Verify'}
+                        </button>
+                        {aiConfig.gemini_api_key && !byoKeyDraft && (
+                          <button
+                            className="action-btn"
+                            onClick={handleRemoveByoKey}
+                            disabled={byoKeyVerifying}
+                            style={{ whiteSpace: 'nowrap' }}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      {byoKeyError && (
+                        <p style={{ fontSize: '12px', color: '#dc2626', margin: '0 0 8px 0', whiteSpace: 'pre-wrap' }}>
+                          {byoKeyError}
+                        </p>
+                      )}
                       <button 
                         onClick={() => invoke('open_url', { url: 'https://aistudio.google.com/app/apikey' })}
                         style={{ 
@@ -2863,7 +2940,7 @@ function App() {
                           🔒 Pro Feature: Stealth Mode
                         </div>
                         <div style={{ color: 'var(--text-secondary)' }}>
-                          Upgrade to Pro to unlock Stealth Mode (Hotkey Hiding, and hiding from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows)).
+                          Upgrade to Pro to unlock Stealth Mode (Undetectable and fully private. Hidden hotkeys, and the window never appears in screen shares, recordings, screenshots, the Dock or the Taskbar).
                         </div>
                       </div>
                     )}
