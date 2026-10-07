@@ -803,6 +803,7 @@ unsafe extern "system" fn windows_keyboard_proc(
 ) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::Foundation::LRESULT;
     use windows::Win32::UI::WindowsAndMessaging::*;
+    use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
     if code >= 0 {
         let msg = wparam.0 as u32;
