@@ -8,6 +8,7 @@ import PromptEditor from './components/PromptEditor';
 import PromptListView from './components/PromptListView';
 import DocumentManager, { DocumentPlaceholder } from './components/DocumentManager';
 import AuthScreen from './components/AuthScreen';
+import SetupChecklist, { getSetupSteps, SetupStatus, PrivacyPane } from './components/SetupChecklist';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts, StoredDocPlaceholder } from './services/prompts';
 import { 
   onAuthStateChange, 
@@ -109,6 +110,12 @@ function App() {
   const [aiResponse, setAiResponse] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isOpeningChrome, setIsOpeningChrome] = useState(false);
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
+  const [setupRequested, setSetupRequested] = useState<Partial<Record<PrivacyPane, boolean>>>({});
+  // Session-only: the card returns on next launch if something is still missing.
+  const [setupHidden, setSetupHidden] = useState(false);
+  const [setupJustCompleted, setSetupJustCompleted] = useState(false);
+  const prevSetupMissingRef = useRef<number | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [message, setMessage] = useState('');
   // Solve progress stepper: tracks which phase we're in
@@ -1233,6 +1240,66 @@ function App() {
     }
   };
 
+  const refreshSetupStatus = async () => {
+    try {
+      setSetupStatus(await invoke<SetupStatus>('get_setup_status'));
+    } catch (e) {
+      console.error('Failed to read setup status:', e);
+    }
+  };
+
+  useEffect(() => {
+    refreshSetupStatus();
+    window.addEventListener('focus', refreshSetupStatus);
+    return () => window.removeEventListener('focus', refreshSetupStatus);
+  }, []);
+
+  const setupIsPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+  const setupSteps = getSetupSteps(setupStatus, cdpReady, setupIsPro);
+  const setupOneTimeMissing = setupSteps.filter(s => s.oneTime && !s.done).length;
+
+  useEffect(() => {
+    const prev = prevSetupMissingRef.current;
+    prevSetupMissingRef.current = setupStatus ? setupOneTimeMissing : null;
+    if (prev !== null && prev > 0 && setupOneTimeMissing === 0 && !setupHidden) {
+      setSetupJustCompleted(true);
+      const t = setTimeout(() => setSetupJustCompleted(false), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [setupOneTimeMissing, setupStatus, setupHidden]);
+
+  const handleGrantPermission = async (pane: PrivacyPane) => {
+    try {
+      if (pane === 'accessibility') {
+        await invoke('request_accessibility');
+      } else {
+        await invoke('request_screen_recording');
+      }
+      await invoke('open_privacy_settings', { pane });
+    } catch (e) {
+      console.error(`Failed to request ${pane}:`, e);
+    }
+    setSetupRequested(prev => ({ ...prev, [pane]: true }));
+    refreshSetupStatus();
+    handleRefreshStealthStatus();
+  };
+
+  const handleShowSetup = () => {
+    setSetupHidden(false);
+    if (showSettings) handleCloseSettings();
+  };
+
+  const setupChecklistProps = {
+    steps: setupSteps,
+    requested: setupRequested,
+    isOpeningChrome,
+    onOpenChrome: () => { openChromeCdp(); },
+    onDownloadChrome: () => { invoke('open_url', { url: 'https://www.google.com/chrome/' }); },
+    onGrant: handleGrantPermission,
+    onRestart: () => { invoke('restart_app'); },
+    onRecheck: () => { refreshSetupStatus(); handleRefreshStealthStatus(); },
+  };
+
   const handleRefreshStealthStatus = async () => {
     try {
       const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('refresh_stealth_status');
@@ -1994,6 +2061,15 @@ function App() {
               🎙️ {(usageStats.audio_seconds_used / 3600).toFixed(1)}/{usageStats.audio_seconds_limit / 3600}h
             </span>
           )}
+          {setupOneTimeMissing > 0 && (
+            <button
+              className="setup-badge"
+              onClick={handleShowSetup}
+              title="Some setup steps are missing. Click to see them."
+            >
+              ⚠ Setup {setupSteps.length - setupSteps.filter(s => !s.done).length}/{setupSteps.length}
+            </button>
+          )}
           {cdpReady ? (
             <span
               className={`status-indicator${chromeConnectionMode === 'user' ? ' chrome-user-mode' : ''}`}
@@ -2185,6 +2261,14 @@ function App() {
       <div className="content" ref={contentScrollRef}>
         <div className="main-section">
           
+          {((setupOneTimeMissing > 0 && !setupHidden) || setupJustCompleted) && (
+            <SetupChecklist
+              variant="card"
+              {...setupChecklistProps}
+              onHide={() => { setSetupHidden(true); setSetupJustCompleted(false); }}
+            />
+          )}
+
           {announcement && showAnnouncement && (
             <div className="info-banner announcement">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -2902,6 +2986,8 @@ function App() {
 
               {settingsTab === 'app' && (
                 <>
+                  <SetupChecklist variant="panel" {...setupChecklistProps} />
+
                   {/* Transparency */}
                   <div className="app-settings-group">
                     <div className="app-settings-label">Transparency</div>

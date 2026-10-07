@@ -8,6 +8,7 @@ pub(crate) mod audio;
 mod transcription;
 mod documents;
 mod stealth_hotkey;
+mod setup;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1828,6 +1829,10 @@ fn main() {
             get_stealth_status,
             request_accessibility,
             refresh_stealth_status,
+            get_setup_status,
+            request_screen_recording,
+            open_privacy_settings,
+            restart_app,
             move_window_by,
         ])
         .setup(|app| {
@@ -2068,6 +2073,26 @@ fn get_stealth_status() -> Result<StealthStatus, String> {
 #[tauri::command]
 fn request_accessibility() -> Result<bool, String> {
     Ok(stealth_hotkey::request_accessibility_permission())
+}
+
+#[tauri::command]
+fn get_setup_status() -> setup::SetupStatus {
+    setup::status()
+}
+
+#[tauri::command]
+fn request_screen_recording() -> bool {
+    setup::request_screen_recording()
+}
+
+#[tauri::command]
+fn open_privacy_settings(pane: String) -> Result<(), String> {
+    setup::open_privacy_settings(&pane)
+}
+
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.restart();
 }
 
 #[tauri::command]

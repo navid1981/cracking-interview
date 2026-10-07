@@ -377,6 +377,13 @@ AI (Direct calls - user's own API key):
 - `validate_gemini_key(api_key: String, model: String) -> ()` — `GET models/{byo_model}?key=…` (no generation, no quota use). The AI Models tab's "Save & Verify" button (or Enter) only stores the key and shows "✓ Active" after this succeeds
 - `source_url` is checked against `free_allowed_domains`, which Rust stores from the `fetch_models` response (and fetches itself with the anon key if not loaded yet)
 
+Setup checklist (`src-tauri/src/setup.rs`, UI in `src/components/SetupChecklist.tsx`):
+
+- `get_setup_status() -> { platform, chrome_installed, accessibility_granted?, screen_recording_granted? }` — permission fields are `null` off macOS. Screen Recording uses `CGPreflightScreenCaptureAccess`, which usually reports a new grant only after an app restart
+- `request_screen_recording() -> bool`, `open_privacy_settings(pane: "accessibility" | "screen_recording")`, `restart_app()`
+- Steps: Chrome installed, Chrome connected, Accessibility (macOS), Screen & System Audio Recording (macOS, Pro only). Re-checked on window focus and via "Re-check" (no polling)
+- Shown as a main-screen card and an amber "⚠ Setup n/total" header badge only while a one-time step (install/permission) is missing; "Chrome connected" alone never triggers them because the header already has "Open Chrome". The card can be hidden for the current session (in-memory, returns next launch). Always listed in Settings → App → "Setup & Permissions"
+- After "Grant access" in this session, an ungranted permission shows "Open Settings" + "Restart app"
 AI (Proxy calls - via Supabase Edge Function):
 
 - `query_ai_via_proxy(prompt: String, model: String, access_token: String, source_url: Option<String>) -> AIProxyResponse`
