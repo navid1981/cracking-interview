@@ -74,6 +74,15 @@ async fn post_with_retry(request: reqwest::RequestBuilder) -> Result<serde_json:
 
         // Success path
         if status.is_success() {
+            // RECITATION means Gemini matched its answer too closely to memorized
+            // training content and withheld it. It's non-deterministic across
+            // sampling, so a retry often succeeds; only give up after a few tries.
+            let finish_reason = json["candidates"][0]["finishReason"].as_str().unwrap_or("");
+            if finish_reason == "RECITATION" && attempt < delays_ms.len() - 1 {
+                println!("⏳ Gemini recitation block; retrying in {}ms (attempt {}/{})", delay, attempt + 1, delays_ms.len());
+                tokio::time::sleep(std::time::Duration::from_millis(*delay)).await;
+                continue;
+            }
             return Ok(json);
         }
 
@@ -286,6 +295,9 @@ fn no_response_reason(json: &serde_json::Value) -> String {
     if let Some(reason) = json["candidates"][0]["finishReason"].as_str() {
         if reason == "MAX_TOKENS" {
             return "⚠️ Gemini ran out of output tokens before producing a response. Try increasing the max output tokens in AI Models settings.".to_string();
+        }
+        if reason == "RECITATION" {
+            return "⚠️ Gemini withheld its answer because it matched memorized training content too closely. Try again, or rephrase the question slightly.".to_string();
         }
         if reason != "STOP" {
             return format!("⚠️ Gemini stopped without a response ({}).", reason);
