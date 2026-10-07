@@ -52,6 +52,17 @@ static WIN_HOOK_HANDLE: std::sync::atomic::AtomicIsize = std::sync::atomic::Atom
 #[cfg(target_os = "windows")]
 static WIN_HOOK_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+// Set when a hotkey combo is swallowed while the given modifier is held, so its
+// eventual keyup is swallowed too (see windows_keyboard_proc for why).
+#[cfg(target_os = "windows")]
+static WIN_ALT_COMBO_FIRED: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "windows")]
+static WIN_CTRL_COMBO_FIRED: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "windows")]
+static WIN_SHIFT_COMBO_FIRED: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "windows")]
+static WIN_WIN_COMBO_FIRED: AtomicBool = AtomicBool::new(false);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotkeyAction {
     SolveText,
@@ -814,31 +825,30 @@ unsafe extern "system" fn windows_keyboard_proc(
             let kbd = *(lparam.0 as *const KBDLLHOOKSTRUCT);
             let vk = kbd.vkCode;
 
-            // A bare modifier press/release (its companion key swallowed below)
-            // reaches Chrome as "Alt alone", which triggers the browser/OS's own
-            // keyboard-mnemonic menu-focus behavior and fires window.blur/focus
-            // even though our hotkey combo itself was swallowed. Swallow the
-            // modifier key too whenever it's part of an active hotkey, so Chrome
-            // never observes a standalone modifier press.
-            let modifier = match vk {
-                v if v == VK_LMENU.0 as u32 || v == VK_RMENU.0 as u32 || v == VK_MENU.0 as u32 => Some(0),
-                v if v == VK_LCONTROL.0 as u32 || v == VK_RCONTROL.0 as u32 || v == VK_CONTROL.0 as u32 => Some(1),
-                v if v == VK_LSHIFT.0 as u32 || v == VK_RSHIFT.0 as u32 || v == VK_SHIFT.0 as u32 => Some(2),
-                v if v == VK_LWIN.0 as u32 || v == VK_RWIN.0 as u32 => Some(3),
+            // Modifier keydowns are NEVER swallowed: Chrome/WebView2 (both
+            // Chromium) track "is Alt/Ctrl/Shift held" from the actual
+            // WM_*KEYDOWN message stream they receive, not by re-polling
+            // hardware state per keystroke. Swallowing the modifier's keydown
+            // breaks that tracking everywhere (Chrome AND our own hotkey
+            // recorder), so later keys stop matching entirely.
+            //
+            // Instead, only the modifier's KEYUP is swallowed, and only when a
+            // hotkey combo using it was actually swallowed during this hold.
+            // That hides the "down, nothing, up" pattern that makes Chrome/
+            // Windows treat it as a lone Alt tap (which toggles keyboard-menu
+            // focus and fires window.blur/focus), without ever touching the
+            // keydown that Chrome needs for correct modifier tracking.
+            let modifier_flag = match vk {
+                v if v == VK_LMENU.0 as u32 || v == VK_RMENU.0 as u32 || v == VK_MENU.0 as u32 => Some(&WIN_ALT_COMBO_FIRED),
+                v if v == VK_LCONTROL.0 as u32 || v == VK_RCONTROL.0 as u32 || v == VK_CONTROL.0 as u32 => Some(&WIN_CTRL_COMBO_FIRED),
+                v if v == VK_LSHIFT.0 as u32 || v == VK_RSHIFT.0 as u32 || v == VK_SHIFT.0 as u32 => Some(&WIN_SHIFT_COMBO_FIRED),
+                v if v == VK_LWIN.0 as u32 || v == VK_RWIN.0 as u32 => Some(&WIN_WIN_COMBO_FIRED),
                 _ => None,
             };
 
-            if let Some(kind) = modifier {
-                if crate::STEALTH_ENABLED.load(Ordering::Relaxed) {
-                    let used_by_active_hotkey = ACTIVE_HOTKEYS.lock().unwrap().iter().any(|h| match kind {
-                        0 => h.alt,
-                        1 => h.ctrl,
-                        2 => h.shift,
-                        _ => h.cmd,
-                    });
-                    if used_by_active_hotkey {
-                        return LRESULT(1);
-                    }
+            if let Some(flag) = modifier_flag {
+                if is_keyup && crate::STEALTH_ENABLED.load(Ordering::Relaxed) && flag.swap(false, Ordering::Relaxed) {
+                    return LRESULT(1);
                 }
                 return CallNextHookEx(None, code, wparam, lparam);
             }
@@ -851,7 +861,7 @@ unsafe extern "system" fn windows_keyboard_proc(
             let win = ((GetAsyncKeyState(VK_LWIN.0 as i32) as u16 & 0x8000) != 0)
                 || ((GetAsyncKeyState(VK_RWIN.0 as i32) as u16 & 0x8000) != 0);
 
-            let matched_action = {
+            let matched = {
                 let guard = ACTIVE_HOTKEYS.lock().unwrap();
                 guard.iter().find(|h| {
                     h.ctrl == ctrl
@@ -859,13 +869,17 @@ unsafe extern "system" fn windows_keyboard_proc(
                         && h.shift == shift
                         && h.cmd == win
                         && h.key_code == vk
-                }).map(|h| h.action)
+                }).map(|h| (h.action, h.ctrl, h.alt, h.shift, h.cmd))
             };
 
-            if let Some(action) = matched_action {
+            if let Some((action, h_ctrl, h_alt, h_shift, h_cmd)) = matched {
                 let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed);
                 if is_stealth {
                     println!("🕵️ [stealth-hotkey-windows] Swallowed key event for {}", action.label());
+                    if h_ctrl { WIN_CTRL_COMBO_FIRED.store(true, Ordering::Relaxed); }
+                    if h_alt { WIN_ALT_COMBO_FIRED.store(true, Ordering::Relaxed); }
+                    if h_shift { WIN_SHIFT_COMBO_FIRED.store(true, Ordering::Relaxed); }
+                    if h_cmd { WIN_WIN_COMBO_FIRED.store(true, Ordering::Relaxed); }
                 } else {
                     println!("⌨️ [normal-hotkey-windows] Key event triggered for {}", action.label());
                 }
