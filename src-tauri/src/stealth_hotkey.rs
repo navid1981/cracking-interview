@@ -807,10 +807,43 @@ unsafe extern "system" fn windows_keyboard_proc(
 
     if code >= 0 {
         let msg = wparam.0 as u32;
-        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+        let is_keydown = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+        let is_keyup = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+
+        if is_keydown || is_keyup {
             let kbd = *(lparam.0 as *const KBDLLHOOKSTRUCT);
             let vk = kbd.vkCode;
 
+            // A bare modifier press/release (its companion key swallowed below)
+            // reaches Chrome as "Alt alone", which triggers the browser/OS's own
+            // keyboard-mnemonic menu-focus behavior and fires window.blur/focus
+            // even though our hotkey combo itself was swallowed. Swallow the
+            // modifier key too whenever it's part of an active hotkey, so Chrome
+            // never observes a standalone modifier press.
+            let modifier = match vk {
+                v if v == VK_LMENU.0 as u32 || v == VK_RMENU.0 as u32 || v == VK_MENU.0 as u32 => Some(0),
+                v if v == VK_LCONTROL.0 as u32 || v == VK_RCONTROL.0 as u32 || v == VK_CONTROL.0 as u32 => Some(1),
+                v if v == VK_LSHIFT.0 as u32 || v == VK_RSHIFT.0 as u32 || v == VK_SHIFT.0 as u32 => Some(2),
+                v if v == VK_LWIN.0 as u32 || v == VK_RWIN.0 as u32 => Some(3),
+                _ => None,
+            };
+
+            if let Some(kind) = modifier {
+                if crate::STEALTH_ENABLED.load(Ordering::Relaxed) {
+                    let used_by_active_hotkey = ACTIVE_HOTKEYS.lock().unwrap().iter().any(|h| match kind {
+                        0 => h.alt,
+                        1 => h.ctrl,
+                        2 => h.shift,
+                        _ => h.cmd,
+                    });
+                    if used_by_active_hotkey {
+                        return LRESULT(1);
+                    }
+                }
+                return CallNextHookEx(None, code, wparam, lparam);
+            }
+
+            if is_keydown {
             // Check modifier states via GetAsyncKeyState:
             let ctrl = (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0;
             let alt = (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0;
@@ -849,6 +882,7 @@ unsafe extern "system" fn windows_keyboard_proc(
                     // Windows will NOT dispatch WM_KEYDOWN/WM_KEYUP to Chrome.
                     return LRESULT(1);
                 }
+            }
             }
         }
     }
