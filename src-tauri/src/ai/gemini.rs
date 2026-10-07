@@ -201,14 +201,14 @@ pub async fn query_with_text(
         .json(&payload);
     
     let json = post_with_retry(request).await?;
-    
+
     // Extract text from response
-    if let Some(text) = json["candidates"][0]["content"]["parts"][0]["text"].as_str() {
-        Ok(text.to_string())
+    if let Some(text) = extract_text(&json) {
+        Ok(text)
     } else if let Some(error) = json["error"]["message"].as_str() {
         Err(format!("❌ Gemini API Error: {}", error))
     } else {
-        Err("⚠️ No response from Gemini".to_string())
+        Err(no_response_reason(&json))
     }
 }
 
@@ -253,14 +253,45 @@ pub async fn query_with_image(
         .json(&payload);
     
     let json = post_with_retry(request).await?;
-    
-    if let Some(text) = json["candidates"][0]["content"]["parts"][0]["text"].as_str() {
-        Ok(text.to_string())
+
+    if let Some(text) = extract_text(&json) {
+        Ok(text)
     } else if let Some(error) = json["error"]["message"].as_str() {
         Err(format!("❌ Gemini API Error: {}", error))
     } else {
-        Err("⚠️ No response from Gemini".to_string())
+        Err(no_response_reason(&json))
     }
+}
+
+/// Joins all text parts of the first candidate (Gemini splits "thinking" output
+/// across multiple parts, so the answer isn't always in parts[0]).
+fn extract_text(json: &serde_json::Value) -> Option<String> {
+    let parts = json["candidates"][0]["content"]["parts"].as_array()?;
+    let text: String = parts
+        .iter()
+        .filter(|p| p["thought"].as_bool() != Some(true))
+        .filter_map(|p| p["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("");
+    if text.is_empty() { None } else { Some(text) }
+}
+
+/// Explains why no text came back when the HTTP call itself succeeded
+/// (blocked prompt, safety filter, or the model running out of tokens
+/// while "thinking" before it produced any visible text).
+fn no_response_reason(json: &serde_json::Value) -> String {
+    if let Some(reason) = json["promptFeedback"]["blockReason"].as_str() {
+        return format!("⚠️ Gemini blocked the prompt ({}).", reason);
+    }
+    if let Some(reason) = json["candidates"][0]["finishReason"].as_str() {
+        if reason == "MAX_TOKENS" {
+            return "⚠️ Gemini ran out of output tokens before producing a response. Try increasing the max output tokens in AI Models settings.".to_string();
+        }
+        if reason != "STOP" {
+            return format!("⚠️ Gemini stopped without a response ({}).", reason);
+        }
+    }
+    "⚠️ No response from Gemini".to_string()
 }
 
 fn generate_content_url(model: &str, api_key: &str) -> String {
