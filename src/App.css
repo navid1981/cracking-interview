@@ -308,6 +308,82 @@ span.status-indicator.chrome-user-mode {
   cursor: not-allowed;
 }
 
+/* Solve button with the Text/Screenshot input-mode segmented control inline to its left */
+.solve-group {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.mode-segment {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+}
+
+/* Sliding highlight behind the active segment */
+.mode-segment-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px var(--shadow), 0 0 0 1px var(--border);
+  transition: transform 0.2s ease;
+}
+
+[data-theme="dark"] .mode-segment-thumb {
+  background: rgba(96, 165, 250, 0.14);
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.35);
+}
+
+.mode-segment.is-screenshot .mode-segment-thumb {
+  transform: translateX(100%);
+}
+
+.mode-segment-btn {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.mode-segment-btn:hover:not(:disabled):not(.active) {
+  color: var(--text-primary);
+}
+
+.mode-segment-btn.active {
+  color: var(--primary-blue);
+}
+
+.mode-segment-btn:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 1px;
+}
+
+.mode-segment-btn:disabled {
+  cursor: not-allowed;
+}
+
+.mode-segment.is-locked {
+  opacity: 0.65;
+}
+
 
 /* ========== Solve Progress Stepper ========== */
 .solve-stepper {

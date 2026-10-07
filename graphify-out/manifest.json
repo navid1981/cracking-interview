@@ -156,9 +156,9 @@
     "semantic_hash": ""
   },
   "src/App.tsx": {
-    "mtime": 1791346902.8570592,
-    "seen": 1791346931.129678,
-    "ast_hash": "31b555c44ffc0266c485813742fe7711",
+    "mtime": 1791349717.672073,
+    "seen": 1791349732.9290519,
+    "ast_hash": "f744146ef5b00d5a1623e2763b5a2196",
     "semantic_hash": ""
   },
   "src/components/AIResponseDisplay.tsx": {
@@ -210,10 +210,10 @@
     "semantic_hash": ""
   },
   "src/components/TabDropdown.tsx": {
-    "mtime": 1791312753.8126464,
-    "seen": 1791314020.859794,
-    "ast_hash": "a99228eae961b595dabeb3522fec6b4b",
-    "semantic_hash": "a99228eae961b595dabeb3522fec6b4b"
+    "mtime": 1791348961.3048236,
+    "seen": 1791349050.009092,
+    "ast_hash": "f2ea4b2e810fa496090e9a8ca8367f2e",
+    "semantic_hash": ""
   },
   "src/main.tsx": {
     "mtime": 1767389947.7981832,
@@ -342,9 +342,9 @@
     "semantic_hash": ""
   },
   "docs/AI_PROJECT_GUIDE.md": {
-    "mtime": 1791346920.0099955,
-    "seen": 1791346931.130412,
-    "ast_hash": "a95a3b262207d62cd9aaf72f6ce703c2",
+    "mtime": 1791349718.5801966,
+    "seen": 1791349732.929707,
+    "ast_hash": "c212134c069a36763a469e51957122ca",
     "semantic_hash": ""
   },
   "index.html": {

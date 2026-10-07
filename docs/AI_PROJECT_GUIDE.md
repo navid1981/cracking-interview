@@ -1540,6 +1540,8 @@ The Input Mode controls (text extraction vs screenshot) have been merged into th
 
 Styled via `.toggle-btn .mode-icon`, `.mode-label`, `.mode-description` in `App.css`.
 
+**Main-screen switch:** an icon segmented control (document = Text, camera = Screenshot; `.solve-group`, `.mode-segment`, `.mode-segment-thumb` sliding highlight, `.mode-segment-btn`) sits inline to the left of the Solve button, matching its height; the Solve button keeps its original size. It reads and writes the same `useScreenshot` state (persisted as `localStorage('use_screenshot')`) as the AI Models tab, so changing either updates both. Hidden for the Audio source; locked to Screenshot for Display sources.
+
 #### Verbal Interview Badge (Prompts Tab)
 
 The "Verbal Interview (Audio)" prompt shows a `🎙️ Audio` button (using `.prompt-action-btn` class for consistent styling) instead of a "Duplicate" button. This badge matches the font size, color, and hover effects of other action buttons.
@@ -1558,6 +1560,14 @@ The refresh button for input sources includes visual feedback:
 - **Refreshing**: Spinning animation (`.refreshing` class with `@keyframes spin`)
 - **Tooltip**: `title="Refresh Input Sources"`
 - `isRefreshing` state controls disabled + animation
+
+#### Automatic Tab Refresh
+
+`refreshChromeTabsQuietly()` keeps the Chrome tab list current without the spinner (the manual 🔄 `fetchTabs()` still does a full refresh including displays):
+- Runs (while Chrome is connected) on window `focus` and when the input dropdown opens — no periodic polling (`TabDropdown` `onOpen`); skipped while a solve is in progress (`isLoadingRef`) or another refresh is running
+- Re-captures thumbnails only for new tabs or tabs whose URL changed, at most once per tab+URL (`thumbnailAttemptedRef`), since background tabs often can't be screenshotted
+- Updates the selected tab object in place so its URL/title stay current; if it was closed, selects the first source
+- `solveWithAI()` also re-reads the selected tab's current URL (2s timeout) before solving, so the free-tier site check and `source_url` never use a stale page (important for hotkey solves while the app is unfocused)
 
 #### Always on Top
 

@@ -56,6 +56,16 @@ function isDisplay(source: InputSource): source is DisplayInfo {
   return 'width' in source && 'height' in source;
 }
 
+function isChromeTab(source: InputSource): source is ChromeTab {
+  return 'url' in source && !isDisplay(source);
+}
+
+function decodeHtmlEntities(text: string): string {
+  const div = document.createElement('div');
+  div.innerHTML = text;
+  return div.textContent || div.innerText || text;
+}
+
 function isAudio(source: InputSource): source is AudioSource {
   return (source as any).source_type === 'audio';
 }
@@ -356,6 +366,85 @@ function App() {
   useEffect(() => {
     allSourcesRef.current = allSources;
   }, [allSources]);
+
+  // Refs let the background tab refresh (timer/focus listeners) read current state.
+  const selectedTabRef = useRef<InputSource | null>(null);
+  const cdpReadyRef = useRef(false);
+  const isLoadingRef = useRef(false);
+  const quietRefreshInFlightRef = useRef(false);
+  // Background tabs often can't be screenshotted; try each tab+URL once instead of every cycle.
+  const thumbnailAttemptedRef = useRef<Set<string>>(new Set());
+  useEffect(() => { selectedTabRef.current = selectedTab; }, [selectedTab]);
+  useEffect(() => { cdpReadyRef.current = cdpReady; }, [cdpReady]);
+  useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
+
+  // Background refresh of Chrome tabs: no spinner, keeps the selection (updated in place so its
+  // URL/title stay current), and only re-captures thumbnails for new tabs or tabs that navigated.
+  const refreshChromeTabsQuietly = async () => {
+    if (!cdpReadyRef.current || quietRefreshInFlightRef.current || isLoadingRef.current) return;
+    quietRefreshInFlightRef.current = true;
+    try {
+      const tabs = await Promise.race([
+        invoke<ChromeTab[]>('get_chrome_tabs'),
+        new Promise<ChromeTab[]>((_, reject) => setTimeout(() => reject('timeout'), 5000)),
+      ]);
+      const previousTabs = new Map(
+        allSourcesRef.current.filter(isChromeTab).map(t => [t.id, t] as const)
+      );
+      const merged = await Promise.all(tabs.map(async (tab): Promise<ChromeTab> => {
+        const previous = previousTabs.get(tab.id);
+        if (previous?.thumbnail && previous.url === tab.url) return { ...tab, thumbnail: previous.thumbnail };
+        const attemptKey = `${tab.id}|${tab.url}`;
+        if (thumbnailAttemptedRef.current.has(attemptKey)) return { ...tab, thumbnail: previous?.thumbnail };
+        thumbnailAttemptedRef.current.add(attemptKey);
+        try {
+          const thumbnail = await Promise.race([
+            invoke<string>('get_tab_thumbnail', { tabId: tab.id }),
+            new Promise<string>((_, reject) => setTimeout(() => reject('timeout'), 6000)),
+          ]);
+          return { ...tab, thumbnail };
+        } catch {
+          return { ...tab, thumbnail: previous?.thumbnail };
+        }
+      }));
+
+      const changed = merged.length !== previousTabs.size || merged.some(t => {
+        const p = previousTabs.get(t.id);
+        return !p || p.url !== t.url || p.title !== t.title || p.thumbnail !== t.thumbnail;
+      });
+      if (!changed || !cdpReadyRef.current) return;
+
+      const combined: InputSource[] = [...merged, ...allSourcesRef.current.filter(s => !isChromeTab(s))];
+      allSourcesRef.current = combined;
+      setAllSources(combined);
+
+      const selected = selectedTabRef.current;
+      if (selected && isChromeTab(selected)) {
+        const updated = merged.find(t => t.id === selected.id);
+        if (updated) {
+          setSelectedTab(updated);
+          if (updated.title !== selected.title) {
+            const title = decodeHtmlEntities(updated.title?.trim() || updated.url);
+            setMessage(prev => prev.startsWith('Selected: ') ? `Selected: ${title}` : prev);
+          }
+        } else if (combined.length > 0) {
+          setSelectedTab(combined[0]);
+          setMessage('Selected tab was closed, auto-selected first source');
+        }
+      }
+    } catch {
+      // Keep the current list on transient CDP errors; the next refresh will retry.
+    } finally {
+      quietRefreshInFlightRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    if (!cdpReady) return;
+    const onFocus = () => { refreshChromeTabsQuietly(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [cdpReady]);
 
   // Cleanup audio timer on unmount.
   useEffect(() => {
@@ -1512,8 +1601,12 @@ function App() {
       const combined: InputSource[] = [...chromeTabs, ...displaysWithThumbnails, audioSource];
       setAllSources(combined);
       
+      const currentSelection = selectedTab ? combined.find(s => s.id === selectedTab.id) : undefined;
+      if (currentSelection) {
+        setSelectedTab(currentSelection);
+      }
       // If selected tab is no longer in the list, select first available source
-      if (selectedTab && !combined.find(s => s.id === selectedTab.id)) {
+      else if (selectedTab) {
         if (combined.length > 0) {
           setSelectedTab(combined[0]);
           setMessage('Previous selection unavailable, auto-selected first source');
@@ -1539,7 +1632,25 @@ function App() {
     announcementDismissedRef.current = true;
     setShowAnnouncement(false);
     
-    const sourceToUse = selectedTab ?? (allSources.length > 0 ? allSources[0] : null);
+    let sourceToUse = selectedTab ?? (allSources.length > 0 ? allSources[0] : null);
+
+    // The tab may have navigated since the list was last refreshed; use its current URL/title.
+    if (sourceToUse && isChromeTab(sourceToUse) && cdpReady) {
+      try {
+        const tabs = await Promise.race([
+          invoke<ChromeTab[]>('get_chrome_tabs'),
+          new Promise<ChromeTab[]>((_, reject) => setTimeout(() => reject('timeout'), 2000)),
+        ]);
+        const current = tabs.find(t => t.id === sourceToUse!.id);
+        if (current) {
+          sourceToUse = { ...current, thumbnail: sourceToUse.thumbnail };
+          setSelectedTab(sourceToUse);
+        }
+      } catch {
+        // Fall back to the cached tab info.
+      }
+    }
+
     if (!selectedTab && sourceToUse) {
       // Keep UI selection in sync so the user can see what was used.
       setSelectedTab(sourceToUse);
@@ -1968,6 +2079,7 @@ function App() {
                 }
               }}
               disabled={false}
+              onOpen={refreshChromeTabsQuietly}
             />
             <button
               onClick={fetchTabs}
@@ -1980,15 +2092,62 @@ function App() {
           </div>
         </div>
 
-        <button 
-          onClick={() => solveWithAI('auto')}
-          disabled={isLoading || !selectedTab}
-          className="solve-button"
-        >
-          {selectedTab && isAudio(selectedTab)
-            ? (isRecordingAudio ? `⏹️ Stop (${audioSeconds}s)` : '🎙️ Record')
-            : `${selectedTab && (isDisplay(selectedTab) || useScreenshot) ? '📸' : '📝'} Solve`}
-        </button>
+        <div className="solve-group">
+          {selectedTab && !isAudio(selectedTab) && (() => {
+            const displayLocked = isDisplay(selectedTab);
+            const screenshotActive = displayLocked || useScreenshot;
+            const lockedHint = 'Displays always use Screenshot Capture';
+            // Same `useScreenshot` setting as Settings → AI Models → Input Mode, so both stay in sync.
+            return (
+              <div
+                className={`mode-segment ${screenshotActive ? 'is-screenshot' : ''} ${displayLocked ? 'is-locked' : ''}`}
+                role="radiogroup"
+                aria-label="Input mode"
+              >
+                <span className="mode-segment-thumb" aria-hidden="true" />
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!screenshotActive}
+                  aria-label="Text Extraction"
+                  className={`mode-segment-btn ${!screenshotActive ? 'active' : ''}`}
+                  onClick={() => setUseScreenshot(false)}
+                  disabled={isLoading || displayLocked}
+                  title={displayLocked ? lockedHint : 'Text Extraction'}
+                >
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 3v5h5M9 13h6M9 17h4" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={screenshotActive}
+                  aria-label="Screenshot Capture"
+                  className={`mode-segment-btn ${screenshotActive ? 'active' : ''}`}
+                  onClick={() => setUseScreenshot(true)}
+                  disabled={isLoading || displayLocked}
+                  title={displayLocked ? lockedHint : 'Screenshot Capture'}
+                >
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 8a2 2 0 0 1 2-2h1.5l1.5-2h6l1.5 2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+                    <circle cx="12" cy="12.5" r="3.5" />
+                  </svg>
+                </button>
+              </div>
+            );
+          })()}
+          <button 
+            onClick={() => solveWithAI('auto')}
+            disabled={isLoading || !selectedTab}
+            className="solve-button"
+          >
+            {selectedTab && isAudio(selectedTab)
+              ? (isRecordingAudio ? `⏹️ Stop (${audioSeconds}s)` : '🎙️ Record')
+              : `${selectedTab && (isDisplay(selectedTab) || useScreenshot) ? '📸' : '📝'} Solve`}
+          </button>
+        </div>
       </div>
 
       {isRecordingAudio && !isLiveTranscribing && (
@@ -2332,7 +2491,7 @@ function App() {
                         <li>✓ {proRequestLimitLabel} AI requests per month</li>
                         <li>✓ {proAudioHoursLabel} hours audio recording per month</li>
                         {proModelNames && <li>✓ {proModelNames}</li>}
-                        <li>✓ Screen capture</li>
+                        <li>✓ Screen capture for display</li>
                         <li>✓ Audio input with transcription</li>
                       </ul>
                       <button 
@@ -2493,7 +2652,7 @@ function App() {
                             ? (aiConfig.gemini_api_key ? 'Unlimited with your API key' : `${freeCallLimit} lifetime AI requests (used)`)
                             : `${freeCallLimit - freeCallsUsed} of ${freeCallLimit} free requests remaining`}</li>
                         )}
-                        <li>Chrome tabs only (no screen capture)</li>
+                        <li>Chrome tabs only (no display screen capture)</li>
                         {modelConfig && (allowsAllDomains(modelConfig)
                           ? <li>Works on any website</li>
                           : <li>Only works on: {modelConfig.free_allowed_domains.join(', ')}</li>)}

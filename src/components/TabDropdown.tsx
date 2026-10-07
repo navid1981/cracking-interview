@@ -67,9 +67,10 @@ interface Props {
   selectedSource: InputSource | null;
   onSelect: (source: InputSource) => void;
   disabled?: boolean;
+  onOpen?: () => void;
 }
 
-export default function TabDropdown({ sources, selectedSource, onSelect, disabled }: Props) {
+export default function TabDropdown({ sources, selectedSource, onSelect, disabled, onOpen }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -89,7 +90,11 @@ export default function TabDropdown({ sources, selectedSource, onSelect, disable
     <div className="tab-dropdown" ref={dropdownRef}>
       <button
         className={`dropdown-trigger ${isOpen ? 'open' : ''}`}
-        onClick={() => !disabled && setIsOpen(!isOpen)}
+        onClick={() => {
+          if (disabled) return;
+          if (!isOpen) onOpen?.();
+          setIsOpen(!isOpen);
+        }}
         disabled={disabled}
       >
         <div className="trigger-content">
