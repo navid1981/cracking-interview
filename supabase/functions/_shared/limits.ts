@@ -1,6 +1,6 @@
 // Subscription limits. Served to the app by `get-models?v=2` and enforced by `ai-proxy`,
 // `deepgram-key`, and `log-audio-usage`; the app must not hardcode these values.
-export const FREE_LIFETIME_CALL_LIMIT = 3;
+export const FREE_LIFETIME_CALL_LIMIT = 4;
 
 export const PRO_MONTHLY_REQUEST_LIMIT = 150;
 export const PRO_MONTHLY_AUDIO_SECONDS = 36000;   // 10 hours per billing period

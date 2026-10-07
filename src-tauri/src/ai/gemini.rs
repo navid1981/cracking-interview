@@ -113,6 +113,13 @@ async fn post_with_retry(request: reqwest::RequestBuilder) -> Result<serde_json:
             }
             return Err(format!("❌ Gemini API Error: {}", msg));
         }
+        // Google always returns JSON errors; an HTML body means a firewall/proxy answered instead.
+        if json.get("raw").is_some() && text.trim_start().starts_with('<') {
+            return Err(format!(
+                "❌ Gemini API blocked by your network (HTTP {}). A firewall or corporate proxy is blocking generativelanguage.googleapis.com. Try a different network.",
+                status.as_u16()
+            ));
+        }
         return Err(format!("❌ Gemini API Error: HTTP {} {}", status.as_u16(), status.canonical_reason().unwrap_or("")));
     }
 
