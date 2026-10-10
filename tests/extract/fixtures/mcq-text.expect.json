@@ -1,0 +1,15 @@
+{
+  "contains": [
+    "Question 1 / 10",
+    "Choose the word that is most nearly opposite to the word FAST",
+    "A) Large",
+    "B) Cold",
+    "C) Slow",
+    "D) Afraid",
+    "E) Hard"
+  ],
+  "notContains": ["Submit Answer", "*"],
+  "images": 0,
+  "drawn": 0,
+  "code": 0
+}

@@ -37,14 +37,14 @@ pub async fn query_with_text(
     gemini::query_with_text(prompt, &config.gemini_api_key, &config.selected_model, config.max_output_tokens).await
 }
 
-/// Query AI with image
-pub async fn query_with_image(
+/// Query AI with one or more images
+pub async fn query_with_images(
     prompt: &str,
-    image_data: &[u8],
+    images: &[Vec<u8>],
     config: &AIConfig,
 ) -> Result<String, String> {
     validate_config(config)?;
-    gemini::query_with_image(prompt, image_data, &config.gemini_api_key, &config.selected_model, config.max_output_tokens).await
+    gemini::query_with_images(prompt, images, &config.gemini_api_key, &config.selected_model, config.max_output_tokens).await
 }
 
 /// Best-effort MIME sniffing based on file signatures ("magic bytes").

@@ -1,0 +1,8 @@
+{
+  "contains": [
+    "Implement the function below so it returns the sum of a and b.",
+    "--- Code editor 1 (python) ---\ndef solve(a, b):\n    # write your code here\n    pass"
+  ],
+  "code": 1,
+  "codeLanguages": ["python"]
+}

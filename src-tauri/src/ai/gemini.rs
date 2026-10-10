@@ -212,10 +212,10 @@ pub async fn query_with_text(
     }
 }
 
-/// Query Gemini with image (screenshot)
-pub async fn query_with_image(
+/// Query Gemini with one or more images (screenshots / page images) plus the prompt text.
+pub async fn query_with_images(
     prompt: &str,
-    image_data: &[u8],
+    images: &[Vec<u8>],
     api_key: &str,
     model: &str,
     max_output_tokens: Option<u32>,
@@ -223,28 +223,24 @@ pub async fn query_with_image(
     if api_key.is_empty() {
         return Err("⚠️ Gemini API key not configured.".to_string());
     }
-    
-    // Base64 encode image
-    let base64_image = general_purpose::STANDARD.encode(image_data);
-    let mime_type = detect_image_mime_type(image_data)?;
-    
+
+    let mut parts = vec![json!({"text": prompt})];
+    for image in images {
+        parts.push(json!({
+            "inline_data": {
+                "mime_type": detect_image_mime_type(image)?,
+                "data": general_purpose::STANDARD.encode(image)
+            }
+        }));
+    }
+
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .build()
         .map_err(|e| format!("Client build failed: {}", e))?;
-    
+
     let payload = json!({
-        "contents": [{
-            "parts": [
-                {"text": prompt},
-                {
-                    "inline_data": {
-                        "mime_type": mime_type,
-                        "data": base64_image
-                    }
-                }
-            ]
-        }],
+        "contents": [{ "parts": parts }],
         "generationConfig": generation_config(max_output_tokens)
     });
     

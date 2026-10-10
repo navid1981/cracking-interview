@@ -1,0 +1,14 @@
+{
+  "contains": [
+    "Question 7 / 10",
+    "[image 1]",
+    "Which box should replace the question mark (?) to complete the pattern?",
+    "A) A",
+    "E) E"
+  ],
+  "notContains": ["Enlarge Image", "Submit Answer", "[image 2]"],
+  "images": 1,
+  "imageNaturalWidth": 1424,
+  "drawn": 0,
+  "code": 0
+}

@@ -1,0 +1,37 @@
+{
+  "contains": [
+    "She [blank] in London since 2015, and she [blank] (enjoy) it.",
+    "If I [choose: was | were | am] you, I would apologize.",
+    "Write 150 words about your hometown.",
+    "Word | Meaning",
+    "Benevolent | [choose: kind | angry]",
+    "Solve x + 3 = 7 for x.",
+    "Simplify $\\frac{2}{4}$ to lowest terms.",
+    "[collapsed section]",
+    "The Industrial Revolution began in Britain in the late 18th century.",
+    "Question 8: Which word is a synonym of HAPPY?",
+    "A) Joyful",
+    "B) Sad",
+    "Question 10: Choose the correct article: ___ apple.",
+    "A) Paris",
+    "B) London",
+    "C) Rome",
+    "Listen and answer question 9.",
+    "def f():\n    for i in range(2):\n        if i:\n            print(i)\n\nf()"
+  ],
+  "notContains": [
+    "has lived",
+    "My hometown is a small city by the sea.",
+    "Rich-text answer draft here.",
+    "Choose...",
+    "RENDERED",
+    "cookies",
+    "Practice Tests",
+    "Copyright",
+    "Privacy"
+  ],
+  "images": 0,
+  "drawn": 0,
+  "code": 0,
+  "root": "main"
+}

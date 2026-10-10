@@ -1,0 +1,71 @@
+<!doctype html>
+<!-- General exam elements (plan §4.6): blanks, dropdowns, answer boxes, math, collapsed
+     passage, same-origin iframe, shadow DOM, ARIA radios, plus nav/footer/cookie junk. -->
+<html>
+<head><meta charset="utf-8"><title>English Test</title></head>
+<body>
+  <div id="cookie-banner">We use cookies to improve your experience. <button>Accept cookies</button></div>
+  <header>
+    <nav><a href="#">Home</a> <a href="#">Practice Tests</a> <input type="search" placeholder="Search"></nav>
+    <h1>English Grammar Test</h1>
+  </header>
+  <main>
+    <h2>Part 1: Fill in the blanks</h2>
+    <p>She <input type="text" value="has lived"> in London since 2015, and she <input type="text" value=""> (enjoy) it.</p>
+
+    <h2>Part 2: Dropdown in sentence</h2>
+    <p>If I <select><option>Choose...</option><option>was</option><option selected>were</option><option>am</option></select> you, I would apologize.</p>
+
+    <h2>Part 3: Essay</h2>
+    <p>Write 150 words about your hometown.</p>
+    <textarea rows="5" cols="60">My hometown is a small city by the sea.</textarea>
+    <div contenteditable="true" style="min-height:60px;border:1px solid #ccc">Rich-text answer draft here.</div>
+
+    <h2>Part 4: Matching</h2>
+    <table>
+      <tr><th>Word</th><th>Meaning</th></tr>
+      <tr><td>Benevolent</td><td><select><option>--</option><option>kind</option><option>angry</option></select></td></tr>
+    </table>
+
+    <h2>Part 5: Math</h2>
+    <p>Solve <math><mi>x</mi><mo>+</mo><mn>3</mn><mo>=</mo><mn>7</mn></math> for x.</p>
+    <p>Simplify <span class="katex"><span class="katex-mathml"><math><semantics><mrow><mfrac><mn>2</mn><mn>4</mn></mfrac></mrow><annotation encoding="application/x-tex">\frac{2}{4}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true">2/4 RENDERED</span></span> to lowest terms.</p>
+
+    <h2>Part 6: Reading</h2>
+    <details><summary>Show reading passage</summary><p>The Industrial Revolution began in Britain in the late 18th century.</p></details>
+    <p>Where did the Industrial Revolution begin?</p>
+
+    <h2>Part 7: Embedded question</h2>
+    <iframe style="width:500px;height:150px" srcdoc="<p>Question 8: Which word is a synonym of HAPPY?</p><div><label><input type=radio name=q8>Joyful</label></div><div><label><input type=radio name=q8>Sad</label></div>"></iframe>
+
+    <h2>Part 8: Widget</h2>
+    <div id="host"></div>
+
+    <h2>Part 9: Capital cities</h2>
+    <p>What is the capital of France?</p>
+    <div role="radiogroup">
+      <div class="opt"><div role="radio" aria-checked="true" tabindex="0"></div><span>Paris</span></div>
+      <div class="opt"><div role="radio" aria-checked="false" tabindex="0"></div><span>London</span></div>
+      <div class="opt"><div role="radio" aria-checked="false" tabindex="0"></div><span>Rome</span></div>
+    </div>
+
+    <h2>Part 10: Listening</h2>
+    <audio controls src="listening1.mp3"></audio>
+    <p>Listen and answer question 9.</p>
+
+    <h2>Part 11: Code reading</h2>
+    <p>What does this function print?</p>
+    <pre>def f():
+    for i in range(2):
+        if i:
+            print(i)
+
+f()</pre>
+  </main>
+  <footer>Copyright 2026 English Tests Inc. <a href="#">Privacy</a></footer>
+  <script>
+    document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML =
+      '<p>Question 10: Choose the correct article: ___ apple.</p>';
+  </script>
+</body>
+</html>

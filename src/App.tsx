@@ -14,6 +14,7 @@ import AppSettingsTab from './components/settings/AppSettingsTab';
 import HotkeysSettingsTab from './components/settings/HotkeysSettingsTab';
 import { getMessageActions, MESSAGE_ACTION_LABELS, MessageActionKind } from './services/messageActions';
 import { HotkeysConfig, formatHotkey } from './services/hotkeys';
+import { TabExtraction, MAX_QUESTION_IMAGES, needsTabScreenshot, isWhiteboard } from './services/tabExtraction';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts, StoredDocPlaceholder } from './services/prompts';
 import { 
   onAuthStateChange, 
@@ -1824,7 +1825,7 @@ function App() {
         // Display capture is Pro-only, never uses BYO key
         const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
           prompt,
-          imagePath: screenshotPath,
+          imagePaths: [screenshotPath],
           model: modelToUse,
           accessToken,
         });
@@ -1868,8 +1869,8 @@ function App() {
           const tabUrl = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
           responseText = await invoke<string>('query_ai_with_image', {
             prompt,
-            imagePath: screenshotPath,
-            config: { 
+            imagePaths: [screenshotPath],
+            config: {
               selected_model: modelToUse, 
               gemini_api_key: aiConfig.gemini_api_key || '', 
               max_output_tokens: models.max_output_tokens,
@@ -1881,7 +1882,7 @@ function App() {
           const tabUrl = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
           const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
             prompt,
-            imagePath: screenshotPath,
+            imagePaths: [screenshotPath],
             model: modelToUse,
             accessToken,
             sourceUrl: tabUrl,
@@ -1909,36 +1910,56 @@ function App() {
         setSolvePhase('extract');
         setMessage('📝 Extracting text...');
         await invoke('activate_tab', { tabId: sourceToUse.id });
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        const text = await invoke<string>('extract_tab_text', { tabId: sourceToUse.id });
-        
+
+        // The extraction script itself waits (max 300ms) for the page to settle.
+        const tabId = sourceToUse.id;
+        const tabUrl = (sourceToUse as ChromeTab).url;
+        const extraction = await invoke<TabExtraction>('extract_tab_text', { tabId });
+        const text = extraction.text;
+
+        // Pictures go along with the text: original image files from Chrome's own copy, and a
+        // tab screenshot for drawn content (charts, whiteboards) or near-empty pages.
+        const imagePaths: string[] = [];
+        let wantScreenshot = needsTabScreenshot(extraction);
+        if (extraction.images.length > 0) {
+          setMessage('🖼️ Collecting question images...');
+          const pageImages = await invoke<(string | null)[]>('get_tab_images', {
+            tabId,
+            urls: extraction.images.map(img => img.src),
+          });
+          for (const path of pageImages) if (path) imagePaths.push(path);
+          if (pageImages.some(path => !path)) wantScreenshot = true;
+        }
+        if (wantScreenshot && imagePaths.length < MAX_QUESTION_IMAGES) {
+          setMessage(isWhiteboard(extraction) ? '🖼️ Whiteboard detected — capturing the visible area...' : '📸 Capturing the page...');
+          if (extraction.drawn.length > 0) {
+            const scrolled = await invoke<string>('scroll_drawing_into_view', { tabId, rect: extraction.drawn[0] });
+            if (scrolled === 'scrolled') await new Promise(resolve => setTimeout(resolve, 150));
+          }
+          imagePaths.push(await invoke<string>('capture_tab_screenshot', { tabId }));
+        }
+
         setSolvePhase('asking');
         setMessage('🤖 Asking AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage, text);
-        
+
         if (useBYOKey) {
           // Use direct Gemini API with user's own key
           // Pass source_url for domain validation in Rust
-          const tabUrl = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
-          responseText = await invoke<string>('query_ai', {
-            prompt,
-            config: { 
-              selected_model: modelToUse, 
-              gemini_api_key: aiConfig.gemini_api_key || '', 
-              max_output_tokens: models.max_output_tokens,
-            },
-            sourceUrl: tabUrl,
-          });
+          const config = {
+            selected_model: modelToUse,
+            gemini_api_key: aiConfig.gemini_api_key || '',
+            max_output_tokens: models.max_output_tokens,
+          };
+          responseText = imagePaths.length > 0
+            ? await invoke<string>('query_ai_with_image', { prompt, imagePaths, config, sourceUrl: tabUrl })
+            : await invoke<string>('query_ai', { prompt, config, sourceUrl: tabUrl });
         } else {
           // Pass source_url for server-side domain validation
-          const tabUrlForProxy = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
-          const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy', {
-            prompt,
-            model: modelToUse,
-            accessToken,
-            sourceUrl: tabUrlForProxy,
-          });
+          type ProxyResponse = { response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string };
+          const proxyResponse = imagePaths.length > 0
+            ? await invoke<ProxyResponse>('query_ai_via_proxy_with_image', { prompt, imagePaths, model: modelToUse, accessToken, sourceUrl: tabUrl })
+            : await invoke<ProxyResponse>('query_ai_via_proxy', { prompt, model: modelToUse, accessToken, sourceUrl: tabUrl });
           
           if (proxyResponse.error) {
             throw new Error(proxyResponse.error);

@@ -590,8 +590,8 @@ async fn open_chrome_cdp() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn extract_tab_text(tab_id: String) -> Result<String, String> {
-    chrome::execute_javascript(&tab_id, "document.body.innerText").await
+async fn extract_tab_text(tab_id: String) -> Result<serde_json::Value, String> {
+    chrome::extract_page(&tab_id).await
 }
 
 #[tauri::command]
@@ -732,18 +732,79 @@ async fn query_ai(prompt: String, config: ai::AIConfig, source_url: Option<Strin
     ai::query_with_text(&prompt, &config).await
 }
 
+/// Max pictures per AI question (same for free and Pro).
+const MAX_AI_IMAGES: usize = 4;
+/// Total image budget per request, split across the pictures, so a 4-picture request is no
+/// larger than a single full screenshot used to be.
+const AI_IMAGE_TOTAL_BYTES: usize = 4_500_000;
+/// Per-image cap when saving page images taken from Chrome's cache.
+const PAGE_IMAGE_MAX_BYTES: usize = 1_500_000;
+
+/// Reads up to MAX_AI_IMAGES files and shrinks any that exceed their share of the budget.
+async fn load_images_for_ai(image_paths: Vec<String>) -> Result<Vec<Vec<u8>>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths: Vec<String> = image_paths.into_iter().take(MAX_AI_IMAGES).collect();
+        if paths.is_empty() {
+            return Err("No image to send".to_string());
+        }
+        let per_image = AI_IMAGE_TOTAL_BYTES / paths.len();
+        paths
+            .iter()
+            .map(|p| {
+                let bytes = std::fs::read(p).map_err(|e| format!("Failed to read image: {}", e))?;
+                chrome::fit_image_bytes(bytes, per_image)
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("Image load task error: {}", e))?
+}
+
 #[tauri::command]
 async fn query_ai_with_image(
     prompt: String,
-    image_path: String,
+    image_paths: Vec<String>,
     config: ai::AIConfig,
     source_url: Option<String>,
 ) -> Result<String, String> {
     // Validate domain for BYO API key users
     validate_source_url(&source_url).await?;
-    let image_data = std::fs::read(&image_path)
-        .map_err(|e| format!("Failed to read image: {}", e))?;
-    ai::query_with_image(&prompt, &image_data, &config).await
+    let images = load_images_for_ai(image_paths).await?;
+    ai::query_with_images(&prompt, &images, &config).await
+}
+
+/// Saves the page's question images (taken from Chrome's own copy) to temp files.
+/// Returns one entry per URL: the file path, or null if that image couldn't be used.
+#[tauri::command]
+async fn get_tab_images(tab_id: String, urls: Vec<String>) -> Result<Vec<Option<String>>, String> {
+    let urls: Vec<String> = urls.into_iter().take(MAX_AI_IMAGES).collect();
+    let fetched = chrome::get_resource_images(&tab_id, &urls).await;
+    tauri::async_runtime::spawn_blocking(move || {
+        fetched
+            .into_iter()
+            .enumerate()
+            .map(|(i, bytes)| {
+                let fitted = match chrome::fit_image_bytes(bytes?, PAGE_IMAGE_MAX_BYTES) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        println!("⚠️ Page image {} unusable: {}", i + 1, e);
+                        return None;
+                    }
+                };
+                let mut path = std::env::temp_dir();
+                path.push(format!("cracking_interview_page_image_{}.img", i + 1));
+                std::fs::write(&path, fitted).ok()?;
+                path.to_str().map(|s| s.to_string())
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("Page image task error: {}", e))
+}
+
+#[tauri::command]
+async fn scroll_drawing_into_view(tab_id: String, rect: serde_json::Value) -> Result<String, String> {
+    chrome::scroll_drawing_into_view(&tab_id, &rect).await
 }
 
 #[tauri::command]
@@ -1203,11 +1264,11 @@ async fn query_ai_via_proxy(
     })
 }
 
-/// Query AI via proxy with an image (base64 encoded)
+/// Query AI via proxy with one or more images (base64 encoded) after the prompt text
 #[tauri::command]
 async fn query_ai_via_proxy_with_image(
     prompt: String,
-    image_path: String,
+    image_paths: Vec<String>,
     model: String,
     access_token: String,
     source_url: Option<String>,
@@ -1217,17 +1278,21 @@ async fn query_ai_via_proxy_with_image(
     println!("[Rust AI Proxy Image] Starting request to ai-proxy...");
     println!("[Rust AI Proxy Image] Model: {}", model);
     println!("[Rust AI Proxy Image] Prompt length: {} chars", prompt.len());
-    println!("[Rust AI Proxy Image] Image path: {}", image_path);
+    println!("[Rust AI Proxy Image] Image paths: {:?}", image_paths);
     println!("[Rust AI Proxy Image] Source URL: {:?}", source_url);
 
-
-    // Read and encode image
-    let image_data = std::fs::read(&image_path)
-        .map_err(|e| format!("Failed to read image: {}", e))?;
-    
-    let mime_type = ai::detect_image_mime_type(&image_data)?;
-    let base64_image = general_purpose::STANDARD.encode(&image_data);
-    println!("[Rust AI Proxy Image] Image size: {} bytes, mime: {}", image_data.len(), mime_type);
+    let images = load_images_for_ai(image_paths).await?;
+    let mut content = vec![serde_json::json!({ "type": "text", "text": prompt })];
+    for image in &images {
+        let mime_type = ai::detect_image_mime_type(image)?;
+        println!("[Rust AI Proxy Image] Image size: {} bytes, mime: {}", image.len(), mime_type);
+        content.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": {
+                "url": format!("data:{};base64,{}", mime_type, general_purpose::STANDARD.encode(image))
+            }
+        }));
+    }
 
     // Use static client (reuses TLS connections)
     let client = &*AI_PROXY_CLIENT;
@@ -1235,15 +1300,7 @@ async fn query_ai_via_proxy_with_image(
     let messages = serde_json::json!([
         {
             "role": "user",
-            "content": [
-                { "type": "text", "text": prompt },
-                { 
-                    "type": "image_url", 
-                    "image_url": { 
-                        "url": format!("data:{};base64,{}", mime_type, base64_image)
-                    }
-                }
-            ]
+            "content": content
         }
     ]);
 
@@ -1795,6 +1852,8 @@ fn main() {
             open_chrome_cdp,
             get_chrome_connection_mode,
             extract_tab_text,
+            get_tab_images,
+            scroll_drawing_into_view,
             activate_tab,
             capture_tab_screenshot,
             get_tab_thumbnail,

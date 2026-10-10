@@ -18,3 +18,8 @@ CrackingInterview-CREDENTIALS.txt
 
 # Notarization script (contains app-specific password)
 notarize.sh
+
+.playwright-mcp/
+graphify-out/cache/
+graphify-out/**/
+supabase/.temp/
