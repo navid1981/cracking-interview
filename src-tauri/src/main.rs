@@ -1579,6 +1579,37 @@ async fn set_window_opacity(app: tauri::AppHandle, opacity: f64) -> Result<(), S
     Ok(())
 }
 
+/// Windows stealth windows are non-activating (WS_EX_NOACTIVATE) so clicking the app never takes
+/// focus from the exam tab, but that also means the window can never receive keyboard input.
+/// While the user is in a text field, the frontend enables this mode: the window may activate
+/// and takes keyboard focus; leaving the field restores non-activating. No-op elsewhere.
+#[tauri::command]
+async fn set_keyboard_input_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        if !STEALTH_ENABLED.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        let win = app.get_webview_window("main").ok_or("Could not find main window")?;
+        let hwnd_raw = win.hwnd().map_err(|e| format!("HWND error: {}", e))?;
+        unsafe {
+            let hwnd = HWND(hwnd_raw.0 as *mut _);
+            let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let no_activate = WS_EX_NOACTIVATE.0 as isize;
+            let new_style = if enabled { ex_style & !no_activate } else { ex_style | no_activate };
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
+        }
+        if enabled {
+            win.set_focus().map_err(|e| format!("Focus error: {}", e))?;
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (&app, enabled);
+    Ok(())
+}
+
 #[tauri::command]
 async fn set_stealth_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     STEALTH_ENABLED.store(enabled, Ordering::Relaxed);
@@ -1927,6 +1958,7 @@ fn main() {
             fetch_models,
             set_window_opacity,
             set_stealth_mode,
+            set_keyboard_input_mode,
             open_external_url,
             resize_window,
             get_window_inner_size,

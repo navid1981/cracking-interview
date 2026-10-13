@@ -10,6 +10,7 @@ import DocumentManager, { DocumentPlaceholder } from './components/DocumentManag
 import AuthScreen from './components/AuthScreen';
 import SetupChecklist from './components/SetupChecklist';
 import { useSetupStatus } from './hooks/useSetupStatus';
+import { useKeyboardInputMode } from './hooks/useKeyboardInputMode';
 import AppSettingsTab from './components/settings/AppSettingsTab';
 import HotkeysSettingsTab from './components/settings/HotkeysSettingsTab';
 import { getMessageActions, MESSAGE_ACTION_LABELS, MessageActionKind } from './services/messageActions';
@@ -89,6 +90,8 @@ interface Announcement {
 }
 
 function App() {
+  useKeyboardInputMode();
+
   // ========== AUTH STATE ==========
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [_authSession, setAuthSession] = useState<Session | null>(null);

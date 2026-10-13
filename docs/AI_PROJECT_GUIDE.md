@@ -1126,6 +1126,7 @@ Stealth mode is applied at app startup in `src-tauri/src/main.rs` → `setup()`:
 - **`bring_to_front_without_focus(&win)`**: Replaced all `win.set_focus()` calls with non-activating window methods (`orderFrontRegardless` on macOS, `SW_SHOWNOACTIVATE` & `SWP_NOACTIVATE` on Windows).
 - **`move_window_by()` & `resize_window()`**: On Windows, window position animations and size adjustments use `SetWindowPos` with `SWP_NOACTIVATE` to prevent the Desktop Window Manager (DWM) from shifting active focus away from Chrome.
 - **CDP `activate_tab`**: Removed the AppleScript `tell application "Google Chrome" to activate` subprocess so tab switching occurs purely through CDP WebSocket messages without OS-level focus transitions.
+- **Typing on Windows (stealth mode)**: `apply_windows_stealth` sets `WS_EX_NOACTIVATE`, so clicking the window never takes focus from Chrome, but that also means the window can't receive keyboard input. `src/hooks/useKeyboardInputMode.ts` (called at the top of `App()`) listens app-wide: `pointerdown` on a text field (`input`/`textarea`/`contenteditable`) → `set_keyboard_input_mode(true)` (removes `WS_EX_NOACTIVATE`, `set_focus()`), and `focusout` to anything that isn't a text field (including clicking back into another app) → `set_keyboard_input_mode(false)` (restores it). Clicking into a text field therefore does make Chrome lose focus, the same as on macOS. The command is a no-op on macOS and when stealth is off.
 
 #### Toggle Visibility Hotkey
 
