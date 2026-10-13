@@ -511,7 +511,7 @@ The backend registers global hotkeys on startup (customizable in Settings → Ho
 2. **OS-Level Key Event Swallowing (Stealth Mode Only):**
    - When Stealth Mode is enabled, registered hotkey combinations are intercepted and dropped at the OS level:
      - macOS: Uses `CGEventTapCreate` at `kCGHeadInsertEventTap` (`kCGSessionEventTap`). When a shortcut matches, the tap callback dispatches the action and returns `NULL` (`std::ptr::null_mut()`), deleting the event before Chrome's event queue receives it. Chrome DOM never fires `keydown` and never switches tabs.
-     - Windows: Uses `SetWindowsHookExW(WH_KEYBOARD_LL, ...)`. The hook callback returns `LRESULT(1)` to halt message dispatch.
+     - Windows: Uses `SetWindowsHookExW(WH_KEYBOARD_LL, ...)`. The hook callback returns `LRESULT(1)` to halt message dispatch. Modifier keyups are never swallowed to prevent desynchronizing the OS keyboard buffer (which causes stuck keys like Alt+Enter maximizing windows). Instead, when an Alt/Win combination is swallowed, a neutral keyup (mask key `VK_NONAME`/`VK_CONTROL`) is synthesized via `SendInput` so Windows clears its menu candidate state without activating the active window's menu bar or firing `window.blur`.
    - CoreGraphics modifier bits are isolated (`CG_FLAG_COMMAND`, `CG_FLAG_SHIFT`, `CG_FLAG_CONTROL`, `CG_FLAG_ALT`), filtering out Caps Lock (`AlphaShift`) and arrow-key NumPad bits.
    - When Stealth Mode is disabled, hotkeys pass through normally.
    - **Threading rule:** hook callbacks run on a background/OS hook thread. Matched actions are always dispatched with `app.run_on_main_thread(|| dispatch_action(...))` (both macOS and Windows). Never call window APIs (`NSWindow`, `show`/`hide`, positioning) directly from the hook callback — on macOS this triggers AppKit main-thread assertion crashes.
@@ -1113,7 +1113,7 @@ Stealth mode is applied at app startup in `src-tauri/src/main.rs` → `setup()`:
 - `apply_windows_stealth(win)` — Uses Win32 API:
   - `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` (0x11) — Excludes window from screen capture (Windows 10 2004+).
   - Modifies extended window styles: adds `WS_EX_TOOLWINDOW`, removes `WS_EX_APPWINDOW`, and injects `WS_EX_NOACTIVATE` so mouse clicks on the window never steal foreground focus.
-- `setup_stealth_hotkeys(app, cfg)` — Installs a low-level keyboard hook via `SetWindowsHookExW(WH_KEYBOARD_LL, ...)`. The hook procedure returns `LRESULT(1)` to swallow the event.
+- `setup_stealth_hotkeys(app, cfg)` — Installs a low-level keyboard hook via `SetWindowsHookExW(WH_KEYBOARD_LL, ...)`. The hook procedure returns `LRESULT(1)` to swallow the hotkey. Modifier keyups pass through to maintain OS modifier sync, with neutral keyup masking (`VK_NONAME`/`VK_CONTROL`) to prevent Alt/Win menu activation and focus loss. On app teardown, any lingering modifiers are synthesized as released.
 - Same Tauri cross-platform fallbacks as macOS.
 
 **When stealth is OFF:**

@@ -52,8 +52,9 @@ static WIN_HOOK_HANDLE: std::sync::atomic::AtomicIsize = std::sync::atomic::Atom
 #[cfg(target_os = "windows")]
 static WIN_HOOK_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-// Set when a hotkey combo is swallowed while the given modifier is held, so its
-// eventual keyup is swallowed too (see windows_keyboard_proc for why).
+// Set when a hotkey combo is swallowed while the given modifier is held,
+// used to coordinate mask-key sending so releasing Alt/Win never activates
+// the menu bar or Start menu.
 #[cfg(target_os = "windows")]
 static WIN_ALT_COMBO_FIRED: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "windows")]
@@ -358,6 +359,7 @@ pub fn teardown_stealth_hotkeys() {
     {
         use windows::Win32::UI::WindowsAndMessaging::{UnhookWindowsHookEx, PostThreadMessageW, HHOOK, WM_QUIT};
         use windows::Win32::Foundation::{WPARAM, LPARAM};
+        use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
         let handle = WIN_HOOK_HANDLE.swap(0, Ordering::Relaxed);
         if handle != 0 {
@@ -369,6 +371,41 @@ pub fn teardown_stealth_hotkeys() {
         if tid != 0 {
             unsafe {
                 let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
+            }
+        }
+
+        WIN_ALT_COMBO_FIRED.store(false, Ordering::Relaxed);
+        WIN_CTRL_COMBO_FIRED.store(false, Ordering::Relaxed);
+        WIN_SHIFT_COMBO_FIRED.store(false, Ordering::Relaxed);
+        WIN_WIN_COMBO_FIRED.store(false, Ordering::Relaxed);
+
+        // Safety cleanup: synthesize KEYUP for any modifiers that might still be marked down in the OS buffer
+        unsafe {
+            let modifiers = [
+                VK_LMENU, VK_RMENU, VK_MENU,
+                VK_LCONTROL, VK_RCONTROL, VK_CONTROL,
+                VK_LSHIFT, VK_RSHIFT, VK_SHIFT,
+                VK_LWIN, VK_RWIN,
+            ];
+            let inputs: Vec<INPUT> = modifiers
+                .iter()
+                .filter(|&&vk| (GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000) != 0)
+                .map(|&vk| INPUT {
+                    r#type: INPUT_KEYBOARD,
+                    Anonymous: INPUT_0 {
+                        ki: KEYBDINPUT {
+                            wVk: vk,
+                            wScan: 0,
+                            dwFlags: KEYEVENTF_KEYUP,
+                            time: 0,
+                            dwExtraInfo: 0,
+                        },
+                    },
+                })
+                .collect();
+
+            if !inputs.is_empty() {
+                let _ = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
             }
         }
     }
@@ -807,6 +844,35 @@ fn init_macos_event_tap() {
 // ── Windows Low-Level Keyboard Hook Implementation ──────────────────────────
 
 #[cfg(target_os = "windows")]
+fn send_mask_key(for_win: bool) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::*;
+    unsafe {
+        // Send a neutral key-up event (VK_NONAME: 0xFC for Alt, VK_CONTROL for Win) via SendInput.
+        // Sending KEYEVENTF_KEYUP:
+        // 1. Informs Windows input subsystem that another key event occurred while the modifier
+        //    was down, clearing Windows' internal "modifier tapped alone" state (preventing
+        //    WM_SYSCOMMAND SC_KEYMENU which would focus Chrome's menu bar and fire window.blur,
+        //    or opening the Windows Start menu on Win release).
+        // 2. Produces NO WM_KEYDOWN / DOM keydown event, keeping assessment site listeners (and test_harness.html) clean.
+        // 3. Does not leave any key stuck down.
+        let vk = if for_win { VK_CONTROL } else { VK_NONAME };
+        let input = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        let _ = SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+#[cfg(target_os = "windows")]
 unsafe extern "system" fn windows_keyboard_proc(
     code: i32,
     wparam: windows::Win32::Foundation::WPARAM,
@@ -825,19 +891,16 @@ unsafe extern "system" fn windows_keyboard_proc(
             let kbd = *(lparam.0 as *const KBDLLHOOKSTRUCT);
             let vk = kbd.vkCode;
 
-            // Modifier keydowns are NEVER swallowed: Chrome/WebView2 (both
-            // Chromium) track "is Alt/Ctrl/Shift held" from the actual
-            // WM_*KEYDOWN message stream they receive, not by re-polling
-            // hardware state per keystroke. Swallowing the modifier's keydown
-            // breaks that tracking everywhere (Chrome AND our own hotkey
-            // recorder), so later keys stop matching entirely.
+            // Modifier keyups and keydowns are NEVER swallowed.
+            // Swallowing modifier keyups causes Windows OS keyboard state to desynchronize,
+            // leaving Alt/Ctrl/Shift/Win permanently stuck down and breaking normal typing
+            // (e.g. Enter acts as Alt+Enter, maximizing windows).
             //
-            // Instead, only the modifier's KEYUP is swallowed, and only when a
-            // hotkey combo using it was actually swallowed during this hold.
-            // That hides the "down, nothing, up" pattern that makes Chrome/
-            // Windows treat it as a lone Alt tap (which toggles keyboard-menu
-            // focus and fires window.blur/focus), without ever touching the
-            // keydown that Chrome needs for correct modifier tracking.
+            // To prevent Chrome/Windows from activating the menu bar (or Start menu)
+            // when Alt (or Win) is released after a swallowed combo, we send an artificial
+            // neutral key-up (mask key) via SendInput when the combo is swallowed.
+            // This informs Windows that the modifier was part of a combo without leaking
+            // any keydown event to Chrome or stealing focus.
             let modifier_flag = match vk {
                 v if v == VK_LMENU.0 as u32 || v == VK_RMENU.0 as u32 || v == VK_MENU.0 as u32 => Some(&WIN_ALT_COMBO_FIRED),
                 v if v == VK_LCONTROL.0 as u32 || v == VK_RCONTROL.0 as u32 || v == VK_CONTROL.0 as u32 => Some(&WIN_CTRL_COMBO_FIRED),
@@ -847,56 +910,69 @@ unsafe extern "system" fn windows_keyboard_proc(
             };
 
             if let Some(flag) = modifier_flag {
-                if is_keyup && crate::STEALTH_ENABLED.load(Ordering::Relaxed) && flag.swap(false, Ordering::Relaxed) {
-                    return LRESULT(1);
+                if is_keyup {
+                    let combo_fired = flag.swap(false, Ordering::Relaxed);
+                    // Secondary safety check: if Alt was part of a swallowed combo, ensure Windows
+                    // clears any residual menu candidate state.
+                    if combo_fired && (vk == VK_LMENU.0 as u32 || vk == VK_RMENU.0 as u32 || vk == VK_MENU.0 as u32) {
+                        send_mask_key(false);
+                    }
                 }
                 return CallNextHookEx(None, code, wparam, lparam);
             }
 
             if is_keydown {
-            // Check modifier states via GetAsyncKeyState:
-            let ctrl = (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0;
-            let alt = (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0;
-            let shift = (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0;
-            let win = ((GetAsyncKeyState(VK_LWIN.0 as i32) as u16 & 0x8000) != 0)
-                || ((GetAsyncKeyState(VK_RWIN.0 as i32) as u16 & 0x8000) != 0);
+                // Check modifier states via GetAsyncKeyState:
+                let ctrl = (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0;
+                let alt = (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0;
+                let shift = (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0;
+                let win = ((GetAsyncKeyState(VK_LWIN.0 as i32) as u16 & 0x8000) != 0)
+                    || ((GetAsyncKeyState(VK_RWIN.0 as i32) as u16 & 0x8000) != 0);
 
-            let matched = {
-                let guard = ACTIVE_HOTKEYS.lock().unwrap();
-                guard.iter().find(|h| {
-                    h.ctrl == ctrl
-                        && h.alt == alt
-                        && h.shift == shift
-                        && h.cmd == win
-                        && h.key_code == vk
-                }).map(|h| (h.action, h.ctrl, h.alt, h.shift, h.cmd))
-            };
+                let matched = {
+                    let guard = ACTIVE_HOTKEYS.lock().unwrap();
+                    guard.iter().find(|h| {
+                        h.ctrl == ctrl
+                            && h.alt == alt
+                            && h.shift == shift
+                            && h.cmd == win
+                            && h.key_code == vk
+                    }).map(|h| (h.action, h.ctrl, h.alt, h.shift, h.cmd))
+                };
 
-            if let Some((action, h_ctrl, h_alt, h_shift, h_cmd)) = matched {
-                let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed);
-                if is_stealth {
-                    println!("🕵️ [stealth-hotkey-windows] Swallowed key event for {}", action.label());
-                    if h_ctrl { WIN_CTRL_COMBO_FIRED.store(true, Ordering::Relaxed); }
-                    if h_alt { WIN_ALT_COMBO_FIRED.store(true, Ordering::Relaxed); }
-                    if h_shift { WIN_SHIFT_COMBO_FIRED.store(true, Ordering::Relaxed); }
-                    if h_cmd { WIN_WIN_COMBO_FIRED.store(true, Ordering::Relaxed); }
-                } else {
-                    println!("⌨️ [normal-hotkey-windows] Key event triggered for {}", action.label());
+                if let Some((action, h_ctrl, h_alt, h_shift, h_cmd)) = matched {
+                    let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed);
+                    if is_stealth {
+                        println!("🕵️ [stealth-hotkey-windows] Swallowed key event for {}", action.label());
+                        if h_ctrl { WIN_CTRL_COMBO_FIRED.store(true, Ordering::Relaxed); }
+                        if h_alt { WIN_ALT_COMBO_FIRED.store(true, Ordering::Relaxed); }
+                        if h_shift { WIN_SHIFT_COMBO_FIRED.store(true, Ordering::Relaxed); }
+                        if h_cmd { WIN_WIN_COMBO_FIRED.store(true, Ordering::Relaxed); }
+
+                        // Mask Alt / Win key release so Windows will not activate
+                        // the active window menu bar (firing window.blur) or Start Menu.
+                        if h_alt {
+                            send_mask_key(false);
+                        } else if h_cmd {
+                            send_mask_key(true);
+                        }
+                    } else {
+                        println!("⌨️ [normal-hotkey-windows] Key event triggered for {}", action.label());
+                    }
+
+                    if let Some(app) = APP_HANDLE.lock().unwrap().clone() {
+                        let app_handle = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            dispatch_action(&app_handle, action);
+                        });
+                    }
+
+                    if is_stealth {
+                        // SWALLOW THE KEY EVENT: Returning 1 halts propagation.
+                        // Windows will NOT dispatch WM_KEYDOWN to Chrome.
+                        return LRESULT(1);
+                    }
                 }
-
-                if let Some(app) = APP_HANDLE.lock().unwrap().clone() {
-                    let app_handle = app.clone();
-                    let _ = app.run_on_main_thread(move || {
-                        dispatch_action(&app_handle, action);
-                    });
-                }
-
-                if is_stealth {
-                    // SWALLOW THE KEY EVENT: Returning 1 halts propagation.
-                    // Windows will NOT dispatch WM_KEYDOWN/WM_KEYUP to Chrome.
-                    return LRESULT(1);
-                }
-            }
             }
         }
     }
