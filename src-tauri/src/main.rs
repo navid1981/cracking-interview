@@ -1676,6 +1676,50 @@ fn set_macos_activation_policy(policy: i64) {
     }
 }
 
+/// macOS: let the always-on-top window also appear over other apps' full-screen windows.
+/// A full-screen app lives in its own Space, so the window must be allowed to join every Space
+/// (CanJoinAllSpaces) including full-screen ones (FullScreenAuxiliary). Since macOS 10.14 this
+/// only works when the app has no Dock icon (accessory policy), which stealth mode sets.
+#[cfg(target_os = "macos")]
+fn apply_macos_fullscreen_overlay(win: &tauri::WebviewWindow) {
+    use std::ffi::c_void;
+
+    const CAN_JOIN_ALL_SPACES: u64 = 1 << 0;
+    const MOVE_TO_ACTIVE_SPACE: u64 = 1 << 1;
+    const FULL_SCREEN_PRIMARY: u64 = 1 << 7;
+    const FULL_SCREEN_AUXILIARY: u64 = 1 << 8;
+
+    extern "C" {
+        fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
+        fn objc_msgSend();
+    }
+    type GetU64 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> u64;
+    type SetU64 = unsafe extern "C" fn(*mut c_void, *mut c_void, u64);
+
+    unsafe {
+        let ns_window = match win.ns_window() {
+            Ok(ptr) if !ptr.is_null() => ptr as *mut c_void,
+            _ => {
+                println!("⚠️ [macOS] Could not get NSWindow for full-screen overlay");
+                return;
+            }
+        };
+        let get_sel = sel_registerName(b"collectionBehavior\0".as_ptr() as *const _);
+        let set_sel = sel_registerName(b"setCollectionBehavior:\0".as_ptr() as *const _);
+        let get: GetU64 = std::mem::transmute(objc_msgSend as *const ());
+        let set: SetU64 = std::mem::transmute(objc_msgSend as *const ());
+
+        // MoveToActiveSpace conflicts with CanJoinAllSpaces, and FullScreenPrimary with
+        // FullScreenAuxiliary, so those bits are cleared.
+        let current = get(ns_window, get_sel);
+        let updated = (current | CAN_JOIN_ALL_SPACES | FULL_SCREEN_AUXILIARY)
+            & !MOVE_TO_ACTIVE_SPACE
+            & !FULL_SCREEN_PRIMARY;
+        set(ns_window, set_sel, updated);
+        println!("🪟 [macOS] collectionBehavior {:#x} → {:#x} (visible over full-screen apps)", current, updated);
+    }
+}
+
 /// macOS: Exclude window from screen capture (Zoom, Teams, screenshots, etc.)
 /// by setting NSWindow.sharingType = NSWindowSharingNone (0).
 /// This is the ONLY reliable way to hide window content on macOS.
@@ -1844,7 +1888,8 @@ fn remove_windows_stealth(win: &tauri::WebviewWindow) {
 // ============================================================================
 
 fn main() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_chrome_tabs,
@@ -1911,6 +1956,11 @@ fn main() {
 
             STEALTH_ENABLED.store(stealth_mode, Ordering::Relaxed);
 
+            #[cfg(target_os = "macos")]
+            if let Some(win) = app.get_webview_window("main") {
+                apply_macos_fullscreen_overlay(&win);
+            }
+
             if stealth_mode {
                 println!("🕵️ Stealth mode ENABLED — hiding from screen capture and Dock/Taskbar");
                 
@@ -1966,12 +2016,21 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(|_app_handle, event| {
-            if let tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } = event {
-                stealth_hotkey::teardown_stealth_hotkeys();
-            }
-        });
+        .expect("error while building tauri application");
+
+    // macOS only floats a window over other apps' full-screen windows if the app is Dock-less
+    // from launch. `setup` runs after launch (tao launches as .regular), which is too late, so the
+    // launch policy is set here, before run().
+    #[cfg(target_os = "macos")]
+    if load_stealth_preference(app.handle()).unwrap_or(true) {
+        app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    }
+
+    app.run(|_app_handle, event| {
+        if let tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } = event {
+            stealth_hotkey::teardown_stealth_hotkeys();
+        }
+    });
 }
 
 

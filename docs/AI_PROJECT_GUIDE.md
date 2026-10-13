@@ -8,7 +8,7 @@ CrackingInterview is a **Tauri (Rust) + React** desktop app that helps a softwar
 
 - **Listing Chrome tabs** (via **Chrome DevTools Protocol** / CDP) and letting the user choose an input source
 - **Extracting content** from the selected source either as:
-  - **Text** (execute JS in the tab to read `document.body.innerText`), or
+  - **Text** (run `src-tauri/src/chrome/extract.js` in the tab: a structure-aware page reader that returns the question text, code-editor contents, and question images; images/charts are sent to the AI along with the text), or
   - **Screenshot** (CDP tab screenshot or OS display capture)
   - **Audio** (system audio recording sent directly to AI models that support audio input)
 - Sending that content into an **LLM** (via OpenRouter proxy or user's own API key)
@@ -33,6 +33,7 @@ The primary source code is:
   - `src/services/prompts.ts`: prompt templates, per-template system prompts, `buildPrompt(...)`, `getTemplateLabel(templateId)`
   - `src/services/supabase.ts`: Supabase client, auth helpers, usage stats
   - `src/services/modelConfig.ts`: `ModelConfig` type, validation, cache, and `fetchRemoteModelConfig()` for the `get-models` response (models + subscription limits)
+  - `src/services/tabExtraction.ts`: `TabExtraction` type (result of `extract_tab_text`), `MAX_QUESTION_IMAGES` (4), and the rules for when text mode adds a tab screenshot (`needsTabScreenshot`, `isWhiteboard`)
   - `src/components/TabDropdown.tsx`: custom dropdown for **InputSource** with thumbnails
   - `src/components/TabDropdown.css`: styles for `TabDropdown.tsx`
   - `src/components/AIResponseDisplay.tsx`: renders AI response, parses common markers/blocks, syntax-highlights code
@@ -52,7 +53,7 @@ The primary source code is:
 - **Backend (Tauri/Rust)**: `src-tauri/src/`
   - `main.rs`: Tauri commands (IPC), window lifecycle, and global hotkey orchestration
   - `stealth_hotkey.rs`: OS-level key swallowing (`CGEventTap` on macOS, `WH_KEYBOARD_LL` on Windows), non-activating window raising, and hook lifecycle teardown
-  - `chrome/*`: Chrome CDP integration (tabs, activate, execute JS, screenshots)
+  - `chrome/*`: Chrome CDP integration (tabs, activate, execute JS, screenshots); `chrome/extract.js` is the page reader used by text mode (embedded via `include_str!`)
   - `ai/*`: Gemini HTTP client for bring-your-own-key calls
   - `audio.rs`: macOS Swift audio helper lookup/compile + warm/cooldown (used by live transcription)
   - `transcription.rs`: Real-time audio capture → Deepgram WebSocket streaming → live transcript events
@@ -81,6 +82,9 @@ The primary source code is:
   - `restart-app.sh` (project root): Kill and restart the Tauri dev app
   - `scripts/build-macos.sh`: End-to-end macOS release — universal build, codesign (hardened runtime), DMG creation + styling, DMG signing, notarization, stapling
   - `scripts/build-windows.ps1`: Windows release — NSIS build via Tauri, sign app `.exe` and installer with SSL.com eSigner (CodeSignTool), verify signatures
+- **Tests**:
+  - `tests/extract/run.mjs` + `tests/extract/fixtures/*.html` / `*.expect.json`: automated tests for `extract.js`, run in headless Google Chrome (no npm dependencies). `yarn test:extract` runs all fixtures; `yarn test:extract --show <name>` prints one fixture's full output; `yarn test:extract --url <url>` prints the extraction of a live page (manual smoke test; some sites, e.g. HackerRank, block headless Chrome)
+  - `cargo test` (in `src-tauri/`): image fitting/data-URL unit tests in `chrome/mod.rs`. `cargo test -- --ignored chrome_integration` runs the real Rust extraction, page-image and scroll code against headless Chrome
 
 ### "Is this file used?" — how to verify quickly
 
@@ -155,6 +159,12 @@ Component responsibilities:
   - HTTP mode: tab listing via `GET /json/list`, per-tab WS for JS/screenshots
   - WS mode: `Target.getTargets` for tabs, `Target.attachToTarget` (flat protocol) + `sessionId` for JS/screenshots
   - `cdp_http_base()` helper uses `get_cdp_port()` — never hardcodes port 9222
+  - `extract_page(tab_id)` — runs `extract.js` and parses its JSON result
+  - `get_resource_images(tab_id, urls)` — question images from Chrome's own resource cache (`Page.enable` → `Page.getResourceTree` → `Page.getResourceContent`); no new download, so login-gated images work. `data:` URLs are decoded directly. Uses `TabSession` (one CDP connection for several commands, HTTP or WS mode)
+  - `fit_image_bytes(bytes, max_bytes)` — keeps png/jpeg/gif/webp within budget unchanged; otherwise decodes and re-encodes as JPEG (transparent areas on white), shrinking until it fits; fails for formats the `image` crate can't decode (e.g. SVG). Also used by tab screenshots
+  - `scroll_drawing_into_view(tab_id, rect)` — scrolls a chart/drawing into view before the tab screenshot if less than half of it is visible
+- `src-tauri/src/chrome/extract.js`
+  - The text-mode page reader (see "Text extraction details" below). Evaluated with `Runtime.evaluate` + `awaitPromise`; resolves to a JSON string
 - `src-tauri/src/chrome/launcher.rs`
   - `detect_user_chrome_port()` — reads `DevToolsActivePort` from system Chrome profile dirs
   - `WsBrowserHandle` — cloneable handle wrapping an `mpsc::UnboundedSender`; all CDP commands go through one persistent WS connection
@@ -263,8 +273,7 @@ This is why the UI shows "Input Source" rather than only tabs.
 
 Frontend setting: `useScreenshot` (stored in `localStorage`)
 
-- **Text mode** (Chrome tab only): `extract_tab_text` command which runs:
-  - `chrome::execute_javascript(tab_id, "document.body.innerText")`
+- **Text mode** (Chrome tab only): `extract_tab_text` command → `chrome::extract_page(tab_id)`, which runs `extract.js` in the tab and returns structured JSON (`text`, `code`, `images`, `drawn`, ...). Text mode can also attach pictures (up to 4): see "Text extraction details" below.
 - **Screenshot mode**
   - Chrome tab: `capture_tab_screenshot` (CDP `Page.captureScreenshot` as JPEG bytes; decoded, compressed, and written to a temp file via `spawn_blocking`)
   - Display: `capture_display_screenshot` (OS display capture via `screenshots` crate → Lanczos3 downscaled and encoded as JPEG bytes via `spawn_blocking`, written to a temp file)
@@ -272,6 +281,43 @@ Frontend setting: `useScreenshot` (stored in `localStorage`)
 - **Audio mode** (system audio, Pro only): live transcription via Deepgram — see flow D below
   - macOS: ScreenCaptureKit via compiled Swift helper (warm mode pre-initializes it)
   - Windows: WASAPI loopback capture
+
+#### Text extraction details (`extract.js`)
+
+Replaced the old `document.body.innerText` (2026-10). Background, test results and rejected alternatives: `docs/EXTRACT_TEXT_ENHANCEMENT_PLAN.md`. Designed for **any** online exam (coding sites, language tests, LMS quizzes, aptitude tests, whiteboards), with no per-site code.
+
+**Core rule: extract the question, not the user's answers.** Typed values, selected options and essay drafts are never included, because they can mislead the AI and some exams pre-select a default. The one exception is code editors: their content is always included.
+
+What the reader does:
+- **Readiness wait:** waits until the DOM has been quiet for 80ms, **hard cap 300ms** (the solve flow must never be slower than the old fixed 300ms sleep). Uses `MessageChannel` ticks because timers are throttled when the Chrome window is occluded.
+- **Content root:** `<main>` / `[role=main]` if it holds most of the page text, else `<body>`.
+- **Walks the DOM itself** (not `innerText`) and writes each element type explicitly:
+  - text inputs → `[blank]` at their position in the sentence (search/email/password/phone fields and type-ahead `role=combobox` pickers are skipped)
+  - `<select>` → `[choose: was | were | am]` (placeholder option dropped, nothing marked selected)
+  - radio/checkbox groups (native and ARIA `role=radio/checkbox`) → `A) … B) …` labels (a single checkbox → `[ ]`); native inputs hidden behind styled labels still get a letter
+  - `<textarea>` / `contenteditable` answer boxes → skipped. **Exception:** tiny (≤2px) editable elements are screen-reader/clipboard mirrors (e.g. Figma's `div[role=document].focus-target`), read as `[Hidden text copy kept by the page, unordered:]`
+  - code editors → placeholder `[code editor N: see below]`; the full code is appended at the end as `--- Code editor N (lang) --- … --- End of code editor N ---`
+  - collapsed `<details>` content is included, marked `[collapsed section]`; `display:none` / `visibility:hidden` content is skipped (this also drops responsive duplicates)
+  - open shadow roots (including slots) and **same-origin iframes** are walked into. Iframe guardrails: denylist of widget hosts (reCAPTCHA, Twitter, Hotjar, chat widgets, …), ≥100×100px and visible, ≤20k chars per frame. Cross-origin iframes are not read
+  - math: KaTeX → `$TeX$` from its annotation; MathJax → TeX source or MathML; MathML → linear text (`x + 3 = 7`). Server-pre-rendered MathJax SVG (no source in the page, e.g. HackerRank) can't be recovered
+  - `<sup>`/`<sub>` → `^` / `_` (`10^4`, `O(n^2)`)
+  - `<pre>` keeps spaces, tabs and blank lines
+- **Junk removal:** `nav`, `footer`, `role=navigation|contentinfo`, cookie/consent banners (id/class match), **link lists** (≥5 links that are ≥75% of a block's text, e.g. Codility's menu/footer without semantic tags; never applied to blocks containing choices, blanks, dropdowns or editors), and common action buttons (Submit, Run, Next, Share on X, …).
+- **Cleanup:** removes invisible bidi/zero-width characters, collapses whitespace, joins table cells with ` | `, dedupes adjacent identical lines, blank lines only around paragraph-level blocks. Page text is capped at **12k chars** (cut from the end; `truncated: true`), each code editor at 20k.
+
+**Code editors** (read through each editor's own API, never the rendered lines when avoidable):
+- Monaco: `monaco.editor.getEditors()` matched to the editor's DOM node via `getDomNode()` → `getModel().getValue()`. Without `getEditors()`: remaining non-empty models, code languages before `plaintext` (LeetCode has an extra empty plaintext model). Last resorts: the editor's textarea, then rendered `.view-line`s sorted by position
+- CodeMirror 6: `.cm-content.cmView.view.state.doc` (LeetCode's test-case box). CodeMirror 5: `el.CodeMirror.getValue()`. Ace: `el.env.editor.getValue()`
+- Editors outside the chosen content root are still included
+
+**Pictures** (decided in `App.tsx` with `tabExtraction.ts`):
+- `extract.js` reports large visuals (rendered area ≥ 40,000px², i.e. about 200×200; icons/logos are smaller): `images` = up to **4** largest `<img>` (placeholders `[image 1]`…`[image 4]` in page order), `drawn` = large `<canvas>`/`<svg>` (placeholder `[chart/drawing: see screenshot]`; SVG `<text>` labels are also written as text)
+- Image files → `get_tab_images` (original bytes from Chrome's cache, saved to temp files, ≤1.5MB each)
+- A **tab screenshot** is added when there is drawn content, when an image couldn't be retrieved, or when the page has almost no text (<80 chars) and no images/code (e.g. a PDF in Chrome's viewer). Before it, `scroll_drawing_into_view` brings the first chart into view. A canvas ≥300,000px² shows "Whiteboard detected — capturing the visible area"
+- Max **4 pictures per question, same for free and Pro**. The AI commands split a total budget of 4.5MB across the pictures, so a request is never larger than one full screenshot used to be
+- The text is **always** sent with the pictures (pictures cover what has no text; text gives exact words, numbers and off-screen parts)
+
+Known limits: canvas apps without a hidden text copy (e.g. Miro view-only boards) only get the screenshot of the visible area; drag-and-drop answer state isn't read; cross-origin iframes aren't read.
 
 ### 4) AI providers and payload formats
 
@@ -309,10 +355,12 @@ Backend:
 Frontend:
 
 - `activate_tab(tabId)`
-- `extract_tab_text(tabId)` (JS: `document.body.innerText`)
-- `buildPrompt(template, language, text)`
-- `query_ai_via_proxy(prompt, model, accessToken, sourceUrl)` (for proxy users)
-- or `query_ai(prompt, config, sourceUrl)` (for BYO API key users)
+- `extract_tab_text(tabId)` → `TabExtraction` (`extract.js`; waits up to 300ms for the page to settle)
+- If `extraction.images` is non-empty: `get_tab_images(tabId, urls)` → temp file paths (null where unavailable)
+- If `needsTabScreenshot(extraction)` or an image failed: optional `scroll_drawing_into_view(tabId, extraction.drawn[0])`, then `capture_tab_screenshot(tabId)`
+- `buildPrompt(template, language, extraction.text)`
+- No pictures: `query_ai_via_proxy(prompt, model, accessToken, sourceUrl)` (proxy users) or `query_ai(prompt, config, sourceUrl)` (BYO API key users)
+- With pictures (max 4): `query_ai_via_proxy_with_image(prompt, imagePaths, …)` or `query_ai_with_image(prompt, imagePaths, …)`
 
 ### C) Solve (screenshot mode)
 
@@ -321,12 +369,12 @@ Frontend:
 - `activate_tab(tabId)` (only for tab screenshot)
 - `capture_tab_screenshot(tabId)` or `capture_display_screenshot(displayId)`
 - `buildPrompt(template, language)` (prompt without injected text)
-- `query_ai_via_proxy_with_image(prompt, imagePath, model, accessToken, sourceUrl)`
-- or `query_ai_with_image(prompt, imagePath, config, sourceUrl)`
+- `query_ai_via_proxy_with_image(prompt, imagePaths: [path], model, accessToken, sourceUrl)`
+- or `query_ai_with_image(prompt, imagePaths: [path], config, sourceUrl)`
 
 Backend:
 
-- reads bytes from `imagePath` and sends to AI provider with correct MIME type
+- `load_images_for_ai` reads up to 4 files, shrinks any over their share of the 4.5MB budget (`chrome::fit_image_bytes`), and sends them after the prompt text with the correct MIME types (`ai::detect_image_mime_type`)
 
 ### D) Solve (live transcription mode — audio flow)
 
@@ -366,7 +414,9 @@ Chrome/CDP:
 - `open_chrome_cdp() -> String` — auto-detects user Chrome first, falls back to launching new window
 - `get_chrome_connection_mode() -> String` — returns `"user"` (your Chrome), `"app"` (launched by app), or `"none"`
 - `activate_tab(tab_id: String) -> ()`
-- `extract_tab_text(tab_id: String) -> String`
+- `extract_tab_text(tab_id: String) -> serde_json::Value` (the `extract.js` result; typed as `TabExtraction` in `src/services/tabExtraction.ts`)
+- `get_tab_images(tab_id: String, urls: Vec<String>) -> Vec<Option<String>>` (max 4; temp file path per URL, null if unavailable/undecodable)
+- `scroll_drawing_into_view(tab_id: String, rect: serde_json::Value) -> String` (`"scrolled"` / `"visible"` / `"not-found"`)
 - `capture_tab_screenshot(tab_id: String) -> String` (returns temp file path)
 - `get_tab_thumbnail(tab_id: String) -> String` (data URL)
 
@@ -379,7 +429,7 @@ Displays:
 AI (Direct calls - user's own API key):
 
 - `query_ai(prompt: String, config: AIConfig, source_url: Option<String>) -> String`
-- `query_ai_with_image(prompt: String, image_path: String, config: AIConfig, source_url: Option<String>) -> String`
+- `query_ai_with_image(prompt: String, image_paths: Vec<String>, config: AIConfig, source_url: Option<String>) -> String` (1–4 images, sent after the prompt text)
 - `AIConfig = { selected_model, gemini_api_key?, max_output_tokens? }` — `selected_model` is `modelConfig.byo_model.id`, `max_output_tokens` is `modelConfig.max_output_tokens` (both from the server)
 - `validate_gemini_key(api_key: String, model: String) -> ()` — `GET models/{byo_model}?key=…` (no generation, no quota use). The AI Models tab's "Save & Verify" button (or Enter) only stores the key and shows "✓ Active" after this succeeds
 - `source_url` is checked against `free_allowed_domains`, which Rust stores from the `fetch_models` response (and fetches itself with the anon key if not loaded yet)
@@ -394,7 +444,7 @@ Setup checklist (`src-tauri/src/setup.rs`, UI in `src/components/SetupChecklist.
 AI (Proxy calls - via Supabase Edge Function):
 
 - `query_ai_via_proxy(prompt: String, model: String, access_token: String, source_url: Option<String>) -> AIProxyResponse`
-- `query_ai_via_proxy_with_image(prompt: String, image_path: String, model: String, access_token: String, source_url: Option<String>) -> AIProxyResponse`
+- `query_ai_via_proxy_with_image(prompt: String, image_paths: Vec<String>, model: String, access_token: String, source_url: Option<String>) -> AIProxyResponse` (1–4 images as `image_url` content parts; `ai-proxy` passes the content array through unchanged)
 
 Audio:
 
@@ -1551,6 +1601,7 @@ The Input Mode controls (text extraction vs screenshot) have been merged into th
 - 📝 Text Extraction — "Chrome tabs only"
 - 📸 Screenshot Capture — "Visual · Images & diagrams"
 - Note: Text extraction only works with Chrome tabs. Display source always uses screenshot mode.
+- Text mode still attaches pictures when the question needs them (question images, charts, whiteboards, near-empty pages); see "Text extraction details". Screenshot mode sends only the screenshot, as before.
 
 Styled via `.toggle-btn .mode-icon`, `.mode-label`, `.mode-description` in `App.css`.
 
@@ -1586,6 +1637,11 @@ The refresh button for input sources includes visual feedback:
 #### Always on Top
 
 The app window is configured to stay on top of all other windows at all times. This is a core UX feature — the user always has the AI assistant visible while working in Chrome or other apps. Combined with stealth mode, the window floats above everything while remaining invisible to screen-sharing software.
+
+- `alwaysOnTop: true` in `tauri.conf.json` puts the window at macOS floating level / Windows `HWND_TOPMOST`.
+- **Over full-screen apps (macOS):** a full-screen app (e.g. Chrome after Ctrl+Cmd+F) lives in its own Space. `apply_macos_fullscreen_overlay()` (called in `setup`, all modes) adds `NSWindowCollectionBehaviorCanJoinAllSpaces | FullScreenAuxiliary` and clears `MoveToActiveSpace | FullScreenPrimary`, so the window joins every Space including full-screen ones. Side effects: the window follows the user to every desktop Space, and its green button no longer enters full screen itself.
+- macOS (10.14+) only floats a window over **another app's** full-screen window when the app is Dock-less (accessory activation policy) **from launch**. Tauri's `setup` runs after launch, and tao launches as `.regular`, so switching to accessory in `setup` (`apply_macos_dock_hiding`) hides the Dock icon but is too late for full-screen overlay. Measured on macOS 26 (2026-10-12): windows of an app that finished launching as `.regular` never appeared over a full-screen window, even after re-applying the collection behavior, re-showing the window, or switching policy before first show. Fix: `main()` builds the app, then calls `app.set_activation_policy(ActivationPolicy::Accessory)` **before** `app.run()` when stealth is on, so tao launches the app Dock-less. Verified: the real app window is on screen in front of a full-screen window.
+- In normal mode (stealth off, Dock icon visible) the window still won't appear over other apps' full-screen windows.
 
 #### Hotkeys Settings UI
 
