@@ -1,0 +1,9 @@
+{
+  "contains": [
+    "--- Code editor 1 (main.go, go) ---\nfunc Solve() int { return 0 }"
+  ],
+  "notContains": [
+    "package decoy"
+  ],
+  "code": 1
+}

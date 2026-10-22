@@ -1,0 +1,12 @@
+{
+  "contains": [
+    "--- Code editor 1 (main.js, javascript) ---",
+    "Project file f01.js",
+    "Project file f20.js",
+    "[4 more project files not included]"
+  ],
+  "notContains": [
+    "Project file f21.js"
+  ],
+  "code": 21
+}

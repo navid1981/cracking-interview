@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- Four 12k-character files: each is cut to 10k, the total extra budget is 30k, so the fourth is omitted. -->
+<html>
+<head><meta charset="utf-8"><title>Big files</title></head>
+<body>
+  <p>Review the code.</p>
+  <div class="monaco-editor" id="ed"><div class="view-lines"><div class="view-line">x</div></div></div>
+  <script>
+    const model = (path, lang, value, scheme) => ({ uri: { scheme: scheme || 'file', path }, getValue: () => value, getLanguageId: () => lang });
+    const attach = (el, editor) => {
+      const leaf = { return: null, child: null, sibling: null, memoizedProps: null, stateNode: null, memoizedState: { memoizedState: editor, next: null } };
+      const root = { return: null, child: leaf, sibling: null, memoizedProps: null, stateNode: null, memoizedState: null };
+      leaf.return = root;
+      el['__reactFiber$t'] = leaf;
+    };
+    const open = model('/w/main.js', 'javascript', 'const main = 0;');
+    const models = [open,
+      model('/w/a.js', 'javascript', 'x'.repeat(12000)),
+      model('/w/b.js', 'javascript', 'x'.repeat(12000)),
+      model('/w/c.js', 'javascript', 'x'.repeat(12000)),
+      model('/w/d.js', 'javascript', 'x'.repeat(12000)),
+    ];
+    attach(document.getElementById('ed'), { getModel: () => open, getDomNode: () => document.getElementById('ed'), _svc: { getModels: () => models } });
+  </script>
+</body>
+</html>

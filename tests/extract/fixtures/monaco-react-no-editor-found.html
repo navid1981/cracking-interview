@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- React fibers exist (circular refs, throwing getters) but hold no editor: fall back to the rendered lines and never crash. -->
+<html>
+<head><meta charset="utf-8"><title>React without editor object</title></head>
+<body>
+  <p>Fix the loop.</p>
+  <div class="monaco-editor" id="ed"><div class="view-lines">
+    <div class="view-line" style="top:19px">  i++</div><div class="view-line" style="top:0px">while (true) {</div>
+  </div></div>
+  <script>
+    const el = document.getElementById('ed');
+    const cyc = {}; cyc.self = cyc;
+    const bad = {}; Object.defineProperty(bad, 'boom', { enumerable: true, get() { throw new Error('nope'); } });
+    const leaf = { return: null, child: null, sibling: null, memoizedProps: { cyc, bad }, stateNode: cyc,
+      memoizedState: { memoizedState: bad, next: { memoizedState: cyc, next: null } } };
+    const root = { return: null, child: leaf, sibling: null, memoizedProps: null, stateNode: null, memoizedState: null };
+    leaf.return = root;
+    el['__reactFiber$t'] = leaf;
+  </script>
+</body>
+</html>

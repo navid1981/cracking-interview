@@ -1,0 +1,12 @@
+{
+  "contains": [
+    "--- Code editor 1 (src/sum.py, python) ---\ndef total(xs):\n    return 0",
+    "--- Code editor 2 (tests/test_sum.py, python) ---\nassert total([1, 2]) == 3",
+    "--- Project file README.md (markdown) ---\nRun pytest."
+  ],
+  "maxCount": {
+    "def total(xs)": 1,
+    "assert total": 1
+  },
+  "code": 3
+}

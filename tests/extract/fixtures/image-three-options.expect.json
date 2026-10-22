@@ -1,0 +1,16 @@
+{
+  "contains": [
+    "Which picture shows the shape",
+    "[image 1]",
+    "[image 2]",
+    "[image 3]"
+  ],
+  "notContains": [
+    "[image 4]",
+    "Submit Answer"
+  ],
+  "images": 3,
+  "imageNaturalWidth": 800,
+  "drawn": 0,
+  "code": 0
+}

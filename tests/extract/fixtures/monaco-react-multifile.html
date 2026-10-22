@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- No window.monaco. The editor object (and the model service behind it) is only reachable through
+     React's fiber tree, like CoderPad. Expect: the open file in full, the other project files, and no
+     lockfile or SVG noise. -->
+<html>
+<head><meta charset="utf-8"><title>Monaco via React fiber</title></head>
+<body>
+  <p>Make the todo list persistent.</p>
+  <div class="monaco-editor" id="ed" style="position:relative;height:60px">
+    <div class="view-lines"><div class="view-line">function App() {</div></div>
+  </div>
+  <script>
+    const model = (path, lang, value) => ({
+      uri: { scheme: 'file', path },
+      getValue: () => value,
+      getLanguageId: () => lang,
+    });
+    const app = model('/home/app/src/App.tsx', 'typescriptreact', 'function App() {\n  return null;\n}\nexport default App;');
+    const models = [
+      model('/home/app/README.md', 'markdown', '# Todo task'),
+      app,
+      model('/home/app/src/components/TodoList.tsx', 'typescriptreact', 'export const TodoList = () => null;'),
+      model('/home/app/package-lock.json', 'json', '{"lockfileVersion": 3}'),
+      model('/home/app/src/logo.svg', 'xml', '<svg></svg>'),
+      model('/home/app/src/Empty.ts', 'typescript', '   '),
+    ];
+    const el = document.getElementById('ed');
+    const editor = {
+      getModel: () => app,
+      getDomNode: () => el,
+      _modelService: { getModels: () => models },
+    };
+    const leaf = { return: null, child: null, sibling: null, memoizedProps: null, stateNode: null,
+      memoizedState: { memoizedState: editor, next: null } };
+    const root = { return: null, child: leaf, sibling: null, memoizedProps: null, stateNode: null, memoizedState: null };
+    leaf.return = root;
+    el['__reactFiber$test'] = leaf;
+  </script>
+</body>
+</html>

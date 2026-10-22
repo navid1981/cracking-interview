@@ -725,10 +725,26 @@ async fn validate_source_url(source_url: &Option<String>) -> Result<(), String> 
     Ok(())
 }
 
+/// Dev builds only: writes the exact prompt sent to the AI to `$TMPDIR/cracking_interview_prompt.txt`.
+#[cfg(debug_assertions)]
+fn dump_prompt(prompt: &str, image_paths: &[String]) {
+    let mut path = std::env::temp_dir();
+    path.push("cracking_interview_prompt.txt");
+    let body = format!("{}\n\n[images attached: {:?}]\n", prompt, image_paths);
+    match std::fs::write(&path, body) {
+        Ok(()) => println!("📤 [prompt] {} chars written to {}", prompt.chars().count(), path.display()),
+        Err(e) => println!("⚠️ [prompt] could not write {}: {}", path.display(), e),
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn dump_prompt(_prompt: &str, _image_paths: &[String]) {}
+
 #[tauri::command]
 async fn query_ai(prompt: String, config: ai::AIConfig, source_url: Option<String>) -> Result<String, String> {
     // Validate domain for BYO API key users
     validate_source_url(&source_url).await?;
+    dump_prompt(&prompt, &[]);
     ai::query_with_text(&prompt, &config).await
 }
 
@@ -769,6 +785,7 @@ async fn query_ai_with_image(
 ) -> Result<String, String> {
     // Validate domain for BYO API key users
     validate_source_url(&source_url).await?;
+    dump_prompt(&prompt, &image_paths);
     let images = load_images_for_ai(image_paths).await?;
     ai::query_with_images(&prompt, &images, &config).await
 }
@@ -1168,6 +1185,7 @@ async fn query_ai_via_proxy(
     println!("[Rust AI Proxy] Starting request to ai-proxy...");
     println!("[Rust AI Proxy] Model: {}", model);
     println!("[Rust AI Proxy] Prompt length: {} chars", prompt.len());
+    dump_prompt(&prompt, &[]);
     println!("[Rust AI Proxy] Source URL: {:?}", source_url);
     
     
@@ -1278,6 +1296,7 @@ async fn query_ai_via_proxy_with_image(
     println!("[Rust AI Proxy Image] Starting request to ai-proxy...");
     println!("[Rust AI Proxy Image] Model: {}", model);
     println!("[Rust AI Proxy Image] Prompt length: {} chars", prompt.len());
+    dump_prompt(&prompt, &image_paths);
     println!("[Rust AI Proxy Image] Image paths: {:?}", image_paths);
     println!("[Rust AI Proxy Image] Source URL: {:?}", source_url);
 

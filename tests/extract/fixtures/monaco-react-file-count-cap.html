@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- 25 project files in the editor: the open one plus at most 20 extras; the rest is reported as omitted. -->
+<html>
+<head><meta charset="utf-8"><title>Many files</title></head>
+<body>
+  <p>Refactor the module.</p>
+  <div class="monaco-editor" id="ed"><div class="view-lines"><div class="view-line">x</div></div></div>
+  <script>
+    const model = (path, lang, value, scheme) => ({ uri: { scheme: scheme || 'file', path }, getValue: () => value, getLanguageId: () => lang });
+    const attach = (el, editor) => {
+      const leaf = { return: null, child: null, sibling: null, memoizedProps: null, stateNode: null, memoizedState: { memoizedState: editor, next: null } };
+      const root = { return: null, child: leaf, sibling: null, memoizedProps: null, stateNode: null, memoizedState: null };
+      leaf.return = root;
+      el['__reactFiber$t'] = leaf;
+    };
+    const open = model('/w/src/main.js', 'javascript', 'const main = 0;');
+    const models = [open,
+      model('/w/src/f01.js', 'javascript', 'const v1 = 1;'),
+      model('/w/src/f02.js', 'javascript', 'const v2 = 2;'),
+      model('/w/src/f03.js', 'javascript', 'const v3 = 3;'),
+      model('/w/src/f04.js', 'javascript', 'const v4 = 4;'),
+      model('/w/src/f05.js', 'javascript', 'const v5 = 5;'),
+      model('/w/src/f06.js', 'javascript', 'const v6 = 6;'),
+      model('/w/src/f07.js', 'javascript', 'const v7 = 7;'),
+      model('/w/src/f08.js', 'javascript', 'const v8 = 8;'),
+      model('/w/src/f09.js', 'javascript', 'const v9 = 9;'),
+      model('/w/src/f10.js', 'javascript', 'const v10 = 10;'),
+      model('/w/src/f11.js', 'javascript', 'const v11 = 11;'),
+      model('/w/src/f12.js', 'javascript', 'const v12 = 12;'),
+      model('/w/src/f13.js', 'javascript', 'const v13 = 13;'),
+      model('/w/src/f14.js', 'javascript', 'const v14 = 14;'),
+      model('/w/src/f15.js', 'javascript', 'const v15 = 15;'),
+      model('/w/src/f16.js', 'javascript', 'const v16 = 16;'),
+      model('/w/src/f17.js', 'javascript', 'const v17 = 17;'),
+      model('/w/src/f18.js', 'javascript', 'const v18 = 18;'),
+      model('/w/src/f19.js', 'javascript', 'const v19 = 19;'),
+      model('/w/src/f20.js', 'javascript', 'const v20 = 20;'),
+      model('/w/src/f21.js', 'javascript', 'const v21 = 21;'),
+      model('/w/src/f22.js', 'javascript', 'const v22 = 22;'),
+      model('/w/src/f23.js', 'javascript', 'const v23 = 23;'),
+      model('/w/src/f24.js', 'javascript', 'const v24 = 24;'),
+    ];
+    attach(document.getElementById('ed'), { getModel: () => open, getDomNode: () => document.getElementById('ed'), _svc: { getModels: () => models } });
+  </script>
+</body>
+</html>

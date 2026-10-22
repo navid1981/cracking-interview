@@ -134,6 +134,11 @@ function check(result, expect) {
     const langs = result.code.map((c) => c.language);
     if (JSON.stringify(langs) !== JSON.stringify(expect.codeLanguages)) failures.push(`code languages: got ${JSON.stringify(langs)}, expected ${JSON.stringify(expect.codeLanguages)}`);
   }
+  if (expect.skippedFrameReasons) {
+    const got = (result.skippedFrames || []).map((f) => f.reason).sort();
+    const want = [...expect.skippedFrameReasons].sort();
+    if (JSON.stringify(got) !== JSON.stringify(want)) failures.push(`skipped frame reasons: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  }
   if (expect.root && result.root !== expect.root) failures.push(`root: got ${result.root}, expected ${expect.root}`);
   if (expect.minFramesSkipped !== undefined && result.framesSkipped < expect.minFramesSkipped) failures.push(`framesSkipped: got ${result.framesSkipped}, expected >= ${expect.minFramesSkipped}`);
   if (expect.imageNaturalWidth && result.images[0]?.naturalWidth !== expect.imageNaturalWidth) failures.push(`image naturalWidth: got ${result.images[0]?.naturalWidth}, expected ${expect.imageNaturalWidth}`);

@@ -12,6 +12,15 @@
   const MAX_IMAGES = 4;
   const NODE_BUDGET = 40000;
   const MIRROR_MIN_CHARS = 20;
+  // The app replaces this 0 when it runs the script inside an embedded cross-origin frame, so code
+  // blocks keep counting after the ones already found in the parent page.
+  const CODE_NUMBER_OFFSET = 0;
+  // Debug builds only (the app flips this): describe the page's editor environment in the result.
+  const DEBUG_PROBE = false;
+  const REACT_SCAN_MS = 150;
+  const EXTRA_FILE_CAP = 10000;
+  const EXTRA_TOTAL_CAP = 30000;
+  const EXTRA_FILES_MAX = 20;
 
   const EDITOR_SEL = '.monaco-editor, .CodeMirror, .cm-editor, .ace_editor';
   const SKIP_TAGS = new Set(['script', 'style', 'noscript', 'template', 'head', 'meta', 'link',
@@ -80,26 +89,43 @@
   };
 
   // ── Frames ────────────────────────────────────────────────────────────────
-  const stats = { framesRead: 0, framesSkipped: 0, nodes: 0, budgetHit: false };
+  const stats = { framesRead: 0, framesSkipped: 0, skippedFrames: [], nodes: 0, budgetHit: false };
 
+  // Why the last frameDocument() call returned null (for the debug dump only).
+  let frameSkipReason = '';
   const frameDocument = (frame) => {
+    frameSkipReason = '';
     const src = frame.getAttribute('src') || '';
-    if (FRAME_DENY_RE.test(src)) return null;
+    if (FRAME_DENY_RE.test(src)) { frameSkipReason = 'denylisted'; return null; }
     const r = frame.getBoundingClientRect();
-    if (r.width < MIN_FRAME_SIDE || r.height < MIN_FRAME_SIDE) return null;
+    if (r.width < MIN_FRAME_SIDE || r.height < MIN_FRAME_SIDE) { frameSkipReason = 'too-small'; return null; }
     const style = styleOf(frame);
-    if (style && (style.display === 'none' || style.visibility === 'hidden')) return null;
+    if (style && (style.display === 'none' || style.visibility === 'hidden')) { frameSkipReason = 'hidden'; return null; }
     try {
       const doc = frame.contentDocument;
-      if (!doc || !doc.body) return null;
-      if (FRAME_DENY_RE.test(doc.URL || '')) return null;
+      if (!doc || !doc.body) { frameSkipReason = doc ? 'no-body' : 'cross-origin'; return null; }
+      if (FRAME_DENY_RE.test(doc.URL || '')) { frameSkipReason = 'denylisted'; return null; }
       return doc;
     } catch (_) {
-      return null; // cross-origin
+      frameSkipReason = 'cross-origin';
+      return null;
     }
   };
 
-  // ── Choice groups (radio/checkbox) → A) B) C) labels ───────────────────────
+  // Address without query/fragment (they can carry tokens), for the debug dump.
+  const noteSkippedFrame = (frame, reason) => {
+    stats.framesSkipped++;
+    if (stats.skippedFrames.length >= 20) return;
+    const r = frame.getBoundingClientRect();
+    stats.skippedFrames.push({
+      src: (frame.getAttribute('src') || '').split(/[?#]/)[0].slice(0, 200),
+      reason,
+      width: Math.round(r.width),
+      height: Math.round(r.height),
+    });
+  };
+
+  // ── Choice groups (radio/checkbox) → ( ) / [ ] markers ───────────────────────
   const CHOICE_SEL = 'input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]';
   const choiceGroups = new Map();
   const choiceGroupOf = new WeakMap();
@@ -129,11 +155,11 @@
     }
   };
 
+  // No invented A/B/C letters: the page does not show them, so an answer like "C" could not be
+  // matched to anything the user sees. Single-choice options get ( ), multi-select options get [ ].
   const choiceMarker = (el) => {
-    const list = choiceGroups.get(el);
-    if (!list || list.length === 1) return ' [ ] ';
-    const i = list.indexOf(el);
-    return i < 26 ? ` ${String.fromCharCode(65 + i)}) ` : ` ${i + 1}) `;
+    const radio = el.type === 'radio' || el.getAttribute('role') === 'radio';
+    return radio ? ' ( ) ' : ' [ ] ';
   };
 
   // ── Visual content (images, canvases, SVG drawings) ────────────────────────
@@ -186,7 +212,7 @@
   const registerEditor = (el) => {
     if (editorIndex.has(el)) return editorIndex.get(el);
     const i = editors.length;
-    editors.push({ el, language: '', value: '', source: '' });
+    editors.push({ el, language: '', value: '', source: '', model: null, file: '' });
     editorIndex.set(el, i);
     return i;
   };
@@ -195,6 +221,149 @@
     const lines = Array.from(el.querySelectorAll(lineSel));
     lines.sort((a, b) => (parseFloat(a.style.top) || 0) - (parseFloat(b.style.top) || 0));
     return lines.map((l) => (l.textContent || '').replace(/ /g, ' ')).join('\n');
+  };
+
+  const isMonacoModel = (o) => {
+    try {
+      return typeof o.getValue === 'function' && typeof o.getLanguageId === 'function' && !!o.uri;
+    } catch (_) { return false; }
+  };
+
+  // Monaco without window.monaco (e.g. CoderPad): the React app keeps the editor instances, and
+  // through them the model list, in component state. Walk the fiber tree for editor-like and
+  // model-like objects. Read-only and time-boxed; one scan per document.
+  const reactMonacoCache = new Map();
+  const reactMonaco = (el) => {
+    const doc = el.ownerDocument;
+    if (reactMonacoCache.has(doc)) return reactMonacoCache.get(doc);
+    const found = { editors: [], models: [] };
+    reactMonacoCache.set(doc, found);
+    try {
+      const key = Object.keys(el).find((k) => k.startsWith('__reactFiber$'));
+      if (!key) return found;
+      const lists = [];
+      const looksLikeEditor = (o) => {
+        try {
+          const m = typeof o.getModel === 'function' && typeof o.getDomNode === 'function' && o.getModel();
+          return !!m && typeof m.getValue === 'function';
+        } catch (_) { return false; }
+      };
+      const seen = new WeakSet();
+      const scan = (o, depth) => {
+        if (!o || (typeof o !== 'object' && typeof o !== 'function') || seen.has(o) || depth > 3) return;
+        seen.add(o);
+        if (looksLikeEditor(o)) { found.editors.push(o); return; }
+        if (isMonacoModel(o)) { found.models.push(o); return; }
+        try { if (typeof o.getModels === 'function') lists.push(o); } catch (_) { /* getter threw */ }
+        let keys = [];
+        try { keys = Object.keys(o); } catch (_) { return; }
+        for (const k of keys.slice(0, 40)) {
+          try { scan(o[k], depth + 1); } catch (_) { /* getter threw */ }
+        }
+      };
+      const deadline = performance.now() + REACT_SCAN_MS;
+      let root = el[key];
+      while (root.return) root = root.return;
+      const stack = [root];
+      while (stack.length && performance.now() < deadline) {
+        const f = stack.pop();
+        for (let h = f.memoizedState; h && typeof h === 'object'; h = h.next) {
+          scan(h.memoizedState, 0);
+          scan(h.queue, 1);
+        }
+        scan(f.memoizedProps, 0);
+        scan(f.stateNode, 1);
+        if (f.sibling) stack.push(f.sibling);
+        if (f.child) stack.push(f.child);
+      }
+      // The editors' own services usually know every model, not only the one on screen.
+      for (const inst of found.editors.slice()) {
+        let keys = [];
+        try { keys = Object.keys(inst); } catch (_) { continue; }
+        for (const k of keys.slice(0, 60)) {
+          try { scan(inst[k], 1); } catch (_) { /* getter threw */ }
+        }
+      }
+      for (const list of lists) {
+        try {
+          for (const m of list.getModels()) if (isMonacoModel(m)) found.models.push(m);
+        } catch (_) { /* not a model service */ }
+      }
+    } catch (_) {
+      // no React internals: callers fall back to the DOM
+    }
+    return found;
+  };
+
+  const reactEditorFor = (el) => reactMonaco(el).editors.find((inst) => {
+    try {
+      const dom = inst.getDomNode();
+      return dom && (dom === el || el.contains(dom) || dom.contains(el));
+    } catch (_) { return false; }
+  });
+
+  // Other files the editor holds (project tabs that are open but not on screen). Generated and
+  // vendored files are skipped, and the total is capped so the prompt stays small.
+  const NOISE_PATH_RE = /(^|\/)(node_modules|\.git|dist|build|\.next|coverage)\//i;
+  const NOISE_FILE_RE = /(package-lock\.json|npm-shrinkwrap\.json|\.lock|\.min\.(js|css)|\.map|\.svg)$/i;
+  const modelPath = (m) => {
+    try {
+      const u = m.uri;
+      const p = u && typeof u.path === 'string' ? u.path : '';
+      // In-memory models are named like `/1`; only real file names are worth showing.
+      return u && u.scheme !== 'inmemory' && /[A-Za-z]/.test(p.split('/').pop()) ? p : '';
+    } catch (_) { return ''; }
+  };
+  const extraFiles = [];
+  let extraOmitted = 0;
+
+  const collectExtraFiles = (usedModels) => {
+    const all = new Set();
+    const docs = new Set();
+    for (const ed of editors) {
+      if (!ed.el.matches('.monaco-editor') || docs.has(ed.el.ownerDocument)) continue;
+      docs.add(ed.el.ownerDocument);
+      const win = ed.el.ownerDocument.defaultView || window;
+      let viaApi = false;
+      try {
+        const api = win.monaco && win.monaco.editor;
+        if (api && typeof api.getModels === 'function') {
+          api.getModels().forEach((m) => all.add(m));
+          viaApi = true;
+        }
+      } catch (_) { /* fall through to React */ }
+      if (!viaApi) reactMonaco(ed.el).models.forEach((m) => all.add(m));
+    }
+    const candidates = [];
+    for (const m of all) {
+      if (usedModels.has(m)) continue;
+      let value = '';
+      try { value = m.getValue(); } catch (_) { continue; }
+      if (!value.trim()) continue;
+      const path = modelPath(m);
+      if (path && (NOISE_PATH_RE.test(path) || NOISE_FILE_RE.test(path))) continue;
+      candidates.push({ path, value, language: m.getLanguageId() });
+    }
+    // Show paths relative to the folder all the files share.
+    const paths = [...[...usedModels].map(modelPath), ...candidates.map((c) => c.path)].filter(Boolean);
+    let prefix = '';
+    if (paths.length) {
+      const first = paths[0].split('/');
+      let n = 0;
+      while (n < first.length - 1 && paths.every((p) => p.split('/')[n] === first[n] && n < p.split('/').length - 1)) n++;
+      prefix = n ? `${first.slice(0, n).join('/')}/` : '';
+    }
+    const rel = (p) => (p && p.startsWith(prefix) ? p.slice(prefix.length) : p);
+    for (const ed of editors) if (ed.model) ed.file = rel(modelPath(ed.model));
+    let budget = EXTRA_TOTAL_CAP;
+    for (const c of candidates) {
+      if (extraFiles.length >= EXTRA_FILES_MAX || budget <= 0) { extraOmitted++; continue; }
+      let value = c.value;
+      const cap = Math.min(EXTRA_FILE_CAP, budget);
+      if (value.length > cap) value = `${value.slice(0, cap)}\n[... file truncated]`;
+      budget -= Math.min(c.value.length, cap);
+      extraFiles.push({ file: rel(c.path), language: c.language, source: 'monaco-models', value });
+    }
   };
 
   const readEditors = () => {
@@ -215,8 +384,20 @@
             usedModels.add(model);
             ed.value = model.getValue();
             ed.language = model.getLanguageId ? model.getLanguageId() : '';
+            ed.model = model;
             ed.source = 'monaco-api';
             break;
+          }
+          if (!ed.source) {
+            const inst = reactEditorFor(el);
+            const model = inst && inst.getModel();
+            if (model) {
+              usedModels.add(model);
+              ed.value = model.getValue();
+              ed.language = model.getLanguageId ? model.getLanguageId() : '';
+              ed.model = model;
+              ed.source = 'react-fiber';
+            }
           }
           if (!ed.source) pendingMonaco.push(ed);
         } else if (el.matches('.CodeMirror') && el.CodeMirror) {
@@ -263,8 +444,10 @@
       for (const ed of pendingMonaco) {
         const model = spare.shift();
         if (model) {
+          usedModels.add(model);
           ed.value = model.getValue();
           ed.language = model.getLanguageId();
+          ed.model = model;
           ed.source = 'monaco-models';
           continue;
         }
@@ -285,6 +468,63 @@
       }
       if (ed.value.length > CODE_CAP) ed.value = ed.value.slice(0, CODE_CAP) + '\n[... code truncated]';
     }
+    collectExtraFiles(usedModels);
+  };
+
+  // ── Debug probe ────────────────────────────────────────────────────────────
+  const probeEnvironment = () => {
+    const safe = (fn) => { try { return fn(); } catch (e) { return `error: ${e && e.message}`; } };
+    const clip = (v, n) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, n);
+    const ed = document.querySelector('.monaco-editor');
+    const out = {
+      url: location.href.split(/[?#]/)[0],
+      title: document.title,
+      windowKeys: safe(() => Object.getOwnPropertyNames(window)
+        .filter((k) => /monaco|vscode|require|define|theia|workbench|amd|webpack|loader|editor|codemirror|__react|__next|ide/i.test(k)).slice(0, 60)),
+      requireType: typeof window.require,
+      defineType: typeof window.define,
+      amdEditorApi: safe(() => {
+        const m = window.require && window.require('vs/editor/editor.api');
+        return m && m.editor ? m.editor.getModels().map((x) => ({ uri: String(x.uri), chars: x.getValue().length })) : 'not loaded';
+      }),
+      globals: safe(() => {
+        const describe = (v) => {
+          const info = { type: typeof v };
+          if (v === null || (typeof v !== 'object' && typeof v !== 'function')) { info.value = clip(v, 80); return info; }
+          info.ctor = safe(() => v.constructor && v.constructor.name);
+          info.ownKeys = safe(() => Object.getOwnPropertyNames(v).slice(0, 40));
+          const methods = new Set();
+          for (let o = Object.getPrototypeOf(v), d = 0; o && o !== Object.prototype && d < 4; o = Object.getPrototypeOf(o), d++) {
+            Object.getOwnPropertyNames(o).forEach((k) => methods.add(k));
+          }
+          info.protoKeys = Array.from(methods).slice(0, 60);
+          return info;
+        };
+        const out = {};
+        for (const k of Object.getOwnPropertyNames(window)) {
+          if (/^(IDE_|_VSCODE|__)/.test(k) || /(^|_)(fs|files?|filesystem|vfs)$/i.test(k)) out[k] = safe(() => describe(window[k]));
+        }
+        return out;
+      }),
+      hasWorkbench: !!document.querySelector('.monaco-workbench'),
+      editors: document.querySelectorAll('.monaco-editor').length,
+      tabs: safe(() => Array.from(document.querySelectorAll('.tabs-container .tab, [role="tab"]')).slice(0, 30)
+        .map((t) => clip(t.getAttribute('aria-label') || t.textContent, 80))),
+      explorerRows: safe(() => Array.from(document.querySelectorAll('.monaco-list-row')).slice(0, 60)
+        .map((r) => clip(r.getAttribute('aria-label') || r.textContent, 80))),
+      editorAncestors: safe(() => {
+        const chain = [];
+        for (let n = ed && ed.parentElement; n && chain.length < 8; n = n.parentElement) {
+          chain.push({ tag: n.localName, id: n.id || undefined, cls: clip(n.className, 60), role: n.getAttribute('role') || undefined });
+        }
+        return chain;
+      }),
+      reactKeysOnEditor: ed ? Object.keys(ed).filter((k) => k.startsWith('__react')) : [],
+      iframes: Array.from(document.querySelectorAll('iframe')).slice(0, 10)
+        .map((f) => ({ src: (f.getAttribute('src') || '').split(/[?#]/)[0].slice(0, 120), width: Math.round(f.getBoundingClientRect().width), height: Math.round(f.getBoundingClientRect().height) })),
+      bodyTextSample: clip(document.body && document.body.innerText, 400),
+    };
+    return out;
   };
 
   // ── DOM walker ─────────────────────────────────────────────────────────────
@@ -443,7 +683,7 @@
     if (tag === 'iframe') {
       const doc = frameDocument(el);
       if (!doc) {
-        stats.framesSkipped++;
+        noteSkippedFrame(el, frameSkipReason);
         return;
       }
       indexChoices(doc);
@@ -452,7 +692,7 @@
       walk(doc.body, frameOut, { visible: true, pre: false });
       const frameText = frameOut.join('');
       if (frameText.length > FRAME_TEXT_CAP) {
-        stats.framesSkipped++;
+        noteSkippedFrame(el, 'over-size-cap');
         return;
       }
       stats.framesRead++;
@@ -489,7 +729,7 @@
   };
 
   // ── Normalization ──────────────────────────────────────────────────────────
-  const CHOICE_ONLY_RE = /^([A-Z]\)|\d+\)|\[ \])$/;
+  const CHOICE_ONLY_RE = /^(\( \)|\[ \])$/;
 
   const normalize = (raw) => {
     const lines = raw
@@ -578,11 +818,14 @@
     const code = [];
     editors.forEach((ed, i) => {
       const keep = ed.value.trim().length > 0;
-      if (keep) code.push({ number: code.length + 1, language: ed.language, source: ed.source, value: ed.value });
-      const replacement = keep ? `[code editor ${code.length}: see below]` : '';
+      if (keep) code.push({ number: code.length + 1 + CODE_NUMBER_OFFSET, language: ed.language, source: ed.source, file: ed.file, kind: 'editor', value: ed.value });
+      const replacement = keep ? `[code editor ${code.length + CODE_NUMBER_OFFSET}: see below]` : '';
       text = text.split(EDITOR_TOKEN(i)).join(replacement);
     });
     text = text.replace(/\n{3,}/g, '\n\n').trim();
+    for (const f of extraFiles) {
+      code.push({ number: code.length + 1 + CODE_NUMBER_OFFSET, language: f.language, source: f.source, file: f.file, kind: 'file', value: f.value });
+    }
 
     let truncated = false;
     if (text.length > TEXT_CAP) {
@@ -591,9 +834,13 @@
       truncated = true;
     }
 
-    const codeBlocks = code.map((c) =>
-      `--- Code editor ${c.number}${c.language ? ` (${c.language})` : ''} ---\n${c.value}\n--- End of code editor ${c.number} ---`);
-    const fullText = [text, ...codeBlocks].filter(Boolean).join('\n\n');
+    const codeBlocks = code.map((c) => {
+      const meta = (c.kind === 'file' ? [c.language] : [c.file, c.language]).filter(Boolean).join(', ');
+      const name = c.kind === 'file' ? `Project file ${c.file || c.number}` : `Code editor ${c.number}`;
+      return `--- ${name}${meta ? ` (${meta})` : ''} ---\n${c.value}\n--- End of ${c.kind === 'file' ? 'file' : 'code editor'} ${c.file || c.number} ---`;
+    });
+    const omitted = extraOmitted ? `[${extraOmitted} more project file${extraOmitted > 1 ? 's' : ''} not included]` : '';
+    const fullText = [text, ...codeBlocks, omitted].filter(Boolean).join('\n\n');
 
     return JSON.stringify({
       version: 1,
@@ -606,6 +853,9 @@
       root: root.name,
       framesRead: stats.framesRead,
       framesSkipped: stats.framesSkipped,
+      skippedFrames: stats.skippedFrames,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      probe: DEBUG_PROBE ? probeEnvironment() : undefined,
       url: location.href,
       title: document.title,
     });

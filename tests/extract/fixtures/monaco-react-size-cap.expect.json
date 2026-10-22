@@ -1,0 +1,15 @@
+{
+  "contains": [
+    "Project file a.js",
+    "Project file c.js",
+    "[... file truncated]",
+    "[1 more project file not included]"
+  ],
+  "notContains": [
+    "Project file d.js"
+  ],
+  "maxCount": {
+    "[... file truncated]": 3
+  },
+  "code": 4
+}

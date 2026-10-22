@@ -1,0 +1,29 @@
+<!doctype html>
+<!-- Two editors on screen (code + test file), no window.monaco. Each editor gets its own file; the remaining file is an extra; none is repeated. -->
+<html>
+<head><meta charset="utf-8"><title>Monaco split view via React</title></head>
+<body>
+  <p>Make the test pass.</p>
+  <div class="monaco-editor" id="a"><div class="view-lines"><div class="view-line">code</div></div></div>
+  <div class="monaco-editor" id="b"><div class="view-lines"><div class="view-line">test</div></div></div>
+  <script>
+    const model = (path, lang, value, scheme) => ({ uri: { scheme: scheme || 'file', path }, getValue: () => value, getLanguageId: () => lang });
+    const attach = (el, editor) => {
+      const leaf = { return: null, child: null, sibling: null, memoizedProps: null, stateNode: null, memoizedState: { memoizedState: editor, next: null } };
+      const root = { return: null, child: leaf, sibling: null, memoizedProps: null, stateNode: null, memoizedState: null };
+      leaf.return = root;
+      el['__reactFiber$t'] = leaf;
+    };
+    const code = model('/w/src/sum.py', 'python', 'def total(xs):\n    return 0');
+    const test = model('/w/tests/test_sum.py', 'python', 'assert total([1, 2]) == 3');
+    const other = model('/w/README.md', 'markdown', 'Run pytest.');
+    const models = [other, code, test];
+    const ea = { getModel: () => code, getDomNode: () => document.getElementById('a'), _svc: { getModels: () => models } };
+    const eb = { getModel: () => test, getDomNode: () => document.getElementById('b'), _svc: { getModels: () => models } };
+    attach(document.getElementById('a'), ea);
+    const leaf = document.getElementById('a')['__reactFiber$t'];
+    leaf.sibling = { return: leaf.return, child: null, sibling: null, memoizedProps: null, stateNode: null, memoizedState: { memoizedState: eb, next: null } };
+    document.getElementById('b')['__reactFiber$t'] = leaf.sibling;
+  </script>
+</body>
+</html>

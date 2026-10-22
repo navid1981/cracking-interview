@@ -1,0 +1,11 @@
+{
+  "contains": [
+    "Make the todo list persistent.",
+    "--- Code editor 1 (src/App.tsx, typescriptreact) ---\nfunction App() {\n  return null;\n}\nexport default App;",
+    "--- Project file README.md (markdown) ---\n# Todo task",
+    "--- Project file src/components/TodoList.tsx (typescriptreact) ---\nexport const TodoList = () => null;"
+  ],
+  "notContains": ["lockfileVersion", "<svg>", "Empty.ts"],
+  "maxCount": { "export default App;": 1 },
+  "code": 3
+}

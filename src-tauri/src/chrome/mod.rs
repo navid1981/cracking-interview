@@ -123,11 +123,244 @@ pub async fn activate_tab(tab_id: &str) -> Result<(), String> {
 
 const EXTRACT_SCRIPT: &str = include_str!("extract.js");
 
+/// The extraction script with per-run settings filled in. Debug builds also ask it to describe
+/// the page's editor environment (`probe` in the result, dump file only).
+fn extract_script(code_offset: usize) -> String {
+    let script = EXTRACT_SCRIPT.replacen(
+        "const CODE_NUMBER_OFFSET = 0;",
+        &format!("const CODE_NUMBER_OFFSET = {};", code_offset),
+        1,
+    );
+    if cfg!(debug_assertions) {
+        script.replacen("const DEBUG_PROBE = false;", "const DEBUG_PROBE = true;", 1)
+    } else {
+        script
+    }
+}
+
 /// Runs extract.js in the tab and returns its structured result
 /// (`text`, `code`, `images`, `drawn`, ...). The script waits up to 300ms for the DOM to settle.
 pub async fn extract_page(tab_id: &str) -> Result<serde_json::Value, String> {
-    let raw = execute_javascript(tab_id, EXTRACT_SCRIPT).await?;
-    serde_json::from_str(&raw).map_err(|e| format!("Invalid extraction result: {}", e))
+    let raw = execute_javascript(tab_id, &extract_script(0)).await?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("Invalid extraction result: {}", e))?;
+    // Frames from other sites (e.g. an embedded online IDE) are invisible to the page's own script.
+    // Read them through the debugger. Best effort: on any failure the parent page's result is kept.
+    if has_cross_origin_skips(&value) {
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(EMBEDDED_FRAMES_TIMEOUT_SECS),
+            read_embedded_frames(tab_id, &mut value),
+        )
+        .await;
+    }
+    // Dev builds only: log a summary and dump the full result so it can be inspected.
+    #[cfg(debug_assertions)]
+    log_extraction(&value, &serde_json::to_string_pretty(&value).unwrap_or_default());
+    Ok(value)
+}
+
+// ── Cross-origin frames ────────────────────────────────────────────────────
+
+const EMBEDDED_FRAMES_TIMEOUT_SECS: u64 = 6;
+const MAX_EMBEDDED_FRAMES: usize = 4;
+const MAX_EMBEDDED_FRAME_DEPTH: usize = 2;
+const MIN_EMBEDDED_FRAME_SIDE: i64 = 100;
+/// Same third-party widget hosts the page script skips (FRAME_DENY_RE in extract.js).
+const FRAME_DENYLIST: &[&str] = &[
+    "recaptcha", "hcaptcha", "chilipiper", "platform.twitter.com", "twitter.com/widgets",
+    "facebook.com/plugins", "intercom", "hotjar", "doubleclick", "googlesyndication",
+    "googletagmanager", "google-analytics", "disqus", "drift.com", "zendesk", "hubspot",
+    "sprig", "livechat", "tawk.to", "crisp.chat",
+];
+
+struct FrameTarget {
+    id: String,
+    url: String,
+}
+
+fn has_cross_origin_skips(value: &serde_json::Value) -> bool {
+    value["skippedFrames"]
+        .as_array()
+        .map_or(false, |a| a.iter().any(|f| f["reason"].as_str() == Some("cross-origin")))
+}
+
+fn frame_is_readable(url: &str) -> bool {
+    let lower = url.to_lowercase();
+    (lower.starts_with("http://") || lower.starts_with("https://"))
+        && !FRAME_DENYLIST.iter().any(|d| lower.contains(d))
+}
+
+fn host_of(url: &str) -> String {
+    url.split("://").nth(1).unwrap_or(url).split(['/', '?', '#']).next().unwrap_or("").to_string()
+}
+
+/// Cross-origin frames are separate DevTools targets of type "iframe" whose parent is the page
+/// (or an outer frame). Both connection modes list them.
+async fn list_child_frames(parent_id: &str) -> Vec<FrameTarget> {
+    let pick = |t: &serde_json::Value, id_key: &str, parent_key: &str| -> Option<FrameTarget> {
+        if t["type"].as_str() != Some("iframe") || t[parent_key].as_str() != Some(parent_id) {
+            return None;
+        }
+        Some(FrameTarget {
+            id: t[id_key].as_str()?.to_string(),
+            url: t["url"].as_str().unwrap_or("").to_string(),
+        })
+    };
+    if let Some(handle) = get_ws_browser_handle() {
+        let Ok(resp) = handle.send("Target.getTargets", serde_json::json!({})).await else {
+            return vec![];
+        };
+        resp["result"]["targetInfos"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|t| pick(t, "targetId", "parentFrameId")).collect())
+            .unwrap_or_default()
+    } else {
+        let Ok(resp) = reqwest::get(&format!("{}/json/list", cdp_http_base())).await else {
+            return vec![];
+        };
+        let Ok(list) = resp.json::<Vec<serde_json::Value>>().await else {
+            return vec![];
+        };
+        list.iter().filter_map(|t| pick(t, "id", "parentId")).collect()
+    }
+}
+
+async fn read_embedded_frames(tab_id: &str, main: &mut serde_json::Value) {
+    let mut queue = std::collections::VecDeque::from([(tab_id.to_string(), 0usize)]);
+    let mut read = 0usize;
+    while let Some((parent, depth)) = queue.pop_front() {
+        for frame in list_child_frames(&parent).await {
+            if read >= MAX_EMBEDDED_FRAMES {
+                return;
+            }
+            if !frame_is_readable(&frame.url) {
+                continue;
+            }
+            let offset = main["code"].as_array().map_or(0, |a| a.len());
+            let script = extract_script(offset);
+            let Ok(raw) = execute_javascript(&frame.id, &script).await else {
+                continue;
+            };
+            let Ok(result) = serde_json::from_str::<serde_json::Value>(&raw) else {
+                continue;
+            };
+            let side = |k: &str| result["viewport"][k].as_i64().unwrap_or(0);
+            if side("width") < MIN_EMBEDDED_FRAME_SIDE || side("height") < MIN_EMBEDDED_FRAME_SIDE {
+                continue;
+            }
+            let text = result["text"].as_str().unwrap_or("").trim().to_string();
+            let code = result["code"].as_array().cloned().unwrap_or_default();
+            if text.is_empty() && code.is_empty() {
+                continue;
+            }
+            merge_embedded_frame(main, &frame, &result, &text, code);
+            read += 1;
+            if depth + 1 < MAX_EMBEDDED_FRAME_DEPTH && has_cross_origin_skips(&result) {
+                queue.push_back((frame.id.clone(), depth + 1));
+            }
+        }
+    }
+}
+
+fn merge_embedded_frame(
+    main: &mut serde_json::Value,
+    frame: &FrameTarget,
+    result: &serde_json::Value,
+    text: &str,
+    code: Vec<serde_json::Value>,
+) {
+    let host = host_of(&frame.url);
+    let block = format!("--- Embedded frame ({}) ---\n{}\n--- End of embedded frame ---", host, text);
+    let joined = match main["text"].as_str().unwrap_or("") {
+        "" => block,
+        existing => format!("{}\n\n{}", existing, block),
+    };
+    main["text"] = serde_json::Value::String(joined);
+    if let Some(arr) = main["code"].as_array_mut() {
+        arr.extend(code);
+    }
+    let add = |main: &mut serde_json::Value, key: &str, n: i64| {
+        main[key] = serde_json::json!(main[key].as_i64().unwrap_or(0) + n);
+    };
+    add(main, "pageTextLength", result["pageTextLength"].as_i64().unwrap_or(0));
+    add(main, "framesRead", 1);
+    // This frame was counted as skipped in its parent; whatever it skipped itself still is.
+    let still_skipped = result["framesSkipped"].as_i64().unwrap_or(0);
+    add(main, "framesSkipped", still_skipped - 1);
+    if let Some(list) = main["skippedFrames"].as_array_mut() {
+        if let Some(i) = list.iter().position(|f| f["reason"].as_str() == Some("cross-origin")) {
+            list.remove(i);
+        }
+        if let Some(inner) = result["skippedFrames"].as_array() {
+            list.extend(inner.iter().cloned());
+        }
+    }
+    if result["truncated"].as_bool() == Some(true) {
+        main["truncated"] = serde_json::Value::Bool(true);
+    }
+    if let Some(probe) = result.get("probe").filter(|p| !p.is_null()) {
+        let entry = serde_json::json!({ "frame": frame.url.split(['?', '#']).next().unwrap_or(""), "probe": probe });
+        match main["probes"].as_array_mut() {
+            Some(arr) => arr.push(entry),
+            None => main["probes"] = serde_json::json!([entry]),
+        }
+    }
+    let entry = serde_json::json!({
+        "src": frame.url.split(['?', '#']).next().unwrap_or(""),
+        "chars": text.chars().count(),
+    });
+    match main["embeddedFrames"].as_array_mut() {
+        Some(arr) => arr.push(entry),
+        None => main["embeddedFrames"] = serde_json::json!([entry]),
+    }
+}
+
+#[cfg(debug_assertions)]
+fn log_extraction(value: &serde_json::Value, raw: &str) {
+    let len = |k: &str| value[k].as_str().map_or(0, |s| s.chars().count());
+    let count = |k: &str| value[k].as_array().map_or(0, |a| a.len());
+    println!(
+        "📄 [extract] url={} title={:?} root={} text={}ch code_blocks={} images={} drawn={} frames={}/{} skipped truncated={}",
+        value["url"].as_str().unwrap_or(""),
+        value["title"].as_str().unwrap_or(""),
+        value["root"].as_str().unwrap_or(""),
+        len("text"),
+        count("code"),
+        count("images"),
+        count("drawn"),
+        value["framesRead"],
+        value["framesSkipped"],
+        value["truncated"],
+    );
+    if let Some(frames) = value["skippedFrames"].as_array() {
+        for f in frames {
+            println!(
+                "📄 [extract] skipped frame: {} ({}, {}x{})",
+                f["src"].as_str().unwrap_or(""),
+                f["reason"].as_str().unwrap_or(""),
+                f["width"],
+                f["height"],
+            );
+        }
+    }
+    if let Some(frames) = value["embeddedFrames"].as_array() {
+        for f in frames {
+            println!(
+                "📄 [extract] embedded frame read: {} ({} chars)",
+                f["src"].as_str().unwrap_or(""),
+                f["chars"],
+            );
+        }
+    }
+    if let Some(err) = value["error"].as_str() {
+        println!("⚠️ [extract] script error: {}", err);
+    }
+    let mut path = std::env::temp_dir();
+    path.push("cracking_interview_extract.json");
+    match std::fs::write(&path, raw) {
+        Ok(()) => println!("📄 [extract] full result written to {}", path.display()),
+        Err(e) => println!("⚠️ [extract] could not write {}: {}", path.display(), e),
+    }
 }
 
 pub async fn execute_javascript(tab_id: &str, script: &str) -> Result<String, String> {
@@ -727,6 +960,27 @@ mod tests {
         assert!(decode_data_url("https://example.com/a.png").is_none());
     }
 
+    /// Serves one fixed HTML page on a free local port (for the cross-origin frame test).
+    fn serve_html(html: String) -> u16 {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    html.len(),
+                    html
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        });
+        port
+    }
+
     /// Runs the real extraction, page-image and scroll code against headless Chrome.
     /// `cargo test -- --ignored chrome_integration` (needs Google Chrome installed).
     #[tokio::test]
@@ -788,7 +1042,7 @@ mod tests {
             let text = extraction["text"].as_str().unwrap();
             assert!(text.contains("Question 7 / 10"), "{}", text);
             assert!(text.contains("[image 1]"), "{}", text);
-            assert!(text.contains("A) A"), "{}", text);
+            assert!(text.contains("( ) A"), "{}", text);
             assert!(text.contains("[chart/drawing: see screenshot]"), "{}", text);
             let images = extraction["images"].as_array().unwrap();
             assert_eq!(images.len(), 1);
@@ -802,6 +1056,32 @@ mod tests {
             assert_eq!(scroll_drawing_into_view(&tab_id, drawn).await.unwrap(), "scrolled");
             let again = extract_page(&tab_id).await.unwrap();
             assert_eq!(scroll_drawing_into_view(&tab_id, &again["drawn"][0]).await.unwrap(), "visible");
+
+            // A frame from another site (127.0.0.1 vs localhost) is its own DevTools target; the page's
+            // own script cannot read it, so its text and editor lines must come from the debugger.
+            let inner_port = serve_html(
+                "<html><body><p>INNER question: add two numbers</p><div class=\"monaco-editor\"><div class=\"view-lines\"><div class=\"view-line\">def add(a, b):</div></div></div></body></html>".to_string(),
+            );
+            let outer_port = serve_html(format!(
+                "<html><body><p>OUTER shell</p><iframe width=\"800\" height=\"400\" src=\"http://localhost:{}/\"></iframe></body></html>",
+                inner_port
+            ));
+            let resp = client
+                .put(format!("http://127.0.0.1:{}/json/new?http://127.0.0.1:{}/", port, outer_port))
+                .send()
+                .await
+                .unwrap();
+            let outer_tab = resp.json::<serde_json::Value>().await.unwrap()["id"].as_str().unwrap().to_string();
+            tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+            let framed = extract_page(&outer_tab).await.unwrap();
+            let ftext = framed["text"].as_str().unwrap();
+            assert!(ftext.contains("OUTER shell"), "{}", ftext);
+            assert!(ftext.contains(&format!("--- Embedded frame (localhost:{}) ---", inner_port)), "{}", ftext);
+            assert!(ftext.contains("INNER question: add two numbers"), "{}", ftext);
+            assert!(ftext.contains("def add(a, b):"), "{}", ftext);
+            assert_eq!(framed["framesRead"], 1, "{}", framed);
+            assert_eq!(framed["framesSkipped"], 0, "{}", framed);
+            assert_eq!(framed["embeddedFrames"].as_array().unwrap().len(), 1);
         }
         .await;
 

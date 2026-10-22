@@ -3,6 +3,10 @@ export interface ExtractedCode {
   number: number;
   language: string;
   source: string;
+  // File path (relative to the shared folder) when the editor reports one.
+  file?: string;
+  // 'editor' = an editor on screen; 'file' = another file the editor holds (open tab, not shown).
+  kind?: 'editor' | 'file';
   value: string;
 }
 
@@ -39,6 +43,8 @@ export interface TabExtraction {
   root: string;
   framesRead: number;
   framesSkipped: number;
+  // Debug only: why each skipped frame was skipped.
+  skippedFrames?: { src: string; reason: string; width: number; height: number }[];
   url: string;
   title: string;
   error?: string;

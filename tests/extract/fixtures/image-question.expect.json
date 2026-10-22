@@ -3,8 +3,8 @@
     "Question 7 / 10",
     "[image 1]",
     "Which box should replace the question mark (?) to complete the pattern?",
-    "A) A",
-    "E) E"
+    "( ) A",
+    "( ) E"
   ],
   "notContains": ["Enlarge Image", "Submit Answer", "[image 2]"],
   "images": 1,

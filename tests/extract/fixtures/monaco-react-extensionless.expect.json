@@ -1,0 +1,11 @@
+{
+  "contains": [
+    "--- Code editor 1 (Dockerfile, dockerfile) ---\nFROM node:20",
+    "--- Project file Makefile (makefile) ---",
+    "sample input"
+  ],
+  "notContains": [
+    "/1"
+  ],
+  "code": 3
+}

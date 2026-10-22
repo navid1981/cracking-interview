@@ -84,7 +84,8 @@ The primary source code is:
   - `scripts/build-windows.ps1`: Windows release — NSIS build via Tauri, sign app `.exe` and installer with SSL.com eSigner (CodeSignTool), verify signatures
 - **Tests**:
   - `tests/extract/run.mjs` + `tests/extract/fixtures/*.html` / `*.expect.json`: automated tests for `extract.js`, run in headless Google Chrome (no npm dependencies). `yarn test:extract` runs all fixtures; `yarn test:extract --show <name>` prints one fixture's full output; `yarn test:extract --url <url>` prints the extraction of a live page (manual smoke test; some sites, e.g. HackerRank, block headless Chrome)
-  - `cargo test` (in `src-tauri/`): image fitting/data-URL unit tests in `chrome/mod.rs`. `cargo test -- --ignored chrome_integration` runs the real Rust extraction, page-image and scroll code against headless Chrome
+  - Fixtures cover Monaco via `window.monaco` (`monaco-api-multifile`, `coding-monaco`, `monaco-models-fallback`, `monaco-no-api`), Monaco via React fiber (`monaco-react-multifile`, `-two-editors`, `-wrong-editor-first`, `-file-count-cap`, `-size-cap`, `-no-editor-found`, `-extensionless`), pictures (`image-question`, `image-three-options`), and skipped-frame reasons (`frames-skipped-reasons`, via `skippedFrameReasons` in the `.expect.json`). Currently 20/20 pass
+  - `cargo test` (in `src-tauri/`): image fitting/data-URL unit tests in `chrome/mod.rs`. `cargo test -- --ignored chrome_integration` runs the real Rust extraction, page-image and scroll code against headless Chrome, plus a cross-origin frame scenario (two local servers on different sites; the embedded page's text and editor line must appear in `text`)
 
 ### "Is this file used?" — how to verify quickly
 
@@ -159,7 +160,7 @@ Component responsibilities:
   - HTTP mode: tab listing via `GET /json/list`, per-tab WS for JS/screenshots
   - WS mode: `Target.getTargets` for tabs, `Target.attachToTarget` (flat protocol) + `sessionId` for JS/screenshots
   - `cdp_http_base()` helper uses `get_cdp_port()` — never hardcodes port 9222
-  - `extract_page(tab_id)` — runs `extract.js` and parses its JSON result
+  - `extract_page(tab_id)` — runs `extract.js` (via `extract_script(offset)`), parses its JSON result, then reads cross-origin frames (`read_embedded_frames`) if the page reported any
   - `get_resource_images(tab_id, urls)` — question images from Chrome's own resource cache (`Page.enable` → `Page.getResourceTree` → `Page.getResourceContent`); no new download, so login-gated images work. `data:` URLs are decoded directly. Uses `TabSession` (one CDP connection for several commands, HTTP or WS mode)
   - `fit_image_bytes(bytes, max_bytes)` — keeps png/jpeg/gif/webp within budget unchanged; otherwise decodes and re-encodes as JPEG (transparent areas on white), shrinking until it fits; fails for formats the `image` crate can't decode (e.g. SVG). Also used by tab screenshots
   - `scroll_drawing_into_view(tab_id, rect)` — scrolls a chart/drawing into view before the tab screenshot if less than half of it is visible
@@ -294,11 +295,11 @@ What the reader does:
 - **Walks the DOM itself** (not `innerText`) and writes each element type explicitly:
   - text inputs → `[blank]` at their position in the sentence (search/email/password/phone fields and type-ahead `role=combobox` pickers are skipped)
   - `<select>` → `[choose: was | were | am]` (placeholder option dropped, nothing marked selected)
-  - radio/checkbox groups (native and ARIA `role=radio/checkbox`) → `A) … B) …` labels (a single checkbox → `[ ]`); native inputs hidden behind styled labels still get a letter
+  - radio/checkbox groups (native and ARIA `role=radio/checkbox`) → `( ) Large` for single choice, `[ ] Large` for multi-select. **No A/B/C letters are invented** (changed 2026-10-22): the page doesn't show them, so an answer like "C" couldn't be matched to what the user sees. Letters that appear are the page's own label text. The prompt does not yet tell the AI to answer with the option's text (open item, `src/services/prompts.ts`)
   - `<textarea>` / `contenteditable` answer boxes → skipped. **Exception:** tiny (≤2px) editable elements are screen-reader/clipboard mirrors (e.g. Figma's `div[role=document].focus-target`), read as `[Hidden text copy kept by the page, unordered:]`
   - code editors → placeholder `[code editor N: see below]`; the full code is appended at the end as `--- Code editor N (lang) --- … --- End of code editor N ---`
   - collapsed `<details>` content is included, marked `[collapsed section]`; `display:none` / `visibility:hidden` content is skipped (this also drops responsive duplicates)
-  - open shadow roots (including slots) and **same-origin iframes** are walked into. Iframe guardrails: denylist of widget hosts (reCAPTCHA, Twitter, Hotjar, chat widgets, …), ≥100×100px and visible, ≤20k chars per frame. Cross-origin iframes are not read
+  - open shadow roots (including slots) and **same-origin iframes** are walked into. Iframe guardrails: denylist of widget hosts (reCAPTCHA, Twitter, Hotjar, chat widgets, …), ≥100×100px and visible, ≤20k chars per frame. Cross-origin iframes can't be read by the page script; they are recorded in `skippedFrames` (`{src, reason, width, height}`; reasons `cross-origin`, `too-small`, `denylisted`, `over-size-cap`, `no-body`) and read by Rust over the debugger (see "Cross-origin frames" below)
   - math: KaTeX → `$TeX$` from its annotation; MathJax → TeX source or MathML; MathML → linear text (`x + 3 = 7`). Server-pre-rendered MathJax SVG (no source in the page, e.g. HackerRank) can't be recovered
   - `<sup>`/`<sub>` → `^` / `_` (`10^4`, `O(n^2)`)
   - `<pre>` keeps spaces, tabs and blank lines
@@ -309,6 +310,21 @@ What the reader does:
 - Monaco: `monaco.editor.getEditors()` matched to the editor's DOM node via `getDomNode()` → `getModel().getValue()`. Without `getEditors()`: remaining non-empty models, code languages before `plaintext` (LeetCode has an extra empty plaintext model). Last resorts: the editor's textarea, then rendered `.view-line`s sorted by position
 - CodeMirror 6: `.cm-content.cmView.view.state.doc` (LeetCode's test-case box). CodeMirror 5: `el.CodeMirror.getValue()`. Ace: `el.env.editor.getValue()`
 - Editors outside the chosen content root are still included
+- **Monaco without `window.monaco`** (e.g. CoderPad, a React app): `reactMonaco()` walks React's fiber tree (time-boxed 150ms, once per document) for editor-like objects (`getModel()` + `getDomNode()`), matches each to its on-screen editor by DOM node, and reads `getValue()`. `source` = `react-fiber`. Read-only: no scrolling, clicking or clipboard
+- **Other files the editor holds** (open project tabs not on screen): all Monaco models (`monaco.editor.getModels()` if exposed, else the model service reached through the editor's own properties) are appended as `--- Project file <path> (<lang>) --- … ---`. Skipped: empty files, `node_modules`/`dist`/`build`/`.git`, lockfiles, `.min.*`, `.map`, `.svg`. Caps: 10k chars per extra file, 30k total, 20 files; the rest is reported as `[N more project files not included]`. Paths are shown relative to the folder the files share (a lone file shows just its name); in-memory models (`inmemory://…`) get no fake name
+- Code entries carry `source` (`monaco-api`, `react-fiber`, `monaco-models`, `monaco-textarea`, `rendered-lines`, …), `file`, `kind` (`editor` | `file`) in the JSON/dump only; the AI sees only the labelled blocks in `text`
+- **Limit:** editors whose instance can't be reached (no API, no React) fall back to the textarea / rendered lines, which only hold the visible window of a long file. Never solved by scrolling the user's tab (the user does not want the app to move their Chrome tab)
+
+**Cross-origin frames** (`chrome/mod.rs`: `read_embedded_frames`, `list_child_frames`, `merge_embedded_frame`):
+- A frame from another *site* is its own DevTools target of type `iframe` (parent = `parentFrameId` over WS `Target.getTargets`, `parentId` in HTTP `/json/list`). If the page reports a `cross-origin` skip, Rust lists the tab's child frame targets, runs the same `extract.js` inside each (`extract_script(offset)` sets `CODE_NUMBER_OFFSET` so code blocks keep counting) and appends `--- Embedded frame (host) --- … --- End of embedded frame ---` to `text`; code entries are merged; the JSON gets `embeddedFrames` and updated `framesRead`/`framesSkipped`
+- Guardrails: widget denylist (`FRAME_DENYLIST`, same hosts as the page script), http(s) only, viewport ≥100×100, empty frames dropped, max 4 frames, depth 2, 6s total timeout; on any failure the parent page's result is kept. Frame images/canvases are not collected
+- Not handled: **same-site** cross-origin frames (different port/subdomain of one site) share a process and are not separate targets; the WS ("chrome://inspect toggle") mode was not tested live (HTTP mode is covered by the integration test)
+- **Known case, HackerRank project questions** (VS Code in the browser, frame on `*.hrcdn.net`): the frame is read, but only the active editor (via its textarea, `source: monaco-textarea`) comes through. VS Code only loads *opened* files into the browser (the rest live on a remote machine), exposes no global editor API (no `require`, `IDE_FS` is the FullStory recorder), and the task description is likely in an unopened `README.md`. Reaching those would need the IDE's `vscode-remote-resource` URLs or opening files through the UI; the user rejected both, so this is an accepted gap
+
+**Debug aids (debug builds only, `cfg(debug_assertions)`)** — nothing here is compiled into release builds, and none of it reaches the AI:
+- `chrome::log_extraction` prints a `📄 [extract]` summary (url, root, text length, code blocks, images, frames read/skipped with reasons, embedded frames) and writes the full result to `$TMPDIR/cracking_interview_extract.json`
+- `dump_prompt` (`main.rs`) writes the exact prompt plus attached image paths to `$TMPDIR/cracking_interview_prompt.txt` for `query_ai`, `query_ai_with_image`, `query_ai_via_proxy`, `query_ai_via_proxy_with_image` (not the conversation command)
+- `DEBUG_PROBE` in `extract.js` (flipped by `extract_script`) adds a `probe` object (editor environment: relevant window globals, tabs, explorer rows, editor ancestors, iframes, text sample) to the dump; embedded frames' probes are merged under `probes`. Use it to investigate a new site, then read the dump
 
 **Pictures** (decided in `App.tsx` with `tabExtraction.ts`):
 - `extract.js` reports large visuals (rendered area ≥ 40,000px², i.e. about 200×200; icons/logos are smaller): `images` = up to **4** largest `<img>` (placeholders `[image 1]`…`[image 4]` in page order), `drawn` = large `<canvas>`/`<svg>` (placeholder `[chart/drawing: see screenshot]`; SVG `<text>` labels are also written as text)
@@ -317,7 +333,7 @@ What the reader does:
 - Max **4 pictures per question, same for free and Pro**. The AI commands split a total budget of 4.5MB across the pictures, so a request is never larger than one full screenshot used to be
 - The text is **always** sent with the pictures (pictures cover what has no text; text gives exact words, numbers and off-screen parts)
 
-Known limits: canvas apps without a hidden text copy (e.g. Miro view-only boards) only get the screenshot of the visible area; drag-and-drop answer state isn't read; cross-origin iframes aren't read.
+Known limits: canvas apps without a hidden text copy (e.g. Miro view-only boards) only get the screenshot of the visible area; drag-and-drop answer state isn't read; same-site cross-origin iframes aren't read; sites that keep project files outside the browser (HackerRank's VS Code) only expose the active editor.
 
 ### 4) AI providers and payload formats
 

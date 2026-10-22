@@ -80,3 +80,4 @@ AI models are not hardcoded in the app: free, BYO-key, and Pro model lists are s
 
 ---
 
+  ▎ "For multiple-choice questions, answer with the exact text of the option, such as 'Slow', not a letter or a position."
