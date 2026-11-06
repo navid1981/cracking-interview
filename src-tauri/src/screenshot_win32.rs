@@ -212,8 +212,8 @@ mod win32_impl {
     };
 
     const CAPTUREBLT_BITS: u32 = 0x4000_0000;
-    const DESKTOPHORZRES_IDX: i32 = 118;
-    const DESKTOPVERTRES_IDX: i32 = 117;
+    const DESKTOPHORZRES_IDX: u32 = 118;
+    const DESKTOPVERTRES_IDX: u32 = 117;
     const MONITORINFOF_PRIMARY_FLAG: u32 = 1;
     const DWMWA_CLOAKED_ATTR: u32 = 14;
     const PW_RENDERFULLCONTENT_FLAG: u32 = 0x0000_0002;
