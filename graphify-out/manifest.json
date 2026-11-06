@@ -942,9 +942,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot_win32.rs": {
-    "mtime": 1793982348.0185387,
-    "seen": 1793982473.534838,
-    "ast_hash": "dc29ebe7bd396353ad013193768e190c",
+    "mtime": 1793983200.8698883,
+    "seen": 1793983222.884444,
+    "ast_hash": "4ef0ccbef9d933c9d624b813cef6b28b",
     "semantic_hash": ""
   },
   "docs/superpowers/plans/2026-11-06-legacy-gdi-display-capture.md": {
@@ -957,6 +957,12 @@
     "mtime": 1793981804.1258779,
     "seen": 1793982343.102151,
     "ast_hash": "285e38d4f90321e652fc87b8ad5db49b",
+    "semantic_hash": ""
+  },
+  "docs/log.txt": {
+    "mtime": 1793983139.6834733,
+    "seen": 1793983222.885395,
+    "ast_hash": "eb180c199fdf8365820ec7a605bda7f9",
     "semantic_hash": ""
   }
 }
