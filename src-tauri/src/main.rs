@@ -2006,6 +2006,8 @@ fn main() {
             open_privacy_settings,
             restart_app,
             move_window_by,
+            save_session_snapshot,
+            get_session_snapshot,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -2027,6 +2029,7 @@ fn main() {
             if let Ok(cfg_dir) = app_config_dir(app.handle()) {
                 resilience::init_config_dir(cfg_dir);
             }
+            resilience::session::apply_restored_window_rect(app.handle());
             screenshot::request_screen_recording_permission();
             
             // Pre-compile audio recorder helper in background (eliminates first-recording delay)
@@ -2323,6 +2326,19 @@ fn open_privacy_settings(pane: String) -> Result<(), String> {
 fn restart_app(app: tauri::AppHandle) {
     resilience::authorize_quit(&app);
     app.restart();
+}
+
+#[tauri::command]
+fn save_session_snapshot(
+    app: tauri::AppHandle,
+    snapshot: resilience::session::SessionSnapshot,
+) -> Result<(), String> {
+    resilience::session::save_snapshot_with_window(&app, snapshot)
+}
+
+#[tauri::command]
+fn get_session_snapshot() -> Option<resilience::session::SessionSnapshot> {
+    resilience::session::load_snapshot_if_restore_mode()
 }
 
 #[tauri::command]

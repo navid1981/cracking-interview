@@ -11,6 +11,7 @@ import AuthScreen from './components/AuthScreen';
 import SetupChecklist from './components/SetupChecklist';
 import { useSetupStatus } from './hooks/useSetupStatus';
 import { useKeyboardInputMode } from './hooks/useKeyboardInputMode';
+import { scheduleSessionSnapshot, fetchRestoredSessionSnapshot } from './services/recoveryState';
 import AppSettingsTab from './components/settings/AppSettingsTab';
 import HotkeysSettingsTab from './components/settings/HotkeysSettingsTab';
 import { getMessageActions, MESSAGE_ACTION_LABELS, MessageActionKind } from './services/messageActions';
@@ -226,15 +227,42 @@ function App() {
     return saved !== null ? saved === 'true' : true;
   });
 
-  // Apply saved app preferences on startup
+  // Apply saved app preferences on startup & restore snapshot if respawned with --restore-session
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     invoke('set_window_opacity', { opacity: windowOpacity }).catch(() => {});
-    // Stealth mode is applied by Rust at startup from stealth.json config file.
-    // No need to call set_stealth_mode here — it would conflict with the startup
-    // activation policy on macOS.
+    fetchRestoredSessionSnapshot().then((snap) => {
+      if (!snap) return;
+      if (snap.active_template_id) {
+        setSelectedTemplate(snap.active_template_id);
+      }
+      if (snap.programming_language) {
+        setSelectedLanguage(snap.programming_language as ProgrammingLanguage);
+      }
+      if (snap.active_mode) {
+        setUseScreenshot(snap.active_mode === 'screenshot');
+      }
+      if (snap.selected_model) {
+        setAiConfig((prev) => ({ ...prev, selected_model: snap.selected_model! }));
+      }
+      if (snap.last_response_markdown) {
+        setAiResponse(snap.last_response_markdown);
+      }
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Debounced non-sensitive session checkpoint for guardian/desktop recovery
+  useEffect(() => {
+    scheduleSessionSnapshot({
+      stealthEnabled: stealthMode,
+      selectedModel: aiConfig.selected_model,
+      activeTemplateId: selectedTemplate,
+      programmingLanguage: selectedLanguage,
+      useScreenshot,
+      lastResponseMarkdown: aiResponse,
+    });
+  }, [stealthMode, aiConfig.selected_model, selectedTemplate, selectedLanguage, useScreenshot, aiResponse]);
 
   const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
 

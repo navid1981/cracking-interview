@@ -11,6 +11,7 @@ use tauri::Manager;
 pub mod windows;
 #[cfg(target_os = "macos")]
 pub mod macos;
+pub mod session;
 
 pub static AUTHORIZED_QUIT: AtomicBool = AtomicBool::new(false);
 pub static USER_HIDDEN: AtomicBool = AtomicBool::new(false);
