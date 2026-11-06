@@ -150,9 +150,9 @@
     "semantic_hash": ""
   },
   "src-tauri/tauri.conf.json": {
-    "mtime": 1793943764.4399211,
-    "seen": 1793953209.077429,
-    "ast_hash": "821d032c1a543f3859bdeef9302886fd",
+    "mtime": 1793960783.6031694,
+    "seen": 1793960827.471745,
+    "ast_hash": "48717f246715f6e1419095dcb4f56466",
     "semantic_hash": ""
   },
   "src/App.tsx": {
@@ -744,9 +744,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/guardian.rs": {
-    "mtime": 1793960190.9388483,
-    "seen": 1793960224.728311,
-    "ast_hash": "aa21880dfa3d78ef94c02c9dac72eca4",
+    "mtime": 1793960790.9545465,
+    "seen": 1793960827.471595,
+    "ast_hash": "35fcafe11d6fc751792291808e977f72",
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/macos.rs": {

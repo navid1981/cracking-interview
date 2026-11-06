@@ -46,7 +46,8 @@
         "height": 900,
         "resizable": true,
         "fullscreen": false,
-        "alwaysOnTop": true
+        "alwaysOnTop": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu --disable-gpu-compositing --disable-d3d11"
       }
     ],
     "security": {
