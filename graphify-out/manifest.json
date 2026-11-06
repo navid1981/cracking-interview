@@ -126,9 +126,9 @@
     "semantic_hash": "8e734ea5be135a77623dec3091fe2439"
   },
   "src-tauri/src/main.rs": {
-    "mtime": 1793953758.8584502,
-    "seen": 1793953802.292143,
-    "ast_hash": "fd2864610b2869d470f9373b165409dc",
+    "mtime": 1793958876.23289,
+    "seen": 1793958917.337794,
+    "ast_hash": "3e40fd66329263fad3b7354e8b240521",
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot.rs": {
@@ -216,10 +216,10 @@
     "semantic_hash": ""
   },
   "src/main.tsx": {
-    "mtime": 1767389947.7981832,
-    "seen": 1791314020.8597949,
-    "ast_hash": "1cca912cf9c35a164f12f00692ac035f",
-    "semantic_hash": "1cca912cf9c35a164f12f00692ac035f"
+    "mtime": 1793958881.4136665,
+    "seen": 1793958917.338243,
+    "ast_hash": "52ced2634d2e33053b3e6a3a5d15e01f",
+    "semantic_hash": ""
   },
   "src/services/prompts.ts": {
     "mtime": 1793943764.4459507,

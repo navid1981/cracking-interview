@@ -1986,7 +1986,21 @@ fn main() {
             move_window_by,
             save_session_snapshot,
             get_session_snapshot,
+            report_frontend_diagnostic,
         ])
+        .on_page_load(|webview_window, payload| {
+            // [webview-diag] Boundary probe 1: did WebView2 finish loading the
+            // embedded UI at all? Absence of "Finished" under SEB while the
+            // window frame is visible means the renderer/navigation layer died,
+            // not React and not the Rust backend.
+            if webview_window.label() == "main" {
+                resilience::log_event(&format!(
+                    "[webview-diag] page-load {:?} url={}",
+                    payload.event(),
+                    payload.url()
+                ));
+            }
+        })
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if resilience::enabled() && !resilience::quit_was_authorized() {
@@ -2329,7 +2343,17 @@ fn save_session_snapshot(
 
 #[tauri::command]
 fn get_session_snapshot() -> Option<resilience::session::SessionSnapshot> {
+    // [webview-diag] Boundary probe 2: App.tsx calls this on mount, so this
+    // line proves the JS bundle executed, React mounted, and Tauri IPC works.
+    resilience::log_event("[webview-diag] frontend IPC alive: get_session_snapshot called");
     resilience::session::load_snapshot_if_restore_mode()
+}
+
+#[tauri::command]
+fn report_frontend_diagnostic(message: String) {
+    // [webview-diag] Boundary probe 3: JS errors / boot milestones from main.tsx.
+    let truncated: String = message.chars().take(500).collect();
+    resilience::log_event(&format!("[webview-diag] frontend: {}", truncated));
 }
 
 #[tauri::command]
