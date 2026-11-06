@@ -45,6 +45,11 @@ pub fn get_cdp_port() -> u16 {
     CDP_PORT.load(Ordering::Relaxed)
 }
 
+#[cfg(test)]
+pub fn set_cdp_port_for_test(port: u16) {
+    CDP_PORT.store(port, Ordering::Relaxed);
+}
+
 /// Returns a clone of the persistent WS handle (WS mode only).
 pub fn get_ws_browser_handle() -> Option<WsBrowserHandle> {
     WS_HANDLE.lock().unwrap().clone()

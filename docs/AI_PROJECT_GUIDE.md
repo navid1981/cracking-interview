@@ -8,7 +8,7 @@ CrackingInterview is a **Tauri (Rust) + React** desktop app that helps a softwar
 
 - **Listing Chrome tabs** (via **Chrome DevTools Protocol** / CDP) and letting the user choose an input source
 - **Extracting content** from the selected source either as:
-  - **Text** (execute JS in the tab to read `document.body.innerText`), or
+  - **Text** (run `src-tauri/src/chrome/extract.js` in the tab: a structure-aware page reader that returns the question text, code-editor contents, and question images; images/charts are sent to the AI along with the text), or
   - **Screenshot** (CDP tab screenshot or OS display capture)
   - **Audio** (system audio recording sent directly to AI models that support audio input)
 - Sending that content into an **LLM** (via OpenRouter proxy or user's own API key)
@@ -32,6 +32,8 @@ The primary source code is:
   - `src/App.css`: global app styles
   - `src/services/prompts.ts`: prompt templates, per-template system prompts, `buildPrompt(...)`, `getTemplateLabel(templateId)`
   - `src/services/supabase.ts`: Supabase client, auth helpers, usage stats
+  - `src/services/modelConfig.ts`: `ModelConfig` type, validation, cache, and `fetchRemoteModelConfig()` for the `get-models` response (models + subscription limits)
+  - `src/services/tabExtraction.ts`: `TabExtraction` type (result of `extract_tab_text`), `MAX_QUESTION_IMAGES` (4), and the rules for when text mode adds a tab screenshot (`needsTabScreenshot`, `isWhiteboard`)
   - `src/components/TabDropdown.tsx`: custom dropdown for **InputSource** with thumbnails
   - `src/components/TabDropdown.css`: styles for `TabDropdown.tsx`
   - `src/components/AIResponseDisplay.tsx`: renders AI response, parses common markers/blocks, syntax-highlights code
@@ -41,33 +43,49 @@ The primary source code is:
   - `src/components/AuthScreen.tsx` + `.css`: Sign in/sign up container
   - `src/components/SignInForm.tsx`: Email/password sign in form
   - `src/components/SignUpForm.tsx`: Email/password sign up form
+  - `src/components/SetupChecklist.tsx` + `.css`: setup steps (main-screen card + compact Settings → App panel)
+  - `src/components/settings/AppSettingsTab.tsx`: Settings → App (Transparency, Theme, Stealth Mode, Setup & Permissions); Stealth boxes use `.stealth-box.is-active|is-inactive|is-locked` (theme-aware via `--tone` + `color-mix`)
+  - `src/components/settings/HotkeysSettingsTab.tsx`: Settings → HotKeys, data-driven field list (`SECTIONS`)
+  - `src/hooks/useSetupStatus.ts`: setup status state, focus re-check, grant/hide/show, "all set" flash
+  - `src/services/hotkeys.ts`: `HotkeysConfig` type + `formatHotkey` ("Cmd+Shift+1" → "⌘⇧1" on macOS). Solve button and Text/Screenshot segment tooltips show the saved hotkeys (`activeHotkeys`, loaded at startup)
+  - `src/services/messageActions.ts`: maps `❌`/`⚠️` status messages to next-step buttons under the message (Add your API key, Upgrade to Pro, View usage, Open/Download Chrome, Sign in again, Open Screen Recording settings). Add a rule to `RULES` when introducing a new actionable error
+  - Remaining Settings tabs (Account, AI Models, Prompts) are still inline in `App.tsx`
 - **Backend (Tauri/Rust)**: `src-tauri/src/`
-  - `main.rs`: Tauri commands (IPC) + global hotkey registration
-  - `chrome/*`: Chrome CDP integration (tabs, activate, execute JS, screenshots)
-  - `ai/*`: Gemini + Claude HTTP clients + provider routing
-  - `audio.rs`: System audio recording (macOS: ScreenCaptureKit via Swift helper, Windows: WASAPI loopback), MP3 encoding
+  - `main.rs`: Tauri commands (IPC), window lifecycle, and global hotkey orchestration
+  - `stealth_hotkey.rs`: OS-level key swallowing (`CGEventTap` on macOS, `WH_KEYBOARD_LL` on Windows), non-activating window raising, and hook lifecycle teardown
+  - `chrome/*`: Chrome CDP integration (tabs, activate, execute JS, screenshots); `chrome/extract.js` is the page reader used by text mode (embedded via `include_str!`)
+  - `ai/*`: Gemini HTTP client for bring-your-own-key calls
+  - `audio.rs`: macOS Swift audio helper lookup/compile + warm/cooldown (used by live transcription)
   - `transcription.rs`: Real-time audio capture → Deepgram WebSocket streaming → live transcript events
   - `documents.rs`: Document text extraction (PDF, DOCX, DOC, TXT) and placeholder persistence
-  - `screenshot.rs`: OS display capture (screenshots crate), thumbnails
+  - `screenshot.rs`: OS display capture (screenshots crate), thumbnails, asynchronous Lanczos downscaling & JPEG compression
 - **Resources**: `src-tauri/resources/`
   - `audio_recorder.swift`: Swift helper for macOS audio recording + live PCM streaming (compiled at runtime)
 - **Supabase Edge Functions**: `supabase/functions/`
   - `ai-proxy/index.ts`: OpenRouter proxy with quota enforcement (supports single prompt + multi-turn messages array)
-  - `deepgram-key/index.ts`: Securely provides Deepgram API key to authenticated Pro users
+  - `deepgram-key/index.ts`: Securely provides a temporary Deepgram key to authenticated Pro users, plus `remaining_seconds` and the transcription `model` (`TRANSCRIPTION_MODEL`)
   - `create-checkout/index.ts`: Stripe checkout session creation (**production** — app calls this)
   - `create-checkout-test/index.ts`: Stripe checkout (test mode, kept for development)
   - `create-billing-portal/index.ts`: Stripe Customer Portal (**production** — app calls this)
   - `create-billing-portal-test/index.ts`: Stripe Customer Portal (test mode, kept for development)
   - `stripe-webhook/index.ts`: Stripe webhook handler (**production** — Stripe calls this)
   - `stripe-webhook-test/index.ts`: Stripe webhook handler (test mode, kept for development)
-  - `notification/index.ts`: Announcement system (returns announcements based on user type + app version)
-  - `get-models/index.ts`: Returns LLM model configuration (pro models, free model, default) from shared constants
+  - `notification/index.ts`: Announcement system (returns announcements based on user type + app version). Versions older than `LATEST_APP_VERSION` (numeric semver compare) get "Update Available"; Pro welcome lists `PRO_MODELS` names
+  - `get-models/index.ts`: Returns LLM model configuration (pro models, free model, BYO model, default) from shared constants; `?v=2` gets the current shape, no version gets the frozen legacy shape for older releases
   - `log-audio-usage/index.ts`: Logs audio recording duration for usage tracking
-  - `_shared/models.ts`: Shared LLM model constants (IDs, names, providers, OpenRouter mapping) used by `ai-proxy` and `get-models`
-  - `ping/index.ts`: Network latency diagnostic
-- **Scripts** (project root):
-  - `toggle-visibility.sh`: (Legacy) Toggle stealth/normal mode — stealth is now controlled from App Settings
-  - `restart-app.sh`: Kill and restart the Tauri dev app
+  - `_shared/models.ts`: Shared LLM model constants (IDs, names, providers, OpenRouter mapping) used by `ai-proxy` and `get-models`, plus the Deepgram `TRANSCRIPTION_MODEL` (`nova-3`) used by `deepgram-key`
+  - `_shared/limits.ts`: Subscription limits — `FREE_LIFETIME_CALL_LIMIT` (3), `PRO_MONTHLY_REQUEST_LIMIT` (150), `PRO_MONTHLY_AUDIO_SECONDS` (36000 = 10h), `PRO_AUDIO_SESSION_MAX_SECONDS` (5400 = 90 min), `FREE_TIER_ALLOWED_DOMAINS` (free/BYO site allow-list; `['all']` removes the site restriction, an empty list is treated as "config not loaded" and blocks), `MAX_OUTPUT_TOKENS` (16384). Used by `ai-proxy`, `deepgram-key`, `log-audio-usage`, `get-models`, and `notification`
+- **Supabase migrations**: `supabase/migrations/`
+  - `002_cleanup_old_api_usage.sql`: pg_cron job deleting `api_usage` rows older than 3 months
+  - `003_audio_usage.sql`: `audio_usage` table, `sum_audio_seconds` RPC, and its pg_cron cleanup job
+- **Scripts**:
+  - `restart-app.sh` (project root): Kill and restart the Tauri dev app
+  - `scripts/build-macos.sh`: End-to-end macOS release — universal build, codesign (hardened runtime), DMG creation + styling, DMG signing, notarization, stapling
+  - `scripts/build-windows.ps1`: Windows release — NSIS build via Tauri, sign app `.exe` and installer with SSL.com eSigner (CodeSignTool), verify signatures
+- **Tests**:
+  - `tests/extract/run.mjs` + `tests/extract/fixtures/*.html` / `*.expect.json`: automated tests for `extract.js`, run in headless Google Chrome (no npm dependencies). `yarn test:extract` runs all fixtures; `yarn test:extract --show <name>` prints one fixture's full output; `yarn test:extract --url <url>` prints the extraction of a live page (manual smoke test; some sites, e.g. HackerRank, block headless Chrome)
+  - Fixtures cover Monaco via `window.monaco` (`monaco-api-multifile`, `coding-monaco`, `monaco-models-fallback`, `monaco-no-api`), Monaco via React fiber (`monaco-react-multifile`, `-two-editors`, `-wrong-editor-first`, `-file-count-cap`, `-size-cap`, `-no-editor-found`, `-extensionless`), pictures (`image-question`, `image-three-options`), and skipped-frame reasons (`frames-skipped-reasons`, via `skippedFrameReasons` in the `.expect.json`). Currently 20/20 pass
+  - `cargo test` (in `src-tauri/`): image fitting/data-URL unit tests in `chrome/mod.rs`. `cargo test -- --ignored chrome_integration` runs the real Rust extraction, page-image and scroll code against headless Chrome, plus a cross-origin frame scenario (two local servers on different sites; the embedded page's text and editor line must appear in `text`)
 
 ### "Is this file used?" — how to verify quickly
 
@@ -142,6 +160,12 @@ Component responsibilities:
   - HTTP mode: tab listing via `GET /json/list`, per-tab WS for JS/screenshots
   - WS mode: `Target.getTargets` for tabs, `Target.attachToTarget` (flat protocol) + `sessionId` for JS/screenshots
   - `cdp_http_base()` helper uses `get_cdp_port()` — never hardcodes port 9222
+  - `extract_page(tab_id)` — runs `extract.js` (via `extract_script(offset)`), parses its JSON result, then reads cross-origin frames (`read_embedded_frames`) if the page reported any
+  - `get_resource_images(tab_id, urls)` — question images from Chrome's own resource cache (`Page.enable` → `Page.getResourceTree` → `Page.getResourceContent`); no new download, so login-gated images work. `data:` URLs are decoded directly. Uses `TabSession` (one CDP connection for several commands, HTTP or WS mode)
+  - `fit_image_bytes(bytes, max_bytes)` — keeps png/jpeg/gif/webp within budget unchanged; otherwise decodes and re-encodes as JPEG (transparent areas on white), shrinking until it fits; fails for formats the `image` crate can't decode (e.g. SVG). Also used by tab screenshots
+  - `scroll_drawing_into_view(tab_id, rect)` — scrolls a chart/drawing into view before the tab screenshot if less than half of it is visible
+- `src-tauri/src/chrome/extract.js`
+  - The text-mode page reader (see "Text extraction details" below). Evaluated with `Runtime.evaluate` + `awaitPromise`; resolves to a JSON string
 - `src-tauri/src/chrome/launcher.rs`
   - `detect_user_chrome_port()` — reads `DevToolsActivePort` from system Chrome profile dirs
   - `WsBrowserHandle` — cloneable handle wrapping an `mpsc::UnboundedSender`; all CDP commands go through one persistent WS connection
@@ -150,25 +174,26 @@ Component responsibilities:
   - `launch_chrome_cdp_window()` — tries user Chrome (HTTP → WS), falls back to launching new Chrome
   - `get_cdp_port()` / `get_ws_browser_handle()` — runtime accessors for the active connection
 - `src-tauri/src/ai/mod.rs`
-  - routes to Gemini vs Claude based on `config.selected_model`
+  - BYO-key direct calls (Gemini key only); `config.selected_model` (`byo_model`) and `config.max_output_tokens` come from the server
   - MIME sniffing helper for image bytes
 - `src-tauri/src/ai/gemini.rs`
   - calls Google Generative Language API
-  - supports API key authentication
-- `src-tauri/src/ai/claude.rs`
-  - calls Anthropic Messages API
-  - uses detected image MIME type for screenshots
+  - API key authentication only (`?key=` query param)
 - `src-tauri/src/audio.rs`
-  - System audio recording for both macOS and Windows
-  - macOS: Spawns Swift helper process (`audio_recorder.swift`) using ScreenCaptureKit
-  - Windows: WASAPI loopback capture in separate thread
-  - WAV to MP3 conversion using `mp3lame-encoder` crate (statically linked)
-  - Warm mode support for instant recording start (macOS only)
-  - 3-minute automatic timeout on both platforms
+  - macOS audio helper management for live transcription: locates/compiles the Swift helper (`audio_recorder.swift`, ScreenCaptureKit) used by `transcription.rs`
+  - Warm mode (`warm_audio_capture` / `cooldown_audio_capture`) pre-initializes the helper while the Audio source is selected (macOS only; no-ops on Windows)
+  - Windows audio capture lives in `transcription.rs` (WASAPI)
 - `src-tauri/src/screenshot.rs`
   - OS display enumeration + capture (screenshots crate)
   - encodes capture as JPEG bytes and (optionally) downsizes for limits
-
+- `src-tauri/src/stealth_hotkey.rs`
+  - `HotkeyAction` enum + `dispatch_action()` (emits `hotkey-*` events, handles move/visibility/quit)
+  - macOS `CGEventTap` and Windows `WH_KEYBOARD_LL` hooks; matched actions are dispatched via `app.run_on_main_thread(...)` so AppKit/Win32 window calls never run on the hook thread (calling `NSWindow` APIs off the main thread caused assertion crashes)
+  - Accessibility checks (`AXIsProcessTrusted` / `AXIsProcessTrustedWithOptions`), `bring_to_front_without_focus`, hook teardown
+- `src-tauri/src/transcription.rs`
+  - Deepgram WebSocket session + platform PCM capture (see "Real-time Transcription" below)
+- `src-tauri/src/documents.rs`
+  - PDF/DOCX/DOC/TXT text extraction and `documents.json` persistence
 ## Key runtime concepts
 
 ### 1) Chrome integration via CDP (not a Chrome extension)
@@ -249,18 +274,66 @@ This is why the UI shows "Input Source" rather than only tabs.
 
 Frontend setting: `useScreenshot` (stored in `localStorage`)
 
-- **Text mode** (Chrome tab only): `extract_tab_text` command which runs:
-  - `chrome::execute_javascript(tab_id, "document.body.innerText")`
+- **Text mode** (Chrome tab only): `extract_tab_text` command → `chrome::extract_page(tab_id)`, which runs `extract.js` in the tab and returns structured JSON (`text`, `code`, `images`, `drawn`, ...). Text mode can also attach pictures (up to 4): see "Text extraction details" below.
 - **Screenshot mode**
-  - Chrome tab: `capture_tab_screenshot` (CDP `Page.captureScreenshot` as JPEG bytes, written to a temp file)
-  - Display: `capture_display_screenshot` (OS capture → encoded as JPEG bytes, written to a temp file)
-- **Audio mode** (system audio):
-  - `start_audio_recording` / `stop_audio_recording`
-  - Records system audio (interviewer voice from Zoom/Teams/etc.)
-  - Returns MP3 file path (sent directly to Gemini which supports audio input)
-  - 3-minute automatic timeout
-  - macOS: Uses ScreenCaptureKit via compiled Swift helper with "warm mode" for instant start
-  - Windows: Uses WASAPI loopback capture
+  - Chrome tab: `capture_tab_screenshot` (CDP `Page.captureScreenshot` as JPEG bytes; decoded, compressed, and written to a temp file via `spawn_blocking`)
+  - Display: `capture_display_screenshot` (OS display capture via `screenshots` crate → Lanczos3 downscaled and encoded as JPEG bytes via `spawn_blocking`, written to a temp file)
+  - All thumbnail generation (`get_tab_thumbnail`, `get_display_thumbnail`) is similarly offloaded to background thread pools to ensure sub-millisecond hotkey latency on high-DPI (4K/5K Retina) screens.
+- **Audio mode** (system audio, Pro only): live transcription via Deepgram — see flow D below
+  - macOS: ScreenCaptureKit via compiled Swift helper (warm mode pre-initializes it)
+  - Windows: WASAPI loopback capture
+
+#### Text extraction details (`extract.js`)
+
+Replaced the old `document.body.innerText` (2026-10). Background, test results and rejected alternatives: `docs/EXTRACT_TEXT_ENHANCEMENT_PLAN.md`. Designed for **any** online exam (coding sites, language tests, LMS quizzes, aptitude tests, whiteboards), with no per-site code.
+
+**Core rule: extract the question, not the user's answers.** Typed values, selected options and essay drafts are never included, because they can mislead the AI and some exams pre-select a default. The one exception is code editors: their content is always included.
+
+What the reader does:
+- **Readiness wait:** waits until the DOM has been quiet for 80ms, **hard cap 300ms** (the solve flow must never be slower than the old fixed 300ms sleep). Uses `MessageChannel` ticks because timers are throttled when the Chrome window is occluded.
+- **Content root:** `<main>` / `[role=main]` if it holds most of the page text, else `<body>`.
+- **Walks the DOM itself** (not `innerText`) and writes each element type explicitly:
+  - text inputs → `[blank]` at their position in the sentence (search/email/password/phone fields and type-ahead `role=combobox` pickers are skipped)
+  - `<select>` → `[choose: was | were | am]` (placeholder option dropped, nothing marked selected)
+  - radio/checkbox groups (native and ARIA `role=radio/checkbox`) → `( ) Large` for single choice, `[ ] Large` for multi-select. **No A/B/C letters are invented** (changed 2026-10-22): the page doesn't show them, so an answer like "C" couldn't be matched to what the user sees. Letters that appear are the page's own label text. The prompt does not yet tell the AI to answer with the option's text (open item, `src/services/prompts.ts`)
+  - `<textarea>` / `contenteditable` answer boxes → skipped. **Exception:** tiny (≤2px) editable elements are screen-reader/clipboard mirrors (e.g. Figma's `div[role=document].focus-target`), read as `[Hidden text copy kept by the page, unordered:]`
+  - code editors → placeholder `[code editor N: see below]`; the full code is appended at the end as `--- Code editor N (lang) --- … --- End of code editor N ---`
+  - collapsed `<details>` content is included, marked `[collapsed section]`; `display:none` / `visibility:hidden` content is skipped (this also drops responsive duplicates)
+  - open shadow roots (including slots) and **same-origin iframes** are walked into. Iframe guardrails: denylist of widget hosts (reCAPTCHA, Twitter, Hotjar, chat widgets, …), ≥100×100px and visible, ≤20k chars per frame. Cross-origin iframes can't be read by the page script; they are recorded in `skippedFrames` (`{src, reason, width, height}`; reasons `cross-origin`, `too-small`, `denylisted`, `over-size-cap`, `no-body`) and read by Rust over the debugger (see "Cross-origin frames" below)
+  - math: KaTeX → `$TeX$` from its annotation; MathJax → TeX source or MathML; MathML → linear text (`x + 3 = 7`). Server-pre-rendered MathJax SVG (no source in the page, e.g. HackerRank) can't be recovered
+  - `<sup>`/`<sub>` → `^` / `_` (`10^4`, `O(n^2)`)
+  - `<pre>` keeps spaces, tabs and blank lines
+- **Junk removal:** `nav`, `footer`, `role=navigation|contentinfo`, cookie/consent banners (id/class match), **link lists** (≥5 links that are ≥75% of a block's text, e.g. Codility's menu/footer without semantic tags; never applied to blocks containing choices, blanks, dropdowns or editors), and common action buttons (Submit, Run, Next, Share on X, …).
+- **Cleanup:** removes invisible bidi/zero-width characters, collapses whitespace, joins table cells with ` | `, dedupes adjacent identical lines, blank lines only around paragraph-level blocks. Page text is capped at **12k chars** (cut from the end; `truncated: true`), each code editor at 20k.
+
+**Code editors** (read through each editor's own API, never the rendered lines when avoidable):
+- Monaco: `monaco.editor.getEditors()` matched to the editor's DOM node via `getDomNode()` → `getModel().getValue()`. Without `getEditors()`: remaining non-empty models, code languages before `plaintext` (LeetCode has an extra empty plaintext model). Last resorts: the editor's textarea, then rendered `.view-line`s sorted by position
+- CodeMirror 6: `.cm-content.cmView.view.state.doc` (LeetCode's test-case box). CodeMirror 5: `el.CodeMirror.getValue()`. Ace: `el.env.editor.getValue()`
+- Editors outside the chosen content root are still included
+- **Monaco without `window.monaco`** (e.g. CoderPad, a React app): `reactMonaco()` walks React's fiber tree (time-boxed 150ms, once per document) for editor-like objects (`getModel()` + `getDomNode()`), matches each to its on-screen editor by DOM node, and reads `getValue()`. `source` = `react-fiber`. Read-only: no scrolling, clicking or clipboard
+- **Other files the editor holds** (open project tabs not on screen): all Monaco models (`monaco.editor.getModels()` if exposed, else the model service reached through the editor's own properties) are appended as `--- Project file <path> (<lang>) --- … ---`. Skipped: empty files, `node_modules`/`dist`/`build`/`.git`, lockfiles, `.min.*`, `.map`, `.svg`. Caps: 10k chars per extra file, 30k total, 20 files; the rest is reported as `[N more project files not included]`. Paths are shown relative to the folder the files share (a lone file shows just its name); in-memory models (`inmemory://…`) get no fake name
+- Code entries carry `source` (`monaco-api`, `react-fiber`, `monaco-models`, `monaco-textarea`, `rendered-lines`, …), `file`, `kind` (`editor` | `file`) in the JSON/dump only; the AI sees only the labelled blocks in `text`
+- **Limit:** editors whose instance can't be reached (no API, no React) fall back to the textarea / rendered lines, which only hold the visible window of a long file. Never solved by scrolling the user's tab (the user does not want the app to move their Chrome tab)
+
+**Cross-origin frames** (`chrome/mod.rs`: `read_embedded_frames`, `list_child_frames`, `merge_embedded_frame`):
+- A frame from another *site* is its own DevTools target of type `iframe` (parent = `parentFrameId` over WS `Target.getTargets`, `parentId` in HTTP `/json/list`). If the page reports a `cross-origin` skip, Rust lists the tab's child frame targets, runs the same `extract.js` inside each (`extract_script(offset)` sets `CODE_NUMBER_OFFSET` so code blocks keep counting) and appends `--- Embedded frame (host) --- … --- End of embedded frame ---` to `text`; code entries are merged; the JSON gets `embeddedFrames` and updated `framesRead`/`framesSkipped`
+- Guardrails: widget denylist (`FRAME_DENYLIST`, same hosts as the page script), http(s) only, viewport ≥100×100, empty frames dropped, max 4 frames, depth 2, 6s total timeout; on any failure the parent page's result is kept. Frame images/canvases are not collected
+- Not handled: **same-site** cross-origin frames (different port/subdomain of one site) share a process and are not separate targets; the WS ("chrome://inspect toggle") mode was not tested live (HTTP mode is covered by the integration test)
+- **Known case, HackerRank project questions** (VS Code in the browser, frame on `*.hrcdn.net`): the frame is read, but only the active editor (via its textarea, `source: monaco-textarea`) comes through. VS Code only loads *opened* files into the browser (the rest live on a remote machine), exposes no global editor API (no `require`, `IDE_FS` is the FullStory recorder), and the task description is likely in an unopened `README.md`. Reaching those would need the IDE's `vscode-remote-resource` URLs or opening files through the UI; the user rejected both, so this is an accepted gap
+
+**Debug aids (debug builds only, `cfg(debug_assertions)`)** — nothing here is compiled into release builds, and none of it reaches the AI:
+- `chrome::log_extraction` prints a `📄 [extract]` summary (url, root, text length, code blocks, images, frames read/skipped with reasons, embedded frames) and writes the full result to `$TMPDIR/cracking_interview_extract.json`
+- `dump_prompt` (`main.rs`) writes the exact prompt plus attached image paths to `$TMPDIR/cracking_interview_prompt.txt` for `query_ai`, `query_ai_with_image`, `query_ai_via_proxy`, `query_ai_via_proxy_with_image` (not the conversation command)
+- `DEBUG_PROBE` in `extract.js` (flipped by `extract_script`) adds a `probe` object (editor environment: relevant window globals, tabs, explorer rows, editor ancestors, iframes, text sample) to the dump; embedded frames' probes are merged under `probes`. Use it to investigate a new site, then read the dump
+
+**Pictures** (decided in `App.tsx` with `tabExtraction.ts`):
+- `extract.js` reports large visuals (rendered area ≥ 40,000px², i.e. about 200×200; icons/logos are smaller): `images` = up to **4** largest `<img>` (placeholders `[image 1]`…`[image 4]` in page order), `drawn` = large `<canvas>`/`<svg>` (placeholder `[chart/drawing: see screenshot]`; SVG `<text>` labels are also written as text)
+- Image files → `get_tab_images` (original bytes from Chrome's cache, saved to temp files, ≤1.5MB each)
+- A **tab screenshot** is added when there is drawn content, when an image couldn't be retrieved, or when the page has almost no text (<80 chars) and no images/code (e.g. a PDF in Chrome's viewer). Before it, `scroll_drawing_into_view` brings the first chart into view. A canvas ≥300,000px² shows "Whiteboard detected — capturing the visible area"
+- Max **4 pictures per question, same for free and Pro**. The AI commands split a total budget of 4.5MB across the pictures, so a request is never larger than one full screenshot used to be
+- The text is **always** sent with the pictures (pictures cover what has no text; text gives exact words, numbers and off-screen parts)
+
+Known limits: canvas apps without a hidden text copy (e.g. Miro view-only boards) only get the screenshot of the visible area; drag-and-drop answer state isn't read; same-site cross-origin iframes aren't read; sites that keep project files outside the browser (HackerRank's VS Code) only expose the active editor.
 
 ### 4) AI providers and payload formats
 
@@ -268,10 +341,9 @@ Routing happens in:
 
 - `src-tauri/src/ai/mod.rs`
 
-Providers:
+Provider:
 
 - `src-tauri/src/ai/gemini.rs`
-- `src-tauri/src/ai/claude.rs`
 
 Important: screenshots are typically JPEG bytes. The code detects the real MIME type using "magic bytes" via:
 
@@ -299,10 +371,12 @@ Backend:
 Frontend:
 
 - `activate_tab(tabId)`
-- `extract_tab_text(tabId)` (JS: `document.body.innerText`)
-- `buildPrompt(template, language, text)`
-- `query_ai_via_proxy(prompt, model, accessToken, sourceUrl)` (for proxy users)
-- or `query_ai(prompt, config, sourceUrl)` (for BYO API key users)
+- `extract_tab_text(tabId)` → `TabExtraction` (`extract.js`; waits up to 300ms for the page to settle)
+- If `extraction.images` is non-empty: `get_tab_images(tabId, urls)` → temp file paths (null where unavailable)
+- If `needsTabScreenshot(extraction)` or an image failed: optional `scroll_drawing_into_view(tabId, extraction.drawn[0])`, then `capture_tab_screenshot(tabId)`
+- `buildPrompt(template, language, extraction.text)`
+- No pictures: `query_ai_via_proxy(prompt, model, accessToken, sourceUrl)` (proxy users) or `query_ai(prompt, config, sourceUrl)` (BYO API key users)
+- With pictures (max 4): `query_ai_via_proxy_with_image(prompt, imagePaths, …)` or `query_ai_with_image(prompt, imagePaths, …)`
 
 ### C) Solve (screenshot mode)
 
@@ -311,38 +385,18 @@ Frontend:
 - `activate_tab(tabId)` (only for tab screenshot)
 - `capture_tab_screenshot(tabId)` or `capture_display_screenshot(displayId)`
 - `buildPrompt(template, language)` (prompt without injected text)
-- `query_ai_via_proxy_with_image(prompt, imagePath, model, accessToken, sourceUrl)`
-- or `query_ai_with_image(prompt, imagePath, config, sourceUrl)`
+- `query_ai_via_proxy_with_image(prompt, imagePaths: [path], model, accessToken, sourceUrl)`
+- or `query_ai_with_image(prompt, imagePaths: [path], config, sourceUrl)`
 
 Backend:
 
-- reads bytes from `imagePath` and sends to AI provider with correct MIME type
+- `load_images_for_ai` reads up to 4 files, shrinks any over their share of the 4.5MB budget (`chrome::fit_image_bytes`), and sends them after the prompt text with the correct MIME types (`ai::detect_image_mime_type`)
 
-### D) Solve (audio mode — legacy, currently unused)
-
-Frontend:
-
-- Select "Audio (System)" from Input Source dropdown → triggers `warm_audio_capture()` (macOS only, pre-initializes ScreenCaptureKit)
-- Click record or press hotkey → `start_audio_recording()` - begins system audio capture
-- (user waits, timer shows duration, max 3 minutes)
-- Click stop or press hotkey → `stop_audio_recording()` - returns MP3 file path
-- `buildPrompt(template, language, audioInstructions)` - uses audio-specific prompt
-- `query_ai_via_proxy_with_audio(prompt, audioPath, 'gemini-3-flash', accessToken)`
-
-Backend:
-
-- Audio is recorded as WAV then converted to MP3 using mp3lame-encoder (bundled, no FFmpeg needed)
-- MP3 is base64-encoded and sent to OpenRouter with `input_audio` content type
-- Model is forced to `gemini-3-flash` (Google's Gemini model that supports audio input)
-- OpenRouter routes to `google/gemini-3-flash-preview`
-
-**Note:** This flow still exists in the codebase but `toggleAudioRecording` now routes to flow E (live transcription) instead.
-
-### E) Solve (live transcription mode — current audio flow)
+### D) Solve (live transcription mode — audio flow)
 
 Frontend:
 
-- Select "Audio (System)" from Input Source dropdown
+- Select "Audio (System)" from Input Source dropdown → triggers `warm_audio_capture()` (macOS only)
 - Click record or press hotkey → `toggleAudioRecording()` → `startLiveTranscription()`
   1. Checks Pro subscription status
   2. `fetchDeepgramKey()` — fetches Deepgram API key from `deepgram-key` edge function
@@ -353,8 +407,8 @@ Frontend:
 - `stopLiveTranscription()`:
   1. `invoke('stop_live_transcription')` — returns accumulated transcript
   2. `sendTranscriptToAI(transcript)`:
-     - Builds `messages[]` array with `LIVE_CONVERSATION_SYSTEM_PROMPT` (first turn) or conversation history (subsequent turns)
-     - `trimConversationHistory()` if exceeding 12000 tokens
+     - Builds `messages[]` array with the system prompt from `getConversationPrompts()` (first turn) or conversation history (subsequent turns)
+     - `trimConversationHistory()` (keeps last 20 messages in full, summarizes older ones, 100K-token cap)
      - `invoke('query_ai_via_proxy_conversation', { messagesJson, model, accessToken })`
      - Appends AI response to `conversationHistory`
 - Conversation view shows full multi-turn Q&A history
@@ -363,7 +417,7 @@ Backend:
 
 - `transcription.rs`: connects to Deepgram WebSocket, streams PCM audio, emits transcript events
 - `main.rs`: `query_ai_via_proxy_conversation` sends the full `messages[]` array to `ai-proxy` edge function → OpenRouter
-- Uses user's selected Pro model (not forced to Gemini like the legacy audio flow)
+- Uses user's selected Pro model
 
 ## Tauri commands (API surface)
 
@@ -376,7 +430,9 @@ Chrome/CDP:
 - `open_chrome_cdp() -> String` — auto-detects user Chrome first, falls back to launching new window
 - `get_chrome_connection_mode() -> String` — returns `"user"` (your Chrome), `"app"` (launched by app), or `"none"`
 - `activate_tab(tab_id: String) -> ()`
-- `extract_tab_text(tab_id: String) -> String`
+- `extract_tab_text(tab_id: String) -> serde_json::Value` (the `extract.js` result; typed as `TabExtraction` in `src/services/tabExtraction.ts`)
+- `get_tab_images(tab_id: String, urls: Vec<String>) -> Vec<Option<String>>` (max 4; temp file path per URL, null if unavailable/undecodable)
+- `scroll_drawing_into_view(tab_id: String, rect: serde_json::Value) -> String` (`"scrolled"` / `"visible"` / `"not-found"`)
 - `capture_tab_screenshot(tab_id: String) -> String` (returns temp file path)
 - `get_tab_thumbnail(tab_id: String) -> String` (data URL)
 
@@ -389,27 +445,32 @@ Displays:
 AI (Direct calls - user's own API key):
 
 - `query_ai(prompt: String, config: AIConfig, source_url: Option<String>) -> String`
-- `query_ai_with_image(prompt: String, image_path: String, config: AIConfig, source_url: Option<String>) -> String`
+- `query_ai_with_image(prompt: String, image_paths: Vec<String>, config: AIConfig, source_url: Option<String>) -> String` (1–4 images, sent after the prompt text)
+- `AIConfig = { selected_model, gemini_api_key?, max_output_tokens? }` — `selected_model` is `modelConfig.byo_model.id`, `max_output_tokens` is `modelConfig.max_output_tokens` (both from the server)
+- `validate_gemini_key(api_key: String, model: String) -> ()` — `GET models/{byo_model}?key=…` (no generation, no quota use). The AI Models tab's "Save & Verify" button (or Enter) only stores the key and shows "✓ Active" after this succeeds
+- `source_url` is checked against `free_allowed_domains`, which Rust stores from the `fetch_models` response (and fetches itself with the anon key if not loaded yet)
 
+Setup checklist (`src-tauri/src/setup.rs`, UI in `src/components/SetupChecklist.tsx`):
+
+- `get_setup_status() -> { platform, chrome_installed, accessibility_granted?, screen_recording_granted? }` — permission fields are `null` off macOS. Screen Recording uses `CGPreflightScreenCaptureAccess`, which usually reports a new grant only after an app restart
+- `request_screen_recording() -> bool`, `open_privacy_settings(pane: "accessibility" | "screen_recording")`, `restart_app()`
+- Steps: Chrome installed, Chrome connected, Accessibility (macOS), Screen & System Audio Recording (macOS, Pro only). Re-checked on window focus and via "Re-check" (no polling)
+- Shown as a main-screen card and an amber "⚠ Setup n/total" header badge only while a one-time step (install/permission) is missing; "Chrome connected" alone never triggers them because the header already has "Open Chrome". The card can be hidden for the current session (in-memory, returns next launch). Always listed as a compact 2-column grid at the bottom of Settings → App ("Setup & Permissions"; step descriptions are tooltips) so the whole App tab fits the 750px Settings modal without scrolling
+- After "Grant access" in this session, an ungranted permission shows "Open Settings" + "Restart app"
 AI (Proxy calls - via Supabase Edge Function):
 
 - `query_ai_via_proxy(prompt: String, model: String, access_token: String, source_url: Option<String>) -> AIProxyResponse`
-- `query_ai_via_proxy_with_image(prompt: String, image_path: String, model: String, access_token: String, source_url: Option<String>) -> AIProxyResponse`
+- `query_ai_via_proxy_with_image(prompt: String, image_paths: Vec<String>, model: String, access_token: String, source_url: Option<String>) -> AIProxyResponse` (1–4 images as `image_url` content parts; `ai-proxy` passes the content array through unchanged)
 
 Audio:
 
-- `start_audio_recording() -> ()` - begins system audio recording
-- `stop_audio_recording() -> String` - stops recording and returns MP3 file path
-- `warm_audio_capture() -> ()` - (macOS only) pre-initializes ScreenCaptureKit for instant recording start
+- `warm_audio_capture() -> ()` - (macOS only) pre-initializes ScreenCaptureKit when the Audio source is selected
 - `cooldown_audio_capture() -> ()` - (macOS only) releases warm audio capture resources
-- `is_audio_recording() -> bool` - checks if currently recording
-- `query_ai_via_proxy_with_audio(prompt, audioPath, model, accessToken) -> AIProxyResponse` - sends audio to AI
 
 Live Transcription (Deepgram):
 
-- `start_live_transcription(deepgramKey: String, language: String) -> ()` - starts streaming system audio to Deepgram via WebSocket
+- `start_live_transcription(deepgramKey: String, model: String, language: String) -> ()` - `model` comes from the `deepgram-key` response; starts streaming system audio to Deepgram via WebSocket
 - `stop_live_transcription() -> String` - stops transcription, returns accumulated final transcript
-- `is_live_transcribing() -> bool` - checks if live transcription is active
 - `query_ai_via_proxy_conversation(messagesJson: String, model: String, accessToken: String) -> AIProxyResponse` - sends multi-turn conversation messages array to AI via proxy
 
 Document Placeholders:
@@ -434,21 +495,45 @@ Utility:
 - `open_url(url: String) -> ()` (opens URL in system browser)
 - `open_external_url(url: String) -> ()` (opens URL in default browser, used by announcement link handler)
 - `resize_window(window: Window, width: f64, height: f64) -> ()`
-
-App Settings:
+- `get_window_inner_size() -> { width, height }` (logical, DPI-independent pixels)
+- `move_window_by(dx: i32, dy: i32) -> ()` (animated 10-step move; used by the move hotkeys with ±80px)
+- `get_os() -> String` (`std::env::consts::OS`, e.g. `"macos"` / `"windows"`; used to show OS-specific hotkey defaults)
+App Settings & Stealth:
 
 - `set_window_opacity(opacity: f64) -> ()` (sets window transparency, 0.1–1.0)
 - `set_stealth_mode(enabled: bool) -> ()` (toggles stealth protections + saves preference to stealth.json)
+- `get_stealth_status() -> StealthStatus` (returns `{ swallowing_active, blur_prevention_active, macos_accessibility_granted }`)
+- `request_accessibility() -> bool` (triggers native macOS accessibility permission prompt)
+- `refresh_stealth_status() -> StealthStatus` (dynamically attempts to activate event swallowing if user just granted accessibility)
 - `fetch_models(access_token: String) -> Value` (fetches LLM model config from get-models edge function)
 
 Hotkeys:
 
-- `get_hotkeys() -> HotkeyConfig`
-- `set_hotkeys(config: HotkeyConfig) -> ()`
+- `get_hotkeys() -> HotkeysConfig`
+- `set_hotkeys(...) -> HotkeysConfig`
+- `reset_hotkeys_to_default() -> HotkeysConfig`
 
-## Global hotkeys
+## Global hotkeys & Anti-Detection Architecture
 
-Backend registers global hotkeys on startup (customizable in Settings → HotKeys):
+The backend registers global hotkeys on startup (customizable in Settings → HotKeys). In addition to triggering actions, the hotkey subsystem is engineered with an anti-detection architecture designed to operate seamlessly without disturbing active web assessments:
+
+1. **Permanent Blur Prevention (Always Active):**
+   - The app operates as a non-activating floating overlay.
+   - When hotkeys fire, the window is brought forward using `bring_to_front_without_focus`:
+     - macOS: Uses raw AppKit runtime to invoke `orderFrontRegardless` on the `NSWindow`. The window floats to the top without activating `NSApplication` and without becoming key window.
+     - Windows: Uses `ShowWindow(hwnd, SW_SHOWNOACTIVATE)` and `SetWindowPos(hwnd, HWND_TOPMOST, ..., SWP_NOACTIVATE | SWP_SHOWWINDOW)`.
+   - The app **never** calls `set_focus()`. Chrome remains the active OS foreground window at all times, ensuring online assessment pages never fire `window.blur` or `visibilitychange`.
+
+2. **OS-Level Key Event Swallowing (Stealth Mode Only):**
+   - When Stealth Mode is enabled, registered hotkey combinations are intercepted and dropped at the OS level:
+     - macOS: Uses `CGEventTapCreate` at `kCGHeadInsertEventTap` (`kCGSessionEventTap`). When a shortcut matches, the tap callback dispatches the action and returns `NULL` (`std::ptr::null_mut()`), deleting the event before Chrome's event queue receives it. Chrome DOM never fires `keydown` and never switches tabs.
+     - Windows: Uses `SetWindowsHookExW(WH_KEYBOARD_LL, ...)`. The hook callback returns `LRESULT(1)` to halt message dispatch. Modifier keyups are never swallowed to prevent desynchronizing the OS keyboard buffer (which causes stuck keys like Alt+Enter maximizing windows). Instead, when an Alt/Win combination is swallowed, a neutral keyup (mask key `VK_NONAME`/`VK_CONTROL`) is synthesized via `SendInput` so Windows clears its menu candidate state without activating the active window's menu bar or firing `window.blur`.
+   - CoreGraphics modifier bits are isolated (`CG_FLAG_COMMAND`, `CG_FLAG_SHIFT`, `CG_FLAG_CONTROL`, `CG_FLAG_ALT`), filtering out Caps Lock (`AlphaShift`) and arrow-key NumPad bits.
+   - When Stealth Mode is disabled, hotkeys pass through normally.
+   - **Threading rule:** hook callbacks run on a background/OS hook thread. Matched actions are always dispatched with `app.run_on_main_thread(|| dispatch_action(...))` (both macOS and Windows). Never call window APIs (`NSWindow`, `show`/`hide`, positioning) directly from the hook callback — on macOS this triggers AppKit main-thread assertion crashes.
+
+3. **Lifecycle Cleanup:**
+   - Both macOS Event Taps and Windows low-level hook threads (`WM_QUIT`) are explicitly torn down on app exit via Tauri's `RunEvent::Exit` handler.
 
 | Action | macOS Default | Windows Default | Linux Default |
 |--------|---------------|-----------------|---------------|
@@ -469,13 +554,13 @@ When pressed, Rust emits events that the frontend listens for:
 - `hotkey-solve-text`
 - `hotkey-solve-screenshot`
 - `hotkey-audio-toggle`
+- `hotkey-scroll-up` / `hotkey-scroll-down`
+- `hotkey-move-up` / `hotkey-move-down` / `hotkey-move-left` / `hotkey-move-right`
 
 Notes / limitations:
 
 - This does **not** auto-detect "currently active Chrome tab"; it runs on the **tab selected in the app**.
-- To fully match LeetCode Wizard, you likely want:
-  - active-tab detection (platform-specific or deeper CDP integration)
-  - an overlay / small always-on-top result panel that doesn't steal focus
+- If Accessibility permission is pending on macOS, the app gracefully falls back to `tauri_plugin_global_shortcut` while keeping focus-blur prevention active.
 
 ## Authentication & Subscription System
 
@@ -523,14 +608,17 @@ The app includes a full authentication and subscription system using Supabase an
 
 | Tier | Cost | AI Quota | Input Source | Domain Restriction |
 |------|------|----------|--------------|-------------------|
-| Free | $0 | 3 lifetime calls | Chrome tabs only | leetcode.com, codewars.com, codeforces.com, neetcode.io |
+| Free | $0 | `FREE_LIFETIME_CALL_LIMIT` lifetime calls (currently 3) | Chrome tabs only | leetcode.com, codewars.com, codeforces.com, neetcode.io |
 | Free + BYO Key | $0 | Unlimited (own key) | Chrome tabs only | Same domain restriction |
-| Pro | $10/month | 150 requests/billing period | All sources | No restriction |
+| Pro | $10/month | `PRO_MONTHLY_REQUEST_LIMIT` requests/billing period (currently 150) | All sources | No restriction |
 
 ### AI Models
 
+> **Rule:** No model IDs or model names are hardcoded in the app (`src/`, `src-tauri/src/`). Every model shown or sent comes from the `get-models` edge function, which reads `supabase/functions/_shared/models.ts`. The lists below just mirror that file.
+
 **Free Tier:**
-- Gemini 2.5 Flash (via OpenRouter proxy or BYO Gemini API key)
+- Gemini 3.5 Flash-Lite via OpenRouter proxy (`FREE_MODEL`)
+- BYO Gemini API key: Gemini 3.5 Flash-Lite called directly on Google's API (`BYO_MODEL`). It must be a native Gemini model ID **on the Gemini API Free tier**, so users can create a key in Google AI Studio without a billing account or credit card. Don't use 2.5 models here — Google restricts them to accounts that already used them.
 
 **Pro Tier:**
 - GPT-5.2 Codex (OpenAI)
@@ -550,11 +638,12 @@ The app includes a full authentication and subscription system using Supabase an
   - `claude-sonnet-5` → `anthropic/claude-sonnet-5`
   - `gemini-3-flash` → `google/gemini-3-flash-preview`
   - `grok-4.3` → `x-ai/grok-4.3`
-  - `gemini-2.5-flash` → `google/gemini-2.5-flash` (free tier)
+  - `gemini-3.5-flash-lite` → `google/gemini-3.5-flash-lite` (free tier)
 
 **Model Display Names** (used in stepper info):
 - Model IDs are mapped to human-readable names via `modelConfig` state (fetched from `get-models` edge function, cached in localStorage)
-- Example: `claude-sonnet-4.5` → "Claude Sonnet 4.5"
+- Example: `claude-sonnet-5` → "Claude Sonnet 5"
+- **No hardcoded fallback**: before the first successful fetch (and with no valid cache) `modelConfig` is `null`. The UI shows "Loading models…", the Pro upgrade card omits the model list, and Solve calls `ensureModelConfig()` to fetch on demand — failing with "Could not load AI models from the server" if it can't.
 - The `getTemplateLabel(templateId)` function in `prompts.ts` maps template IDs to labels (e.g., `'algorithm-optimal'` → "Algorithm - Optimal")
 
 ### Centralized LLM Model Definitions
@@ -569,7 +658,8 @@ LLM model configurations are defined server-side in a single shared file and fet
 │  (Single source of truth for all model definitions)  │
 ├──────────────────────────────────────────────────────┤
 │  PRO_MODELS[]    — Array of { id, name, provider }   │
-│  FREE_MODEL      — Single { id, name, provider }     │
+│  FREE_MODEL      — Free tier model (via OpenRouter)  │
+│  BYO_MODEL       — Native Gemini ID for BYO-key users│
 │  DEFAULT_PRO_MODEL — Default model ID for Pro users  │
 │  MODEL_MAP       — Maps app model IDs → OpenRouter   │
 │  PRO_MODEL_IDS   — Quick lookup array                │
@@ -592,6 +682,7 @@ LLM model configurations are defined server-side in a single shared file and fet
 │  → Updates modelConfig state            │
 │  → Cached in localStorage               │
 │  → Falls back to cache if fetch fails   │
+│  → No cache: ensureModelConfig() retries│
 └─────────────────────────────────────────┘
 ```
 
@@ -604,32 +695,41 @@ PRO_MODELS: ModelInfo[] = [
   { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google' },
   { id: 'grok-4.3', name: 'Grok 4.3', provider: 'xAI' },
 ];
-FREE_MODEL: { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google' }
+FREE_MODEL: { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite', provider: 'Google' }
+BYO_MODEL:  { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite', provider: 'Google' }  // native Gemini API ID, Free tier
+LEGACY_FREE_MODEL: { id: 'gemini-2.5-flash', ... }  // frozen; served only to old app releases (see below)
 DEFAULT_PRO_MODEL: 'gpt-5.2-codex'
 MODEL_MAP: Maps each ID → OpenRouter format (e.g., 'gpt-5.2-codex' → 'openai/gpt-5.2-codex')
 ```
 
 #### Frontend Flow
 
-1. User logs in → `handleAuthSuccess` calls `invoke('fetch_models', { accessToken })`
-2. `fetch_models` Tauri command makes an authenticated POST to `get-models` edge function (through Rust to bypass VPN/proxy SSL issues)
-3. Response cached in `localStorage('cached_model_config')`
-4. On next startup, `loadCachedModels()` initializes state from cache before the network call completes
-5. `modelConfig` state used for: model selector dropdown, free tier display, stepper info, validation
+1. User logs in → `handleAuthSuccess` calls `fetchModelConfig(accessToken)` → `invoke('fetch_models', { accessToken })`
+2. `fetch_models` Tauri command makes an authenticated POST to `get-models?v=2` (through Rust to bypass VPN/proxy SSL issues)
+3. Response (`{ pro_models, free_model, byo_model, default_pro_model, free_call_limit, pro_request_limit, pro_audio_seconds_limit, audio_session_max_seconds, free_allowed_domains, max_output_tokens }`) is validated by `isValidModelConfig()` (`src/services/modelConfig.ts`) and cached in `localStorage('cached_models')`; an invalid `ai_model` selection is reset to `default_pro_model`
+4. On next startup, `loadCachedModels()` initializes state from cache (or `null`) before the network call completes. Caches missing `byo_model` or any limit field are treated as invalid.
+5. Limits are never hardcoded in the app: quota checks, badges, usage bars, upgrade/Pro feature lists, the live-transcription session cap, and the sign-up screen all read the limit fields. `getUsageStats()` takes the Pro limits as an argument (usage stats stay `null` until config loads). Signed-out screens fetch it with the anon key (`fetch_models` with an empty token).
+5. `ensureModelConfig()` (used by Solve and when Settings opens) returns the loaded config or fetches it on demand
+6. `modelConfig` is used for: model selector dropdown, free/BYO tier display, Pro upgrade benefits list, stepper info, and choosing the model ID sent to Rust (`byo_model.id` for BYO, `free_model.id` for free, `selected_model` for Pro)
 
 #### Updating Models
 
 To add, remove, or rename models:
-1. Edit `supabase/functions/_shared/models.ts`
+1. Edit `supabase/functions/_shared/models.ts` (never add model IDs/names to `src/` or `src-tauri/src/`)
 2. Deploy both `get-models` and `ai-proxy` edge functions
 3. Users get the new model list on their next sign-in — no app update needed
+
+#### Response Versions (`get-models`)
+
+- `?v=2` (current app): `{ pro_models, free_model: FREE_MODEL, byo_model: BYO_MODEL, default_pro_model, free_call_limit, pro_request_limit, pro_audio_seconds_limit, audio_session_max_seconds, free_allowed_domains, max_output_tokens }` (from `_shared/limits.ts`)
+- No `v` (older releases): `{ pro_models, free_model: LEGACY_FREE_MODEL, default_pro_model }`. Older releases send `free_model.id` to their Rust code for BYO-key calls, and that code only accepts `gemini-2.5-flash` — so `LEGACY_FREE_MODEL` must not change until those releases are retired. Their free proxy calls are unaffected because `ai-proxy` forces `FREE_MODEL` server-side.
 
 ### AI Routing Logic
 
 The app supports two AI request paths:
 
 1. **Proxy via Edge Function** (default for all users)
-   - Quota enforced (150/billing period for paid, 3 lifetime for free)
+   - Quota enforced (`PRO_MONTHLY_REQUEST_LIMIT`/billing period for paid, `FREE_LIFETIME_CALL_LIMIT` lifetime for free)
    - Uses `query_ai_via_proxy`, `query_ai_via_proxy_with_image` commands
    - Calls Supabase Edge Function → OpenRouter
    - Provider sorted by throughput for fastest response
@@ -637,122 +737,20 @@ The app supports two AI request paths:
 2. **Direct API calls** (BYO API key for free users who exhausted quota)
    - No quota limits from the app
    - Uses `query_ai`, `query_ai_with_image` commands
-   - Calls Gemini API directly
-   - Domain restrictions still enforced client-side
+   - Calls the Gemini API directly with `byo_model.id` from the server
+   - Domain restrictions still enforced client-side and in Rust (`validate_source_url`)
 
-### Audio Recording Implementation
+### Audio Capture Helper (macOS)
 
-The app supports recording system audio (sound from Zoom/Teams/browser) and sending it directly to AI models that support audio input.
+Audio is only used by live transcription (Deepgram); there is no record-to-file / audio-to-LLM path.
 
-#### Architecture
+**Swift Helper** (`src-tauri/resources/audio_recorder.swift`, managed by `src-tauri/src/audio.rs`):
+- Bundled as `audio_recorder_bin` (built by `build.rs`); falls back to compiling from source in dev
+- Uses `ScreenCaptureKit` (macOS 13+) for system audio and streams PCM to `transcription.rs`
+- `prewarm_audio_recorder()` (Tauri setup) verifies/compiles the helper in the background
+- `warm_audio_capture()` spawns the helper with `--warm` when the Audio source is selected; `cooldown_audio_capture()` stops it (also called by `transcription.rs` before starting its own capture)
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         Audio Recording Flow                            │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  User selects Audio source  →  warm_audio_capture() [macOS only]        │
-│                                 (pre-initializes ScreenCaptureKit)      │
-│                                                                         │
-│  User clicks Record  →  start_audio_recording()                         │
-│                         ├── macOS: Swift helper via ScreenCaptureKit    │
-│                         └── Windows: WASAPI loopback capture            │
-│                         ├── Auto-selects "Verbal Interview (Audio)"     │
-│                         │   prompt (if not already selected)            │
-│                         └── Stores previous prompt for restoration       │
-│                                                                         │
-│  User clicks Stop  →  stop_audio_recording()                            │
-│                       ├── Stop capture                                  │
-│                       ├── WAV → MP3 conversion (mp3lame-encoder)        │
-│                       ├── Delete WAV file                               │
-│                       └── Return MP3 path                               │
-│                                                                         │
-│  Frontend  →  query_ai_via_proxy_with_audio()                           │
-│               ├── Read MP3, base64 encode                               │
-│               ├── Send with input_audio content type                    │
-│               └── Model: gemini-3-flash (forced)                        │
-│                                                                         │
-│  Edge Function  →  OpenRouter API                                       │
-│                    Model: google/gemini-3-flash-preview                 │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-#### macOS Implementation
-
-**Swift Helper** (`src-tauri/resources/audio_recorder.swift`):
-- Compiled on first use (or app startup via pre-warming)
-- Uses `ScreenCaptureKit` (macOS 13+) for system audio capture
-- Supports two modes:
-  - **Warm mode** (`--warm`): Pre-initializes ScreenCaptureKit, waits for "start"/"stop" commands via stdin
-  - **Legacy mode**: Starts recording immediately
-- Output: 44.1kHz mono WAV with volume boost and soft clipping
-- 3-minute automatic timeout
-
-**Warm Mode (Instant Start)**:
-1. When user selects Audio source → `warm_audio_capture()` called
-2. Swift helper spawned with `--warm` flag
-3. ScreenCaptureKit initialized (~0.5s)
-4. Helper waits for "start" command
-5. When user clicks Record → "start" sent via stdin → Recording begins instantly
-6. When user switches away from Audio → `cooldown_audio_capture()` terminates helper
-
-**Pre-warming on App Startup**:
-- `prewarm_audio_recorder()` called in Tauri setup
-- Compiles Swift helper in background
-- Eliminates ~1.5s compilation delay on first recording
-
-#### Windows Implementation
-
-**WASAPI Loopback** (`src-tauri/src/audio.rs` → `mod windows`):
-- Uses Windows Audio Session API (WASAPI) in loopback mode
-- Captures system audio output (what you hear from speakers/headphones)
-- Resamples to 16kHz mono
-- Volume boost (5x) with soft clipping
-- 3-minute automatic timeout
-
-#### MP3 Encoding
-
-**Library**: `mp3lame-encoder` crate (statically linked, no external dependencies)
-
-**Process**:
-1. Record to WAV (temporary file)
-2. Read WAV using `hound` crate
-3. Encode to MP3 at 128kbps
-4. Delete WAV file
-5. Return MP3 path
-
-**Why MP3 over WAV**:
-- ~10x smaller file size
-- Faster upload to OpenRouter
-- Gemini supports both formats
-
-#### OpenRouter Audio Format
-
-Per [OpenRouter documentation](https://openrouter.ai/docs/guides/overview/multimodal/audio):
-
-```json
-{
-  "model": "google/gemini-3-flash-preview",
-  "messages": [
-    {
-      "role": "user",
-      "content": [
-        { "type": "text", "text": "Listen to this audio..." },
-        { 
-          "type": "input_audio", 
-          "input_audio": { 
-            "data": "<base64_mp3>",
-            "format": "mp3"
-          }
-        }
-      ]
-    }
-  ]
-}
-```
-
-**Important**: Audio must use `input_audio` content type (not `audio_url`).
+**Windows**: WASAPI loopback capture lives in `transcription.rs`; the `audio.rs` functions are no-ops.
 
 ### Real-time Transcription & Conversation Context (Deepgram)
 
@@ -797,7 +795,7 @@ The app supports a **real-time live transcription mode** that streams system aud
 │         ├── Builds messages[] array with conversation history           │
 │         │   First turn: [system prompt, user transcript]                │
 │         │   Subsequent: [system, ...history, user transcript]           │
-│         ├── trimConversationHistory() if >12000 tokens                  │
+│         ├── trimConversationHistory() (100K-token cap)                  │
 │         ├── invoke('query_ai_via_proxy_conversation')                   │
 │         │     → Supabase ai-proxy → OpenRouter                         │
 │         ├── Appends AI response to conversationHistory                  │
@@ -821,21 +819,21 @@ New module handling the Deepgram WebSocket session and audio streaming. Key comp
 - `FINAL_TRANSCRIPT` (`Mutex<String>`) — accumulates all final transcript text server-side
 
 **Functions:**
-- `start_live_transcription(app_handle, deepgram_key, language)` — spawns an async task that connects to Deepgram, starts audio capture, and processes responses
+- `start_live_transcription(app_handle, deepgram_key, model, language)` — spawns an async task that connects to Deepgram, starts audio capture, and processes responses
 - `stop_live_transcription()` — sets the stop signal, waits 300ms for cleanup, returns the accumulated transcript
 - `is_transcribing()` — returns the current state
 - `run_transcription_session(...)` — the core async loop that:
-  1. Builds the Deepgram WebSocket URL with parameters (model=nova-3, language, punctuate, smart_format, interim_results, utterance_end_ms=3000, vad_events, encoding=linear16, sample_rate=16000, channels=1)
-  2. Connects with `Authorization: Token {key}` header
+  1. Builds the Deepgram WebSocket URL with parameters (model = server-provided `TRANSCRIPTION_MODEL`, currently nova-3, language, punctuate, smart_format, interim_results, utterance_end_ms=3000, vad_events, encoding=linear16, sample_rate=16000, channels=1)
+  2. Connects with `Authorization: Bearer {temporary_jwt}` header (the JWT comes from the `deepgram-key` edge function)
   3. Spawns a native thread for audio capture, connected via `tokio::sync::mpsc::channel`
   4. Forwards audio chunks to Deepgram as binary WebSocket messages
   5. Parses Deepgram JSON responses (`Results` with `channel.alternatives[0].transcript`, `is_final`, and `UtteranceEnd` events)
-  6. Emits Tauri events: `live_transcript`, `live_transcript_utterance_end`, `live_transcript_error`
+  6. Emits Tauri events: `live_transcript`, `live_transcript_utterance_end`, `live_transcript_error`, and `live_transcript_status` (`"connected"` after the handshake; the frontend does not currently listen for it)
   7. On stop: sends `{"type":"CloseStream"}` to Deepgram
 
 **Deepgram URL format:**
 ```
-wss://api.deepgram.com/v1/listen?model=nova-3&language={lang}
+wss://api.deepgram.com/v1/listen?model={model}&language={lang}
   &punctuate=true&smart_format=true&interim_results=true
   &utterance_end_ms=3000&vad_events=true
   &encoding=linear16&sample_rate=16000&channels=1
@@ -870,7 +868,6 @@ The existing `audio_recorder.swift` was extended with a `--stream-pcm` argument:
 |---------|-----------|-------------|
 | `start_live_transcription` | `(deepgramKey: string, language: string) → ()` | Start streaming audio to Deepgram |
 | `stop_live_transcription` | `() → string` | Stop transcription, return accumulated transcript |
-| `is_live_transcribing` | `() → bool` | Check if transcription is active |
 | `query_ai_via_proxy_conversation` | `(messagesJson: string, model: string, accessToken: string) → AIProxyResponse` | Send multi-turn conversation to AI via proxy |
 
 `query_ai_via_proxy_conversation` differs from `query_ai_via_proxy` in that it accepts a full JSON `messages` array (system + user + assistant turns) instead of a single prompt string. This enables multi-turn conversation context.
@@ -879,17 +876,20 @@ The existing `audio_recorder.swift` was extended with a `--stream-pcm` argument:
 
 File: `supabase/functions/deepgram-key/index.ts`
 
-Generates a **temporary Deepgram JWT** (30-second TTL) for authenticated Pro users. The permanent API key never leaves the server.
+Generates a **temporary Deepgram JWT** for authenticated Pro users. The permanent API key never leaves the server.
+
+TTL is `DEEPGRAM_TOKEN_TTL_SECONDS = 3600` (1 hour).
 
 Flow:
 1. Validates the user's Supabase JWT from the `Authorization` header
-2. Checks `subscription_status` in the `users` table (must be `active` or `cancelling`)
-3. Calls Deepgram's `POST /v1/auth/grant` with the permanent API key to get a temporary JWT
-4. Returns `{ key: "<temporary_jwt>" }` — this JWT expires in 30 seconds
+2. Checks `subscription_status` in the `users` table (must be `active` or `cancelling`) → 403 otherwise
+3. Sums audio usage for the current billing period via `sum_audio_seconds` RPC (falls back to a manual `audio_usage` query) → 429 if ≥ `PRO_MONTHLY_AUDIO_SECONDS`
+4. Calls Deepgram's `POST /v1/auth/grant` (`Authorization: Token <permanent key>`) to get a temporary JWT
+5. Returns `{ key, remaining_seconds, audio_seconds_used, audio_seconds_limit }`
 
 The Rust backend uses `Authorization: Bearer <jwt>` (not `Token`) to open the WebSocket. Per Deepgram docs, the WebSocket connection stays open beyond the JWT's TTL — the token only needs to be valid during the initial handshake.
 
-**Security**: Even if a user intercepts the token, it expires in 30 seconds and cannot be used to manage the Deepgram account (only `usage::write` permissions for `/listen`, `/speak`, `/read`, `/agent` APIs).
+**Security**: An intercepted token expires in 1 hour and cannot be used to manage the Deepgram account (only `usage::write` permissions for `/listen`, `/speak`, `/read`, `/agent` APIs).
 
 **Supabase secret required:**
 ```bash
@@ -922,7 +922,7 @@ supabase functions deploy deepgram-key
 - **`startLiveTranscription()`**: Checks Pro status, fetches key, clears transcript state, invokes `start_live_transcription`, starts audio timer, begins silence detection.
 - **`stopLiveTranscription(autoTriggered)`**: Clears silence timer, invokes `stop_live_transcription`, calls `sendTranscriptToAI` with the accumulated transcript.
 - **`sendTranscriptToAI(transcript)`**: Builds the `messages` array:
-  - First turn: `[{system: LIVE_CONVERSATION_SYSTEM_PROMPT}, {user: transcript}]`
+  - First turn: `[{system: systemPrompt}, {user: userMessage}]` from `getConversationPrompts(template, interviewLanguage, transcript)`
   - Subsequent turns: `[...conversationHistory, {user: transcript}]`
   - Calls `trimConversationHistory()` to keep within token limits
   - Invokes `query_ai_via_proxy_conversation` with the JSON-serialized messages
@@ -970,19 +970,15 @@ When `conversationHistory.length > 1` and the selected source is audio:
 When not in conversation mode (single response):
 - Falls back to standard `AIResponseDisplay` rendering
 
-#### `LIVE_CONVERSATION_SYSTEM_PROMPT` and Interview Language
+#### Live Conversation System Prompt and Interview Language
 
 File: `src/services/prompts.ts`
 
-The live transcription system prompt is generated dynamically by `getLiveConversationSystemPrompt(languageLabel)`:
-- Role: expert interview coach in a live conversation
-- Expects transcribed text (not audio)
+`getConversationPrompts(template, interviewLanguage, content)` returns the system prompt and first user message. By default this is the Verbal Interview template (`VERBAL_INTERVIEW_SYSTEM_PROMPT`, user-overridable in the Prompts tab):
+- Role: expert interview coach in a live conversation; expects transcribed text (not audio)
 - Uses previous exchanges for context on follow-ups
 - Same EXPLANATION_START/END and SOLUTION_START/END markers as other prompts
-- Emphasizes conciseness for real-time conversational flow
-- **Language instruction**: If a specific language is selected, includes "You MUST respond entirely in {language}". If auto-detect, includes "Respond in the same language the interviewer is using."
-
-The static `LIVE_CONVERSATION_SYSTEM_PROMPT` constant (default: auto-detect) is exported for backward compatibility but `getLiveConversationSystemPrompt()` is used by `sendTranscriptToAI()`.
+- **Language instruction**: `{INTERVIEW_LANGUAGE}` is replaced with "You MUST respond entirely in {language}" for a specific language, or "Respond in the same language the interviewer is using" for auto-detect
 
 #### Interview Language Selector
 
@@ -998,19 +994,6 @@ Users can select the interview language via the "🎙️ Audio" button popup in 
 - `transcription.rs` — `run_transcription_session()` passes the language code to Deepgram's WebSocket URL (`language={code}`)
 
 **Default**: "Auto-detect (Multilingual)" — Deepgram detects the language automatically, AI responds in the detected language.
-
-#### Key Differences from Audio Recording Mode
-
-| Aspect | Audio Recording (old) | Live Transcription (new) |
-|--------|----------------------|--------------------------|
-| Flow | Record → MP3 → send audio to Gemini | Stream PCM → Deepgram STT → send text to any LLM |
-| Model | Forced to Gemini 3 Flash (audio support) | Uses user's selected model (any Pro model) |
-| Context | Single turn only | Multi-turn with conversation history |
-| Latency | Wait for full recording + upload | Real-time transcript as you speak |
-| Silence | Manual stop only | Auto-sends after 5s silence (recording continues) |
-| UI | Timer only | Live transcript display + conversation view |
-
-**Note:** The original audio recording mode (record → MP3 → Gemini) still exists in the codebase but the `toggleAudioRecording` function now routes to the live transcription flow. The old flow could be restored by modifying `toggleAudioRecording`.
 
 #### Audio Recording Usage Limits
 
@@ -1046,7 +1029,7 @@ Pro users have a **10-hour/month** audio recording limit and a **90-minute per-s
 ```
 
 **Database:**
-- `audio_usage` table: `id`, `user_id`, `duration_seconds`, `recorded_at`
+- `audio_usage` table: `id`, `user_id`, `duration_seconds`, `created_at`
 - `sum_audio_seconds(p_user_id, p_start, p_end)` — RPC function for efficient usage queries
 - `cleanup_old_audio_usage()` — pg_cron job runs daily, removes records older than 3 months
 - Migration: `supabase/migrations/003_audio_usage.sql`
@@ -1055,9 +1038,9 @@ Pro users have a **10-hour/month** audio recording limit and a **90-minute per-s
 - `deepgram-key/index.ts` — Checks monthly quota before issuing Deepgram JWT; returns remaining seconds
 - `log-audio-usage/index.ts` — Authenticated endpoint to record usage after each session
 
-**Constants:**
-- `MONTHLY_AUDIO_LIMIT = 36000` (10 hours in seconds)
-- `MAX_SESSION_SECONDS = 5400` (90 minutes)
+**Constants** (`supabase/functions/_shared/limits.ts`, served to the app via `get-models?v=2`):
+- `PRO_MONTHLY_AUDIO_SECONDS = 36000` (10 hours) → `pro_audio_seconds_limit`
+- `PRO_AUDIO_SESSION_MAX_SECONDS = 5400` (90 minutes) → `audio_session_max_seconds`; the app stops a session at `min(audio_session_max_seconds, remaining_seconds)`
 
 **Monthly Reset:** Audio usage resets automatically each billing period because queries filter by `subscription_start_date` to `subscription_end_date`, which are updated by the Stripe webhook on renewal.
 
@@ -1104,15 +1087,25 @@ Implementation in `src/App.tsx`:
 - `hotkey-audio-toggle` listener also triggers auto-selection
 - `showAudioPromptWarning` state controls warning dialog visibility
 
-### Stealth Mode (Screen Capture Protection)
+### Stealth Mode & Anti-Detection Architecture
 
-The app includes a "stealth mode" that makes it invisible to screen capture software (Zoom, Teams, OBS, screenshots, screen recording) and hides it from the Dock/Taskbar. This is designed for real interview scenarios where the user doesn't want the app to appear on shared screens.
+The app includes an advanced **Stealth Mode & Anti-Detection System** that provides three distinct protection layers:
 
-#### Configuration
+1. **Blur Prevention (Always Active):** Prevents browser tabs from losing active window focus, stopping `window.blur` from firing on online assessment platforms.
+2. **Hotkey Hiding (Stealth Mode Only):** Drops/swallows shortcut chords at the OS kernel level so Chrome's DOM and assessment event listeners (`keydown`) never see the keys.
+3. **Screen Capture & System Protection (Stealth Mode Only):** Makes the window invisible to screen-sharing and recording software (Zoom, Teams, Meet, Discord, OBS, OS screenshots) and hides the app from the Dock (macOS) and Taskbar (Windows).
+
+#### Pro Subscription Gating & Defaults
+
+- **Pro Users:** Stealth Mode is unlocked and **defaulted to ON** (`true`).
+- **Free Users:** Stealth Mode is disabled and locked (`Disabled (Pro Only)`). The toggle is rendered with a high-contrast disabled track and a card directing the user to upgrade to Pro. An automated `useEffect` enforces that if a non-Pro user logs in, Stealth Mode is disengaged in both local storage and the backend.
+- **Blur Prevention:** Remains **always active** for both Free and Pro users — the window will never steal OS focus regardless of subscription tier or stealth toggle state.
+
+#### Configuration & Persistence
 
 Stealth mode preference is persisted in a `stealth.json` config file in the app's config directory (alongside `hotkeys.json`). On first launch, it defaults to `true` (stealth enabled).
 
-Users toggle stealth mode in **Settings → App → Stealth Mode**. On macOS, changes take effect after restarting the app (due to macOS activation policy constraints). On Windows, changes take effect immediately.
+Users toggle stealth mode in **Settings → App → Stealth Mode**. On macOS, changes to Dock hiding take effect after restarting the app (due to macOS activation policy constraints). On Windows, changes take effect immediately.
 
 **Config file functions** (`src-tauri/src/main.rs`):
 - `load_stealth_preference(app)` — reads `stealth.json`, returns `Option<bool>`
@@ -1128,18 +1121,28 @@ Stealth mode is applied at app startup in `src-tauri/src/main.rs` → `setup()`:
 **macOS:**
 - `apply_macos_dock_hiding()` — Sets `NSApp.activationPolicy` to `.accessory` (1) via raw ObjC runtime. Hides from Dock and Cmd+Tab.
 - `apply_macos_screen_capture_protection(win)` — Sets `NSWindow.sharingType` to `NSWindowSharingNone` (0). This is the only reliable way to exclude a window from screen capture on macOS.
+- `setup_stealth_hotkeys(app, cfg)` — Installs a low-level `CGEventTap` at `kCGHeadInsertEventTap` (`kCGSessionEventTap`). When a hotkey matches, the callback dispatches the action and returns `NULL`, deleting the keystroke before Chrome receives it.
 - `win.set_content_protected(true)` — Tauri cross-platform fallback.
 - `win.set_skip_taskbar(true)` — Tauri cross-platform fallback.
 
 **Windows:**
 - `apply_windows_stealth(win)` — Uses Win32 API:
   - `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` (0x11) — Excludes window from screen capture (Windows 10 2004+).
-  - Modifies extended window styles: adds `WS_EX_TOOLWINDOW`, removes `WS_EX_APPWINDOW` — Hides from taskbar and Alt+Tab.
+  - Modifies extended window styles: adds `WS_EX_TOOLWINDOW`, removes `WS_EX_APPWINDOW`, and injects `WS_EX_NOACTIVATE` so mouse clicks on the window never steal foreground focus.
+- `setup_stealth_hotkeys(app, cfg)` — Installs a low-level keyboard hook via `SetWindowsHookExW(WH_KEYBOARD_LL, ...)`. The hook procedure returns `LRESULT(1)` to swallow the hotkey. Modifier keyups pass through to maintain OS modifier sync, with neutral keyup masking (`VK_NONAME`/`VK_CONTROL`) to prevent Alt/Win menu activation and focus loss. On app teardown, any lingering modifiers are synthesized as released.
 - Same Tauri cross-platform fallbacks as macOS.
 
 **When stealth is OFF:**
 - `restore_macos_screen_capture_visibility(win)` — Sets `NSWindow.sharingType` back to `NSWindowSharingReadWrite` (1) to allow screen capture.
 - `win.set_content_protected(false)` and `win.set_skip_taskbar(false)`.
+- Hotkeys pass through to the foreground application normally.
+
+#### Focus & Geometry Management (Always Active)
+
+- **`bring_to_front_without_focus(&win)`**: Replaced all `win.set_focus()` calls with non-activating window methods (`orderFrontRegardless` on macOS, `SW_SHOWNOACTIVATE` & `SWP_NOACTIVATE` on Windows).
+- **`move_window_by()` & `resize_window()`**: On Windows, window position animations and size adjustments use `SetWindowPos` with `SWP_NOACTIVATE` to prevent the Desktop Window Manager (DWM) from shifting active focus away from Chrome.
+- **CDP `activate_tab`**: Removed the AppleScript `tell application "Google Chrome" to activate` subprocess so tab switching occurs purely through CDP WebSocket messages without OS-level focus transitions.
+- **Typing on Windows (stealth mode)**: `apply_windows_stealth` sets `WS_EX_NOACTIVATE`, so clicking the window never takes focus from Chrome, but that also means the window can't receive keyboard input. `src/hooks/useKeyboardInputMode.ts` (called at the top of `App()`) listens app-wide: `pointerdown` on a text field (`input`/`textarea`/`contenteditable`) → `set_keyboard_input_mode(true)` (removes `WS_EX_NOACTIVATE`, `set_focus()`), and `focusout` to anything that isn't a text field (including clicking back into another app) → `set_keyboard_input_mode(false)` (restores it). Clicking into a text field therefore does make Chrome lose focus, the same as on macOS. The command is a no-op on macOS and when stealth is off.
 
 #### Toggle Visibility Hotkey
 
@@ -1152,10 +1155,9 @@ A global hotkey allows quickly hiding/showing the app window (works in both stea
 | Linux | `Ctrl+Shift+H` |
 
 Implementation: `register_toggle_visibility_hotkey()` in `main.rs`:
-- **macOS / non-stealth**: Uses standard `win.hide()` / `win.show()` + `win.unminimize()` + `win.set_focus()`.
-- **Windows with stealth mode**: Uses `toggle_window_offscreen_win32()` instead of `hide()`/`show()`. This moves the window to coordinates (-30000, -30000) to "hide" and restores saved position to "show". Avoids the `ShowWindow(SW_HIDE/SW_SHOW)` cycle which corrupts `WDA_EXCLUDEFROMCAPTURE`, causing a black rectangle in screen capture instead of complete invisibility. Position is saved/restored via static `AtomicI32` variables.
-- **`STEALTH_ENABLED` global flag**: A static `AtomicBool` set during app startup, checked by the toggle handler to decide which approach to use.
-- **`reapply_stealth_after_show()`**: Called after every `win.show()` in non-toggle hotkey handlers (solve, scroll, move) to re-apply `SetWindowDisplayAffinity` as a safety measure.
+- **macOS / non-stealth**: Uses `stealth_hotkey::toggle_visibility_without_focus(&handle)` via `win.hide()` / `bring_to_front_without_focus()`.
+- **Windows with stealth mode**: Uses `toggle_window_offscreen_win32()` instead of `hide()`/`show()`. This moves the window to coordinates (-30000, -30000) to "hide" and restores saved position to "show" using `SWP_NOACTIVATE`. Avoids the `ShowWindow(SW_HIDE/SW_SHOW)` cycle which corrupts `WDA_EXCLUDEFROMCAPTURE`, causing a black rectangle in screen capture instead of complete invisibility.
+- **`reapply_stealth_after_show()`**: Called after every non-toggle hotkey handler (solve, scroll, move) to re-apply `SetWindowDisplayAffinity` as a safety measure.
 
 #### Quit App Hotkey
 
@@ -1167,12 +1169,13 @@ Since stealth mode hides the app from Dock/Taskbar, there's also a quit hotkey:
 | Windows | `Alt+Shift+Q` |
 | Linux | `Ctrl+Shift+Q` |
 
-Both hotkeys are customizable in Settings → HotKeys tab.
+Both hotkeys are customizable in Settings → HotKeys tab. When the app quits, `teardown_stealth_hotkeys()` is executed to cleanly unhook the event taps and stop background hook threads.
 
 #### Key Files
 
-- `src-tauri/src/main.rs`: Stealth mode helpers, `set_stealth_mode` Tauri command, `load_stealth_preference`/`save_stealth_preference` config file I/O, and startup logic
-- `stealth.json` (in app config dir): Persisted user preference `{"enabled": true/false}`
+- `src-tauri/src/main.rs`: Stealth mode helpers, `set_stealth_mode`, `get_stealth_status`, `request_accessibility`, `refresh_stealth_status` Tauri commands, and startup/exit lifecycle logic.
+- `src-tauri/src/stealth_hotkey.rs`: CoreGraphics Event Tap, Win32 Low-Level Keyboard Hook, event swallowing, and non-activating window show routines.
+- `stealth.json` (in app config dir): Persisted user preference `{"enabled": true/false}`.
 
 ### Notification / Announcement System
 
@@ -1260,7 +1263,7 @@ In `src/App.tsx`:
 ### Billing Period vs Calendar Month
 
 - **Pro users**: Quota is based on subscription billing period (subscription_start_date to subscription_end_date), NOT calendar month
-- **Free users**: 3 lifetime calls total (never resets)
+- **Free users**: `FREE_LIFETIME_CALL_LIMIT` (currently 3) lifetime calls total (never resets), served to the app as `free_call_limit`
 - When a Pro user renews, their `subscription_start_date` and `subscription_end_date` are updated, effectively resetting their quota
 
 ### Domain Restrictions (Security)
@@ -1314,24 +1317,23 @@ The webhook handler (`stripe-webhook` / `stripe-webhook-test`) processes:
 - `id` (UUID)
 - `user_id` (UUID, FK to users.id)
 - `duration_seconds` (numeric)
-- `recorded_at` (timestamptz, default now())
+- `created_at` (timestamptz, default now(); indexed with `user_id`)
 
 **Automatic audio usage cleanup** (pg_cron):
 - Runs daily at 4:00 AM UTC
 - Deletes audio_usage records older than 3 months
 
 **Automatic user creation**:
-- Database trigger `on_auth_user_created` automatically creates a `public.users` entry when a new user signs up via `auth.users`
-- Trigger function: `handle_new_user()` (defined in migration `20260217000000_create_users_and_trigger.sql`)
-- This ensures every authenticated user has a corresponding record in `public.users` for subscription/quota tracking
+- Database trigger `on_auth_user_created` / function `handle_new_user()` creates a `public.users` entry on sign-up. **The SQL for this (and for the `users` / `api_usage` tables) is not in this repo** — it lives only in the hosted Supabase project.
+- As a safety net, `ai-proxy` inserts a `users` row (`lifetime_ai_calls: 0`) if none exists for the caller.
 
 **Automatic cleanup job** (pg_cron):
 - Runs daily at 3:00 AM UTC
 - Deletes api_usage records older than 3 months
 
-**Database Migrations**:
-- `supabase/migrations/20260217000000_create_users_and_trigger.sql`: Creates `public.users` table with RLS policies and auto-creation trigger
-- `supabase/migrations/20260217000001_fix_existing_user.sql`: Example migration to backfill existing auth users
+**Database Migrations** (only these exist in `supabase/migrations/`):
+- `002_cleanup_old_api_usage.sql`: Enables `pg_cron`, schedules `cleanup-old-api-usage` (daily 3:00 AM UTC)
+- `003_audio_usage.sql`: Creates `audio_usage` + index, `sum_audio_seconds()` RPC, schedules `cleanup-old-audio-usage` (daily 4:00 AM UTC)
 
 To apply migrations:
 ```bash
@@ -1373,6 +1375,8 @@ Or manually via Supabase Dashboard → SQL Editor
 **Frontend constants** (in `src/services/supabase.ts`):
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
+
+The desktop app reads no local `.env`; all secrets live in Supabase.
 
 ### OpenRouter Integration
 
@@ -1448,9 +1452,8 @@ Each of the 6 built-in prompts has its **own tailored system prompt** (not a sha
 | Code Review | `CODE_REVIEW_SYSTEM_PROMPT` | Senior software engineer | Improved/fixed code |
 | Explain Concept | `EXPLAIN_CONCEPT_SYSTEM_PROMPT` | Technical educator | Code example or structured summary |
 | Verbal Interview | `VERBAL_INTERVIEW_SYSTEM_PROMPT` | Interview coach | Code or bullet-point answer |
-| Live Conversation (auto) | `LIVE_CONVERSATION_SYSTEM_PROMPT` | Interview coach (live) | Concise code or bullet points |
 
-**`LIVE_CONVERSATION_SYSTEM_PROMPT`** is used automatically by the live transcription flow (not selectable as a template). It is injected as the system message on the first turn of a conversation. It emphasizes conciseness and multi-turn context awareness.
+The live transcription flow uses the Verbal Interview template via `getConversationPrompts()`; its system prompt is injected as the system message on the first turn of a conversation.
 
 **Key prompt rules enforced across all templates:**
 - Do NOT repeat or restate the problem
@@ -1468,11 +1471,9 @@ Each of the 6 built-in prompts has its **own tailored system prompt** (not a sha
 
 **`GENERAL_SYSTEM_PROMPT`** is now only used as a fallback for custom prompts that don't override the system prompt.
 
-**Max output tokens:** All AI calls use `max_tokens: 16384` (increased from 4096) to prevent solution truncation on complex problems. This applies to:
-- Rust proxy functions (`main.rs`): 3 places
-- Direct Claude calls (`claude.rs`): 2 places
-- Direct Gemini calls (`gemini.rs`): 3 places (`generationConfig.maxOutputTokens`)
-- Edge function default (`ai-proxy/index.ts`)
+**Max output tokens:** `MAX_OUTPUT_TOKENS` (16384) in `_shared/limits.ts` is the only source:
+- Proxy calls: the Rust proxy commands send no `max_tokens`; `ai-proxy` defaults to `MAX_OUTPUT_TOKENS` and clamps any client value to it (old releases send 16384)
+- BYO Gemini calls: the app passes `modelConfig.max_output_tokens` (from `get-models?v=2`) as `AIConfig.max_output_tokens` → `generationConfig.maxOutputTokens`
 
 **AI request timeout:** 50 seconds (both Rust HTTP client and edge function `AbortController`). Increased from 30s to accommodate System Design prompts with Mermaid diagrams + screenshot input.
 
@@ -1563,7 +1564,7 @@ Implementation in `src/App.tsx`:
 - Stepper renders only when `solvePhase !== 'idle' && solvePhase !== 'error' && isLoading && !isRecordingAudio`
 - Steps light up as `active` (pulsing animation) or `completed` (green)
 - **No "Done" step** — stepper disappears immediately when AI responds (`solvePhase → 'idle'`)
-- **Model + Prompt info**: When `solvePhase === 'asking'`, a subtitle line appears below the stepper showing the AI model name and selected prompt (e.g., "🧠 Claude Sonnet 4.5 · 📋 Algorithm - Optimal"). Fades in with animation.
+- **Model + Prompt info**: When `solvePhase === 'asking'`, a subtitle line appears below the stepper showing the AI model name and selected prompt (e.g., "🧠 Claude Sonnet 5 · 📋 Algorithm - Optimal"). Fades in with animation.
 - Styled via `.solve-stepper`, `.stepper-track`, `.stepper-step`, `.stepper-connector`, `.stepper-info` in `App.css`
 
 #### Mermaid Diagram Rendering (System Design)
@@ -1599,8 +1600,8 @@ No separate label — the icon is part of the button text itself.
 #### Usage Badge (Header)
 
 The header shows a usage badge (`quota-badge`) with units:
-- **Pro**: `📊 94/150 calls` — tooltip shows detailed period info + reset date
-- **Free**: `🎁 2/3 calls` — tooltip shows "lifetime free calls used"
+- **Pro**: `📊 94/150 calls` (limit from `pro_request_limit` / usage response) — tooltip shows detailed period info + reset date
+- **Free**: `🎁 2/3 calls` (limit from `free_call_limit`) — tooltip shows "lifetime free calls used"
 - **BYO Key**: `🔑 BYO Key` — tooltip shows "Using your own Gemini API key"
 
 #### Usage Bar Gradient (Settings → Account)
@@ -1617,8 +1618,11 @@ The Input Mode controls (text extraction vs screenshot) have been merged into th
 - 📝 Text Extraction — "Chrome tabs only"
 - 📸 Screenshot Capture — "Visual · Images & diagrams"
 - Note: Text extraction only works with Chrome tabs. Display source always uses screenshot mode.
+- Text mode still attaches pictures when the question needs them (question images, charts, whiteboards, near-empty pages); see "Text extraction details". Screenshot mode sends only the screenshot, as before.
 
 Styled via `.toggle-btn .mode-icon`, `.mode-label`, `.mode-description` in `App.css`.
+
+**Main-screen switch:** an icon segmented control (document = Text, camera = Screenshot; `.solve-group`, `.mode-segment`, `.mode-segment-thumb` sliding highlight, `.mode-segment-btn`) sits inline to the left of the Solve button, matching its height; the Solve button keeps its original size. It reads and writes the same `useScreenshot` state (persisted as `localStorage('use_screenshot')`) as the AI Models tab, so changing either updates both. Hidden for the Audio source; locked to Screenshot for Display sources.
 
 #### Verbal Interview Badge (Prompts Tab)
 
@@ -1639,9 +1643,22 @@ The refresh button for input sources includes visual feedback:
 - **Tooltip**: `title="Refresh Input Sources"`
 - `isRefreshing` state controls disabled + animation
 
+#### Automatic Tab Refresh
+
+`refreshChromeTabsQuietly()` keeps the Chrome tab list current without the spinner (the manual 🔄 `fetchTabs()` still does a full refresh including displays):
+- Runs (while Chrome is connected) on window `focus` and when the input dropdown opens — no periodic polling (`TabDropdown` `onOpen`); skipped while a solve is in progress (`isLoadingRef`) or another refresh is running
+- Re-captures thumbnails only for new tabs or tabs whose URL changed, at most once per tab+URL (`thumbnailAttemptedRef`), since background tabs often can't be screenshotted
+- Updates the selected tab object in place so its URL/title stay current; if it was closed, selects the first source
+- `solveWithAI()` also re-reads the selected tab's current URL (2s timeout) before solving, so the free-tier site check and `source_url` never use a stale page (important for hotkey solves while the app is unfocused)
+
 #### Always on Top
 
 The app window is configured to stay on top of all other windows at all times. This is a core UX feature — the user always has the AI assistant visible while working in Chrome or other apps. Combined with stealth mode, the window floats above everything while remaining invisible to screen-sharing software.
+
+- `alwaysOnTop: true` in `tauri.conf.json` puts the window at macOS floating level / Windows `HWND_TOPMOST`.
+- **Over full-screen apps (macOS):** a full-screen app (e.g. Chrome after Ctrl+Cmd+F) lives in its own Space. `apply_macos_fullscreen_overlay()` (called in `setup`, all modes) adds `NSWindowCollectionBehaviorCanJoinAllSpaces | FullScreenAuxiliary` and clears `MoveToActiveSpace | FullScreenPrimary`, so the window joins every Space including full-screen ones. Side effects: the window follows the user to every desktop Space, and its green button no longer enters full screen itself.
+- macOS (10.14+) only floats a window over **another app's** full-screen window when the app is Dock-less (accessory activation policy) **from launch**. Tauri's `setup` runs after launch, and tao launches as `.regular`, so switching to accessory in `setup` (`apply_macos_dock_hiding`) hides the Dock icon but is too late for full-screen overlay. Measured on macOS 26 (2026-10-12): windows of an app that finished launching as `.regular` never appeared over a full-screen window, even after re-applying the collection behavior, re-showing the window, or switching policy before first show. Fix: `main()` builds the app, then calls `app.set_activation_policy(ActivationPolicy::Accessory)` **before** `app.run()` when stealth is on, so tao launches the app Dock-less. Verified: the real app window is on screen in front of a full-screen window.
+- In normal mode (stealth off, Dock icon visible) the window still won't appear over other apps' full-screen windows.
 
 #### Hotkeys Settings UI
 
@@ -1671,12 +1688,17 @@ The "App" tab in the Settings modal provides three app-level preferences that pe
 - ~20+ CSS variables extracted from hardcoded colors: `--surface`, `--border`, `--shadow`, `--input-bg`, `--stepper-bg`, `--transcript-bg`, etc.
 - Persisted in `localStorage('app_theme')`, applied on startup
 
-**Stealth Mode Toggle:**
-- Switch control with "Enabled" / "Disabled" label
-- Calls `invoke('set_stealth_mode', { enabled })` which saves to `stealth.json` config file
-- On Windows: applies/removes stealth protections immediately
-- On macOS: saves preference for next app launch (shows note: "On macOS, stealth changes take effect after restarting the app.")
-- Persisted in both `localStorage('stealth_mode')` (for UI state) and `stealth.json` (for Rust startup)
+**Stealth Mode Toggle & Anti-Detection System:**
+- **Pro Gated Feature**: Stealth Mode is available exclusively to Pro users (`isPro === true`).
+  - **Pro Users**: Switch is enabled and defaults to **ON** (`true`).
+  - **Free Users**: Switch is locked to **OFF** (`checked={false}` and `disabled={true}`) with a `PRO ONLY` badge and an upgrade callout.
+- **High-Contrast Theme-Adaptive Switch**: The toggle switch (`.toggle-switch-slider`) features a high-contrast slate track (`#cbd5e1` in light, `#334155` in dark) with distinct slate borders (`#94a3b8` / `#475569`). In the disabled state, the track is clearly defined (`#e2e8f0` / `#1e293b`) with a muted thumb, ensuring the switch is 100% visible across both light and dark themes.
+- **Unified Anti-Detection Slot**: Placed directly underneath the toggle switch:
+  - **When Stealth Active (Pro)**: Green protection card confirming that **Hotkey Hiding** (swallowing shortcuts from Chrome DOM) and **Screen & System Protection** (hidden from Zoom, Teams, Meet, OS screenshots, Dock, Taskbar) are engaged.
+  - **When Stealth Inactive (Pro)**: Amber warning card indicating that Hotkey Hiding and Screen Sharing protection are disengaged.
+  - **When Free Tier**: Blue upgrade card detailing the benefits of Stealth Mode.
+- **Blur Prevention**: Always active across all tiers and states (the window never pulls active OS focus, preventing `window.blur` in online tests).
+- Persisted in both `localStorage('stealth_mode')` (for UI state) and `stealth.json` (for Rust startup).
 
 **Tauri Commands:**
 
@@ -1684,13 +1706,16 @@ The "App" tab in the Settings modal provides three app-level preferences that pe
 |---------|-----------|-------------|
 | `set_window_opacity` | `(opacity: f64) → ()` | Set window transparency (0.1–1.0) |
 | `set_stealth_mode` | `(enabled: bool) → ()` | Toggle stealth protections + save preference |
+| `get_stealth_status` | `() → StealthStatus` | Read live stealth status (`swallowing_active`, `blur_prevention_active`, `macos_accessibility_granted`) |
+| `request_accessibility` | `() → bool` | Trigger native macOS Accessibility permission prompt via `AXIsProcessTrustedWithOptions` |
+| `refresh_stealth_status` | `() → StealthStatus` | Dynamically re-check accessibility and activate event swallowing without restarting the app |
 
 **CSS Classes:**
 - `.app-settings-group` — Setting group with bottom border separator
 - `.app-settings-label` / `.app-settings-desc` — Setting name and description
 - `.opacity-slider-row` / `.opacity-slider` / `.opacity-value` — Transparency slider layout
 - `.theme-toggle-group` / `.theme-toggle-btn` — Light/Dark toggle buttons
-- `.stealth-toggle-row` / `.toggle-switch` / `.toggle-switch-slider` — Stealth on/off switch
+- `.stealth-toggle-row` / `.toggle-switch` / `.toggle-switch-slider` — Theme-adaptive toggle switch with explicit light/dark contrast and `.disabled` states
 
 #### Custom Prompt Management
 
@@ -1727,8 +1752,8 @@ The Rust backend (`src-tauri/src/main.rs`) calls these production endpoints. Tes
 - **`src-tauri/tauri.conf.json`**:
   - `macOS.minimumSystemVersion` set to `"11.0"` (Big Sur, required for ScreenCaptureKit audio recording)
   - Bundle targets: `"all"` (builds all platform-appropriate bundles — DMG on macOS, NSIS `.exe` + MSI on Windows)
-  - **Windows NSIS installer**: Configured at `bundle.windows.nsis` with `installMode: "both"` (user chooses per-user or per-machine at install time). Produces `CrackingInterview_1.0.0_x64-setup.exe`. Note: Tauri v2 does not support `oneClick` or `allowElevation` NSIS properties (v1 only).
-  - **MSI installer**: Auto-generated by Tauri via WiX. Produces `CrackingInterview_1.0.0_x64_en-US.msi`. Better for enterprise/GPO deployment.
+  - **Windows NSIS installer**: Configured at `bundle.windows.nsis` with `installMode: "both"` (user chooses per-user or per-machine at install time). Produces `CrackingInterview_2.0.0_x64-setup.exe`. Note: Tauri v2 does not support `oneClick` or `allowElevation` NSIS properties (v1 only).
+  - **MSI installer**: Auto-generated by Tauri via WiX. Produces `CrackingInterview_2.0.0_x64_en-US.msi`. Better for enterprise/GPO deployment.
 - **`package.json`**: `author: "Cracking Interview LLC"`, `license: "UNLICENSED"`
 - **`.gitignore`**: Includes `notarize.sh` (contains Apple Developer credentials)
 - **App window**: `alwaysOnTop: true` configured in `tauri.conf.json`
@@ -1744,11 +1769,17 @@ npm run tauri build
 # Output: src-tauri/target/release/bundle/nsis/*.exe + msi/*.msi
 ```
 
+**Release scripts** (preferred over running the steps by hand):
+- `scripts/build-macos.sh` — 7 steps: universal build → codesign `.app` (hardened runtime) → create DMG with Applications shortcut → style DMG window → sign DMG → `notarytool submit --wait` → `stapler staple`. Reads the version from `tauri.conf.json`; works in `/tmp/cracking-dmg-build`.
+- `scripts/build-windows.ps1` — builds the NSIS installer, signs the app `.exe` and the installer with SSL.com eSigner (CodeSignTool), then verifies both signatures. Credentials come from env vars (e.g. `SSL_USERNAME`) or interactive prompts.
+
 ### Code Cleanup (Release Readiness)
 
 All debug logging has been removed for the release build:
 - Removed all `console.log` statements from `App.tsx` and component files
-- Removed all `invoke('frontend_log', ...)` debug calls from frontend
+- Removed the `frontend_log` command and all its frontend calls
+- Free and Pro limits moved to `_shared/limits.ts` and served via `get-models?v=2` (`free_call_limit`, `pro_request_limit`, `pro_audio_seconds_limit`, `audio_session_max_seconds`); removed the unused record-to-file audio path (`start/stop/is_audio_recording`, `query_ai_via_proxy_with_audio`, `is_live_transcribing`, MP3 encoding, `hound`/`mp3lame-encoder`) and dead TS helpers (`checkAIQuota`, `getSession`, `getUser`, `getDefaultSystemPrompt`, `LIVE_CONVERSATION_SYSTEM_PROMPT`)
+- Removed the unused Google OAuth flow (`google_oauth.rs`, `oauth_server.rs`, `.env` loading), legacy audio-to-Gemini direct commands, and their crates (`tiny_http`, `sha2`, `rand`, `urlencoding`, `dotenv`)
 - Kept only critical error logs (`console.error`) for production debugging
 - Removed commented-out code and unused imports
 - Cleaned unused variables
@@ -1775,7 +1806,7 @@ rustup target add x86_64-apple-darwin
 
 **Output files:**
 - `.app`: `src-tauri/target/universal-apple-darwin/release/bundle/macos/CrackingInterview.app`
-- `.dmg`: `src-tauri/target/universal-apple-darwin/release/bundle/dmg/CrackingInterview_1.0.0_universal.dmg`
+- `.dmg`: `src-tauri/target/universal-apple-darwin/release/bundle/dmg/CrackingInterview_2.0.0_universal.dmg`
 
 **Verify universal binary:**
 ```bash
@@ -1861,8 +1892,8 @@ Notes:
   - `useAuth()` hook (for Supabase auth state)
   - `useSubscription()` hook
 - **WS mode CDP commands use incrementing IDs** (`AtomicU64 MSG_ID`) with a `oneshot` channel map for response routing. HTTP mode still uses fixed IDs per-request (single command per temporary WS connection, no concurrency issue).
-- **Audio flow has two paths**: The legacy "record → MP3 → Gemini" path still exists in `audio.rs` but `toggleAudioRecording` now routes to live transcription via Deepgram. The old path could be useful as a fallback if Deepgram is unreachable (e.g., corporate proxy blocking).
 - **Test vs Production Edge Functions**: Production functions are now active (no `-test` suffix). Test-mode copies still exist as separate deployments. Consider consolidating to a single function with environment variable switching.
 - **Corporate VPN workarounds**: Auth and some API calls go through Rust backend to bypass SSL inspection issues. This adds complexity but is necessary for some enterprise environments.
 - **Mermaid diagrams are client-side only**: If the AI returns malformed Mermaid syntax, it falls back to showing the raw text. Consider adding a retry mechanism or server-side validation.
+- **Missing base schema migrations**: `users` / `api_usage` tables and the `handle_new_user` trigger are not versioned in `supabase/migrations/`.
 - **Windows stealth off-screen approach**: The off-screen window position trick (-30000, -30000) works but multi-monitor setups with unusual configurations (e.g., very large negative-coordinate monitors) could theoretically conflict. Tested and working on standard multi-monitor setups.

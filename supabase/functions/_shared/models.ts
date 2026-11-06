@@ -12,10 +12,32 @@ export const PRO_MODELS: ModelInfo[] = [
 ];
 
 export const FREE_MODEL: ModelInfo = {
+  id: 'gemini-3.5-flash-lite',
+  name: 'Gemini 3.5 Flash-Lite',
+  provider: 'Google',
+};
+
+// Used by free users who paste their own Gemini API key; the app calls the
+// Google Generative Language API directly, so `id` must be a native Gemini model ID.
+// Must be a model on the Gemini API Free tier (AI Studio key, no billing account);
+// 2.5 models are restricted to accounts that already used them.
+export const BYO_MODEL: ModelInfo = {
+  id: 'gemini-3.5-flash-lite',
+  name: 'Gemini 3.5 Flash-Lite',
+  provider: 'Google',
+};
+
+// Served by `get-models` to app releases that don't send `?v=2`. Those releases use
+// `free_model.id` for BYO-key calls and their Rust only accepts 'gemini-2.5-flash',
+// so this must stay frozen until those releases are retired.
+export const LEGACY_FREE_MODEL: ModelInfo = {
   id: 'gemini-2.5-flash',
   name: 'Gemini 2.5 Flash',
   provider: 'Google',
 };
+
+// Deepgram speech-to-text model for live transcription (returned by `deepgram-key`).
+export const TRANSCRIPTION_MODEL = 'nova-3';
 
 export const DEFAULT_PRO_MODEL = 'gpt-5.2-codex';
 
@@ -26,5 +48,5 @@ export const MODEL_MAP: Record<string, string> = {
   'claude-sonnet-5': 'anthropic/claude-sonnet-5',
   'gemini-3-flash': 'google/gemini-3-flash-preview',
   'grok-4.3': 'x-ai/grok-4.3',
-  'gemini-2.5-flash': 'google/gemini-2.5-flash',
+  'gemini-3.5-flash-lite': 'google/gemini-3.5-flash-lite',
 };

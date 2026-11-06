@@ -101,9 +101,14 @@ export async function getUserSubscription(userId: string): Promise<UserSubscript
 
 /**
  * Get usage statistics for the current billing period
- * Counts requests from subscription_start_date to subscription_end_date
+ * Counts requests from subscription_start_date to subscription_end_date.
+ * Limits are server-provided (`get-models` config).
  */
-export async function getUsageStats(userId: string, subscription?: UserSubscription | null): Promise<UsageStats> {
+export async function getUsageStats(
+  userId: string,
+  subscription: UserSubscription | null,
+  limits: { requests: number; audioSeconds: number },
+): Promise<UsageStats> {
   const now = new Date();
   
   // Use subscription dates if available, otherwise fall back to all-time
@@ -124,9 +129,9 @@ export async function getUsageStats(userId: string, subscription?: UserSubscript
 
   const defaultStats: UsageStats = {
     requests_used: 0,
-    requests_limit: 150,
+    requests_limit: limits.requests,
     audio_seconds_used: 0,
-    audio_seconds_limit: 36000,
+    audio_seconds_limit: limits.audioSeconds,
     period_start: periodStart,
     period_end: periodEnd,
   };
@@ -180,9 +185,9 @@ export async function getUsageStats(userId: string, subscription?: UserSubscript
 
     return {
       requests_used: count || 0,
-      requests_limit: 150,
+      requests_limit: limits.requests,
       audio_seconds_used: audioSecondsUsed,
-      audio_seconds_limit: 36000,
+      audio_seconds_limit: limits.audioSeconds,
       period_start: periodStart,
       period_end: periodEnd,
     };
@@ -347,109 +352,12 @@ export async function resetPassword(email: string): Promise<{ error: string | nu
 }
 
 /**
- * Get current session with timeout to avoid VPN hangs
- * Falls back to localStorage if network is slow
- */
-export async function getSession(): Promise<Session | null> {
-  // Race between Supabase call and a timeout
-  const timeoutMs = 2000; // 2 second max wait
-  
-  const supabasePromise = supabase.auth.getSession().then(({ data }) => data.session);
-  const timeoutPromise = new Promise<Session | null>((resolve) => {
-    setTimeout(() => {
-      // Try to get session from localStorage as fallback
-      const stored = localStorage.getItem(`sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`);
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          resolve(parsed as Session);
-        } catch {
-          resolve(null);
-        }
-      } else {
-        resolve(null);
-      }
-    }, timeoutMs);
-  });
-  
-  return Promise.race([supabasePromise, timeoutPromise]);
-}
-
-/**
- * Get current user with timeout
- */
-export async function getUser(): Promise<User | null> {
-  const session = await getSession();
-  return session?.user || null;
-}
-
-/**
  * Subscribe to auth state changes
  */
 export function onAuthStateChange(callback: (event: string, session: Session | null) => void) {
   return supabase.auth.onAuthStateChange((event, session) => {
     callback(event, session);
   });
-}
-
-/**
- * Check if user can make AI requests via proxy
- * Returns: { allowed: boolean, reason?: string, remainingCalls?: number }
- */
-export async function checkAIQuota(userId: string): Promise<{
-  allowed: boolean;
-  reason?: string;
-  remainingCalls?: number;
-  isPaid: boolean;
-}> {
-  const subscription = await getUserSubscription(userId);
-  
-  if (!subscription) {
-    return { allowed: false, reason: 'User not found', isPaid: false };
-  }
-
-  // Include 'cancelling' as paid - they still have access until period ends
-  const isPaid = subscription.subscription_status === 'active' || subscription.subscription_status === 'cancelling';
-
-  if (isPaid) {
-    // Paid user - check monthly quota
-    const usage = await getUsageStats(userId);
-    const remaining = usage.requests_limit - usage.requests_used;
-    
-    if (remaining <= 0) {
-      return {
-        allowed: false,
-        reason: 'Monthly quota exceeded. Resets on ' + usage.period_end.toLocaleDateString(),
-        remainingCalls: 0,
-        isPaid: true,
-      };
-    }
-
-    return {
-      allowed: true,
-      remainingCalls: remaining,
-      isPaid: true,
-    };
-  } else {
-    // Free user - check lifetime quota (3 calls)
-    const lifetimeUsed = subscription.lifetime_ai_calls || 0;
-    const remaining = 3 - lifetimeUsed;
-
-    if (remaining <= 0) {
-      return {
-        allowed: false,
-        reason: 'Free trial expired. Subscribe to continue using AI features.',
-        remainingCalls: 0,
-        isPaid: false,
-      };
-    }
-
-    return {
-      allowed: true,
-      remainingCalls: remaining,
-      isPaid: false,
-    };
-  }
 }
 
 /**

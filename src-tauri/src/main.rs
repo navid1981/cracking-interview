@@ -6,16 +6,15 @@ mod ai;
 mod screenshot;
 pub(crate) mod audio;
 mod transcription;
-mod oauth_server;
-mod google_oauth;
 mod documents;
+mod stealth_hotkey;
+mod setup;
 
-use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::path::PathBuf;
 
-static STEALTH_ENABLED: AtomicBool = AtomicBool::new(false);
+pub(crate) static STEALTH_ENABLED: AtomicBool = AtomicBool::new(false);
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -23,10 +22,6 @@ use serde::{Serialize, Deserialize};
 use base64::{Engine as _, engine::general_purpose};
 
 lazy_static::lazy_static! {
-    static ref OAUTH_SERVICE: Arc<google_oauth::GoogleOAuthService> = {
-        Arc::new(google_oauth::GoogleOAuthService::new())
-    };
-    
     // Reusable HTTP client for AI proxy requests (avoids TLS handshake per request)
     static ref AI_PROXY_CLIENT: reqwest::Client = {
         reqwest::Client::builder()
@@ -36,6 +31,8 @@ lazy_static::lazy_static! {
             .build()
             .expect("Failed to create AI proxy HTTP client")
     };
+    // Free-tier site allow-list, populated from the `get-models` response in `fetch_models`.
+    static ref FREE_ALLOWED_DOMAINS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 }
 
 // Two dedicated hotkeys:
@@ -68,18 +65,18 @@ const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Alt+3";
 const DEFAULT_AUDIO_TOGGLE_HOTKEY: &str = "Ctrl+3";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct HotkeysConfig {
-    text: String,
-    screenshot: String,
-    audio_toggle: String,
-    scroll_up: String,
-    scroll_down: String,
-    move_up: String,
-    move_down: String,
-    move_left: String,
-    move_right: String,
-    toggle_visibility: String,
-    quit_app: String,
+pub(crate) struct HotkeysConfig {
+    pub(crate) text: String,
+    pub(crate) screenshot: String,
+    pub(crate) audio_toggle: String,
+    pub(crate) scroll_up: String,
+    pub(crate) scroll_down: String,
+    pub(crate) move_up: String,
+    pub(crate) move_down: String,
+    pub(crate) move_left: String,
+    pub(crate) move_right: String,
+    pub(crate) toggle_visibility: String,
+    pub(crate) quit_app: String,
 }
 
 struct HotkeysState(Mutex<HotkeysConfig>);
@@ -351,10 +348,24 @@ fn unregister_hotkey_best_effort(app: &tauri::AppHandle, hotkey: &str) {
     let _ = app.global_shortcut().unregister(hotkey);
 }
 
+pub(crate) fn unregister_all_fallback_hotkeys(app: &tauri::AppHandle, cfg: &HotkeysConfig) {
+    unregister_hotkey_best_effort(app, &cfg.text);
+    unregister_hotkey_best_effort(app, &cfg.screenshot);
+    unregister_hotkey_best_effort(app, &cfg.audio_toggle);
+    unregister_hotkey_best_effort(app, &cfg.scroll_up);
+    unregister_hotkey_best_effort(app, &cfg.scroll_down);
+    unregister_hotkey_best_effort(app, &cfg.move_up);
+    unregister_hotkey_best_effort(app, &cfg.move_down);
+    unregister_hotkey_best_effort(app, &cfg.move_left);
+    unregister_hotkey_best_effort(app, &cfg.move_right);
+    unregister_hotkey_best_effort(app, &cfg.toggle_visibility);
+    unregister_hotkey_best_effort(app, &cfg.quit_app);
+}
+
 /// Reapply screen-capture exclusion after win.show() on Windows.
 /// On Windows, hiding then showing a window can reset the WDA_EXCLUDEFROMCAPTURE flag,
 /// causing a black rectangle in screen sharing instead of full invisibility.
-fn reapply_stealth_after_show(win: &tauri::WebviewWindow) {
+pub(crate) fn reapply_stealth_after_show(win: &tauri::WebviewWindow) {
     if !STEALTH_ENABLED.load(Ordering::Relaxed) {
         return;
     }
@@ -381,7 +392,7 @@ fn reapply_stealth_after_show(win: &tauri::WebviewWindow) {
 /// WDA_EXCLUDEFROMCAPTURE and causes a black rectangle in screen capture.
 /// The window stays "visible" to Windows at all times so the display affinity is preserved.
 #[cfg(target_os = "windows")]
-fn toggle_window_offscreen_win32(win: &tauri::WebviewWindow) {
+pub(crate) fn toggle_window_offscreen_win32(win: &tauri::WebviewWindow) {
     use std::sync::atomic::AtomicBool;
 
     static WINDOW_HIDDEN: AtomicBool = AtomicBool::new(false);
@@ -389,13 +400,24 @@ fn toggle_window_offscreen_win32(win: &tauri::WebviewWindow) {
     static SAVED_Y: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
     if WINDOW_HIDDEN.load(Ordering::Relaxed) {
-        // Restore: move window back to saved position
+        // Restore: move window back to saved position without stealing focus
         let x = SAVED_X.load(Ordering::Relaxed);
         let y = SAVED_Y.load(Ordering::Relaxed);
-        let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
-        let _ = win.set_focus();
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        if let Ok(h) = win.hwnd() {
+            unsafe {
+                let hwnd = HWND(h.0 as *mut _);
+                let _ = SetWindowPos(
+                    hwnd,
+                    HWND_TOPMOST,
+                    x, y, 0, 0,
+                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+            }
+        }
         WINDOW_HIDDEN.store(false, Ordering::Relaxed);
-        println!("🕵️ [toggle-win32] Window restored to ({}, {})", x, y);
+        println!("🕵️ [toggle-win32] Window restored to ({}, {}) without focus", x, y);
     } else {
         // Hide: save current position, move far off-screen
         if let Ok(pos) = win.outer_position() {
@@ -420,20 +442,30 @@ fn register_hotkey(
         .on_shortcut(hotkey, move |_app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 println!("⌨️ Hotkey pressed ({}): {}", label, hk);
-                // Make it obvious something happened: bring the main window to the front.
-                if let Some(win) = handle.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.unminimize();
-                    let _ = win.set_focus();
-                    reapply_stealth_after_show(&win);
-                }
-                handle.emit(event_name, ()).ok();
+                let h = handle.clone();
+                let _ = handle.run_on_main_thread(move || {
+                    if let Some(win) = h.get_webview_window("main") {
+                        stealth_hotkey::bring_to_front_without_focus(&win);
+                        reapply_stealth_after_show(&win);
+                    }
+                    h.emit(event_name, ()).ok();
+                });
             }
         })
         .map_err(|e| e.to_string())
 }
 
 fn register_hotkeys(app: &tauri::AppHandle, cfg: &HotkeysConfig) -> Result<(), String> {
+    // 1. Setup OS-level stealth hotkeys (key event swallowing + zero focus loss).
+    let swallowing_active = stealth_hotkey::setup_stealth_hotkeys(app, cfg);
+    if swallowing_active {
+        println!("🕵️ [hotkeys] Stealth hotkeys active with OS-level event swallowing & blur prevention.");
+        return Ok(());
+    }
+
+    // 2. Fallback: If OS-level event swallowing isn't active,
+    // register via tauri_plugin_global_shortcut (still using bring_to_front_without_focus to prevent blur).
+    println!("ℹ️ [hotkeys] Registering via global_shortcut fallback (blur prevention active, event swallowing inactive).");
     register_hotkey(app, &cfg.text, "hotkey-solve-text", "text")?;
     register_hotkey(app, &cfg.screenshot, "hotkey-solve-screenshot", "screenshot")?;
     register_hotkey(app, &cfg.audio_toggle, "hotkey-audio-toggle", "audio-toggle")?;
@@ -455,36 +487,10 @@ fn register_toggle_visibility_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Re
         .on_shortcut(hotkey, move |_app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 println!("⌨️ Hotkey pressed (toggle): {}", hk);
-                if let Some(win) = handle.get_webview_window("main") {
-                    // On Windows with stealth mode, use opacity toggle instead of
-                    // hide/show to avoid breaking WDA_EXCLUDEFROMCAPTURE.
-                    // ShowWindow(SW_HIDE/SW_SHOW) corrupts the display affinity,
-                    // causing a black rectangle in screen capture.
-                    #[cfg(target_os = "windows")]
-                    if STEALTH_ENABLED.load(Ordering::Relaxed) {
-                        toggle_window_offscreen_win32(&win);
-                        return;
-                    }
-
-                    // macOS / non-stealth: use normal hide/show
-                    match win.is_visible() {
-                        Ok(true) => {
-                            let _ = win.hide();
-                        }
-                        Ok(false) => {
-                            let _ = win.show();
-                            let _ = win.unminimize();
-                            let _ = win.set_focus();
-                        }
-                        Err(_) => {
-                            let _ = win.show();
-                            let _ = win.unminimize();
-                            let _ = win.set_focus();
-                        }
-                    }
-                } else {
-                    println!("⚠️ Could not find main window to toggle visibility");
-                }
+                let h = handle.clone();
+                let _ = handle.run_on_main_thread(move || {
+                    stealth_hotkey::toggle_visibility_without_focus(&h);
+                });
             }
         })
         .map_err(|e| e.to_string())
@@ -584,8 +590,8 @@ async fn open_chrome_cdp() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn extract_tab_text(tab_id: String) -> Result<String, String> {
-    chrome::execute_javascript(&tab_id, "document.body.innerText").await
+async fn extract_tab_text(tab_id: String) -> Result<serde_json::Value, String> {
+    chrome::extract_page(&tab_id).await
 }
 
 #[tauri::command]
@@ -596,19 +602,27 @@ async fn activate_tab(tab_id: String) -> Result<(), String> {
 #[tauri::command]
 async fn capture_tab_screenshot(tab_id: String) -> Result<String, String> {
     let screenshot_bytes = chrome::capture_screenshot(&tab_id).await?;
-    let mut screenshot_path = std::env::temp_dir();
-    screenshot_path.push("cracking_interview_screenshot.png");
-    std::fs::write(&screenshot_path, screenshot_bytes)
-        .map_err(|e| format!("Failed to save screenshot: {}", e))?;
-    Ok(screenshot_path.to_str().ok_or("Invalid path")?.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut screenshot_path = std::env::temp_dir();
+        screenshot_path.push("cracking_interview_screenshot.png");
+        std::fs::write(&screenshot_path, screenshot_bytes)
+            .map_err(|e| format!("Failed to save screenshot: {}", e))?;
+        Ok(screenshot_path.to_str().ok_or("Invalid path")?.to_string())
+    })
+    .await
+    .map_err(|e| format!("Save screenshot task error: {}", e))?
 }
 
 #[tauri::command]
 async fn get_tab_thumbnail(tab_id: String) -> Result<String, String> {
     let thumbnail_bytes = chrome::capture_thumbnail(&tab_id).await?;
-    use base64::{Engine as _, engine::general_purpose};
-    let base64_data = general_purpose::STANDARD.encode(&thumbnail_bytes);
-    Ok(format!("data:image/jpeg;base64,{}", base64_data))
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::{Engine as _, engine::general_purpose};
+        let base64_data = general_purpose::STANDARD.encode(&thumbnail_bytes);
+        Ok(format!("data:image/jpeg;base64,{}", base64_data))
+    })
+    .await
+    .map_err(|e| format!("Tab thumbnail task error: {}", e))?
 }
 
 /// Returns a short string describing how Chrome is connected:
@@ -633,34 +647,28 @@ async fn get_chrome_connection_mode() -> Result<String, String> {
 
 #[tauri::command]
 async fn get_displays() -> Result<Vec<screenshot::DisplayInfo>, String> {
-    screenshot::get_all_displays()
+    tauri::async_runtime::spawn_blocking(screenshot::get_all_displays)
+        .await
+        .map_err(|e| format!("Get displays task error: {}", e))?
 }
 
 #[tauri::command]
 async fn capture_display_screenshot(display_id: String) -> Result<String, String> {
-    let screenshot_bytes = screenshot::capture_display_screenshot(&display_id)?;
-    let mut screenshot_path = std::env::temp_dir();
-    screenshot_path.push("cracking_interview_display_screenshot.jpg");
-    std::fs::write(&screenshot_path, screenshot_bytes)
-        .map_err(|e| format!("Failed to save screenshot: {}", e))?;
-    Ok(screenshot_path.to_str().ok_or("Invalid path")?.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let screenshot_bytes = screenshot::capture_display_screenshot(&display_id)?;
+        let mut screenshot_path = std::env::temp_dir();
+        screenshot_path.push("cracking_interview_display_screenshot.jpg");
+        std::fs::write(&screenshot_path, screenshot_bytes)
+            .map_err(|e| format!("Failed to save screenshot: {}", e))?;
+        Ok(screenshot_path.to_str().ok_or("Invalid path")?.to_string())
+    })
+    .await
+    .map_err(|e| format!("Capture display task error: {}", e))?
 }
 
 // ============================================================================
 // AUDIO RECORDING (SYSTEM AUDIO / LOOPBACK)
 // ============================================================================
-
-#[tauri::command]
-async fn start_audio_recording() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(|| audio::start_system_audio_recording())
-        .await
-        .map_err(|e| format!("Failed to start audio recording task: {e}"))?
-}
-
-#[tauri::command]
-fn stop_audio_recording() -> Result<String, String> {
-    audio::stop_system_audio_recording()
-}
 
 /// Pre-initialize audio capture when user selects Audio tab (instant recording)
 #[tauri::command]
@@ -677,35 +685,15 @@ fn cooldown_audio_capture() {
 }
 
 #[tauri::command]
-fn is_audio_recording() -> Result<bool, String> {
-    Ok(audio::is_recording())
-}
-
-/// Stop audio recording and return the file path
-/// Note: Local transcription is disabled - audio is sent directly to AI instead
-#[tauri::command]
-fn stop_audio_recording_and_transcribe() -> Result<String, String> {
-    let audio_path = audio::stop_system_audio_recording()?;
-    println!("[Audio] Recording stopped, file: {}", audio_path);
-    // Return an error format that frontend can detect to use the audio path
-    // Format: "LOCAL_TRANSCRIPTION_DISABLED:<path>" for backward compatibility
-    Err(format!("LOCAL_TRANSCRIPTION_DISABLED:{}", audio_path))
-}
-
-/// Transcribe an existing audio file
-/// Note: Local transcription is disabled - audio is sent directly to AI instead
-#[tauri::command]
-fn transcribe_audio_file(audio_path: String) -> Result<String, String> {
-    // Local transcription disabled - return error with path
-    Err(format!("LOCAL_TRANSCRIPTION_DISABLED:{}", audio_path))
-}
-
-#[tauri::command]
 async fn get_display_thumbnail(display_id: String) -> Result<String, String> {
-    let thumbnail_bytes = screenshot::capture_display_thumbnail(&display_id)?;
-    use base64::{Engine as _, engine::general_purpose};
-    let base64_data = general_purpose::STANDARD.encode(&thumbnail_bytes);
-    Ok(format!("data:image/jpeg;base64,{}", base64_data))
+    tauri::async_runtime::spawn_blocking(move || {
+        let thumbnail_bytes = screenshot::capture_display_thumbnail(&display_id)?;
+        use base64::{Engine as _, engine::general_purpose};
+        let base64_data = general_purpose::STANDARD.encode(&thumbnail_bytes);
+        Ok(format!("data:image/jpeg;base64,{}", base64_data))
+    })
+    .await
+    .map_err(|e| format!("Display thumbnail task error: {}", e))?
 }
 
 
@@ -713,16 +701,23 @@ async fn get_display_thumbnail(display_id: String) -> Result<String, String> {
 // AI COMMANDS
 // ============================================================================
 
-// Allowed domains for free tier and BYO API key users
-const ALLOWED_DOMAINS: &[&str] = &["leetcode.com", "codewars.com", "codeforces.com", "neetcode.io"];
-
-fn validate_source_url(source_url: &Option<String>) -> Result<(), String> {
+/// Domain check for BYO API key users, against the server-provided allow-list.
+async fn validate_source_url(source_url: &Option<String>) -> Result<(), String> {
     if let Some(url) = source_url {
-        let is_allowed = ALLOWED_DOMAINS.iter().any(|domain| url.contains(domain));
-        if !is_allowed {
+        let load = || FREE_ALLOWED_DOMAINS.lock().map(|d| d.clone()).unwrap_or_default();
+        let mut domains = load();
+        if domains.is_empty() {
+            let _ = fetch_models(String::new()).await;
+            domains = load();
+        }
+        if domains.is_empty() {
+            return Err("❌ Could not load limits from the server. Check your connection and try again.".to_string());
+        }
+        // "all" is the server sentinel for no site restriction.
+        if !domains.iter().any(|domain| domain == "all" || url.contains(domain.as_str())) {
             return Err(format!(
                 "Domain restriction: This feature only works on coding practice sites ({}). Upgrade to Pro for unlimited access.",
-                ALLOWED_DOMAINS.join(", ")
+                domains.join(", ")
             ));
         }
     }
@@ -730,81 +725,108 @@ fn validate_source_url(source_url: &Option<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// Dev builds only: writes the exact prompt sent to the AI to `$TMPDIR/cracking_interview_prompt.txt`.
+#[cfg(debug_assertions)]
+fn dump_prompt(prompt: &str, image_paths: &[String]) {
+    let mut path = std::env::temp_dir();
+    path.push("cracking_interview_prompt.txt");
+    let body = format!("{}\n\n[images attached: {:?}]\n", prompt, image_paths);
+    match std::fs::write(&path, body) {
+        Ok(()) => println!("📤 [prompt] {} chars written to {}", prompt.chars().count(), path.display()),
+        Err(e) => println!("⚠️ [prompt] could not write {}: {}", path.display(), e),
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn dump_prompt(_prompt: &str, _image_paths: &[String]) {}
+
 #[tauri::command]
 async fn query_ai(prompt: String, config: ai::AIConfig, source_url: Option<String>) -> Result<String, String> {
     // Validate domain for BYO API key users
-    validate_source_url(&source_url)?;
+    validate_source_url(&source_url).await?;
+    dump_prompt(&prompt, &[]);
     ai::query_with_text(&prompt, &config).await
+}
+
+/// Max pictures per AI question (same for free and Pro).
+const MAX_AI_IMAGES: usize = 4;
+/// Total image budget per request, split across the pictures, so a 4-picture request is no
+/// larger than a single full screenshot used to be.
+const AI_IMAGE_TOTAL_BYTES: usize = 4_500_000;
+/// Per-image cap when saving page images taken from Chrome's cache.
+const PAGE_IMAGE_MAX_BYTES: usize = 1_500_000;
+
+/// Reads up to MAX_AI_IMAGES files and shrinks any that exceed their share of the budget.
+async fn load_images_for_ai(image_paths: Vec<String>) -> Result<Vec<Vec<u8>>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths: Vec<String> = image_paths.into_iter().take(MAX_AI_IMAGES).collect();
+        if paths.is_empty() {
+            return Err("No image to send".to_string());
+        }
+        let per_image = AI_IMAGE_TOTAL_BYTES / paths.len();
+        paths
+            .iter()
+            .map(|p| {
+                let bytes = std::fs::read(p).map_err(|e| format!("Failed to read image: {}", e))?;
+                chrome::fit_image_bytes(bytes, per_image)
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("Image load task error: {}", e))?
 }
 
 #[tauri::command]
 async fn query_ai_with_image(
     prompt: String,
-    image_path: String,
+    image_paths: Vec<String>,
     config: ai::AIConfig,
     source_url: Option<String>,
 ) -> Result<String, String> {
     // Validate domain for BYO API key users
-    validate_source_url(&source_url)?;
-    let image_data = std::fs::read(&image_path)
-        .map_err(|e| format!("Failed to read image: {}", e))?;
-    ai::query_with_image(&prompt, &image_data, &config).await
+    validate_source_url(&source_url).await?;
+    dump_prompt(&prompt, &image_paths);
+    let images = load_images_for_ai(image_paths).await?;
+    ai::query_with_images(&prompt, &images, &config).await
+}
+
+/// Saves the page's question images (taken from Chrome's own copy) to temp files.
+/// Returns one entry per URL: the file path, or null if that image couldn't be used.
+#[tauri::command]
+async fn get_tab_images(tab_id: String, urls: Vec<String>) -> Result<Vec<Option<String>>, String> {
+    let urls: Vec<String> = urls.into_iter().take(MAX_AI_IMAGES).collect();
+    let fetched = chrome::get_resource_images(&tab_id, &urls).await;
+    tauri::async_runtime::spawn_blocking(move || {
+        fetched
+            .into_iter()
+            .enumerate()
+            .map(|(i, bytes)| {
+                let fitted = match chrome::fit_image_bytes(bytes?, PAGE_IMAGE_MAX_BYTES) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        println!("⚠️ Page image {} unusable: {}", i + 1, e);
+                        return None;
+                    }
+                };
+                let mut path = std::env::temp_dir();
+                path.push(format!("cracking_interview_page_image_{}.img", i + 1));
+                std::fs::write(&path, fitted).ok()?;
+                path.to_str().map(|s| s.to_string())
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("Page image task error: {}", e))
 }
 
 #[tauri::command]
-async fn query_ai_with_audio(
-    prompt: String,
-    audio_path: String,
-    config: ai::AIConfig,
-) -> Result<String, String> {
-    let audio_bytes = std::fs::read(&audio_path)
-        .map_err(|e| format!("Failed to read audio at {}: {}", audio_path, e))?;
+async fn scroll_drawing_into_view(tab_id: String, rect: serde_json::Value) -> Result<String, String> {
+    chrome::scroll_drawing_into_view(&tab_id, &rect).await
+}
 
-    // Validate that we captured actual WAV audio samples.
-    // A header-only file (often ~4KB due to filesystem block size) means we received no audio buffers.
-    let meta_len = std::fs::metadata(&audio_path)
-        .map(|m| m.len() as usize)
-        .unwrap_or(audio_bytes.len());
-    if meta_len < 128 {
-        return Err(format!(
-            "Recorded audio file is too small ({} bytes) at {}. This feature records **system output audio** (sound coming from your speakers/headphones), not your microphone. Play something (e.g., YouTube) or make sure Zoom meeting audio is audible, then record for a few seconds.",
-            meta_len,
-            audio_path
-        ));
-    }
-    match hound::WavReader::open(&audio_path) {
-        Ok(reader) => {
-            let spec = reader.spec();
-            let samples = reader.duration() as u64;
-            if samples == 0 {
-                return Err(format!(
-                    "No audio samples were captured (file is header-only, {} bytes) at {}. This records **system output audio** (other people speaking / app audio), not your microphone. Ensure system audio is playing and record for a few seconds.",
-                    meta_len,
-                    audio_path
-                ));
-            }
-            // If it's extremely short, still allow sending to Gemini, but warn in logs.
-            let channels = spec.channels.max(1) as u64;
-            let frames = samples / channels;
-            if frames < (spec.sample_rate as u64 / 5) {
-                println!(
-                    "🎙️ audio: very short recording: frames={} (~{}ms) spec={{rate={}, ch={}}} path={}",
-                    frames,
-                    (frames * 1000) / (spec.sample_rate as u64).max(1),
-                    spec.sample_rate,
-                    spec.channels,
-                    audio_path
-                );
-            }
-        }
-        Err(e) => {
-            return Err(format!(
-                "Recorded audio is not a valid WAV file at {} ({} bytes). Error: {}",
-                audio_path, meta_len, e
-            ));
-        }
-    }
-    ai::query_with_audio(&prompt, &audio_bytes, &config).await
+#[tauri::command]
+async fn validate_gemini_key(api_key: String, model: String) -> Result<(), String> {
+    ai::gemini::validate_key(&api_key, &model).await
 }
 
 /// Response from the AI proxy Edge Function
@@ -823,10 +845,16 @@ pub struct AIProxyUsage {
     pub is_paid: bool,
 }
 
+/// Checkout and billing-portal URLs are session links, so only the host is logged.
+fn url_host_for_log(url: &str) -> &str {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    rest.split(['/', '?', '#']).next().unwrap_or("")
+}
+
 /// Open a URL in the default system browser
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
-    println!("[OpenURL] Opening: {}", url);
+    println!("[OpenURL] Opening: {}", url_host_for_log(&url));
     
     #[cfg(target_os = "macos")]
     {
@@ -895,7 +923,7 @@ async fn create_checkout_session(
     let response_text = response.text().await
         .map_err(|e| format!("❌ Failed to read checkout response: {}", e))?;
 
-    println!("[Checkout] Response status: {}, body: {}", status, response_text);
+    println!("[Checkout] Response status: {}", status);
 
     if !status.is_success() {
         return Err(format!("❌ Checkout failed ({}): {}", status, response_text));
@@ -910,7 +938,7 @@ async fn create_checkout_session(
         .ok_or("❌ No checkout URL in response")?
         .to_string();
 
-    println!("[Checkout] Got checkout URL: {}", checkout_url);
+    println!("[Checkout] Got checkout URL");
     
     Ok(checkout_url)
 }
@@ -948,7 +976,7 @@ async fn create_billing_portal_session(
     let response_text = response.text().await
         .map_err(|e| format!("❌ Failed to read billing portal response: {}", e))?;
 
-    println!("[Billing Portal] Response status: {}, body: {}", status, response_text);
+    println!("[Billing Portal] Response status: {}", status);
 
     if !status.is_success() {
         return Err(format!("❌ Billing portal failed ({}): {}", status, response_text));
@@ -962,7 +990,7 @@ async fn create_billing_portal_session(
         .ok_or("❌ No portal URL in response")?
         .to_string();
 
-    println!("[Billing Portal] Got portal URL: {}", portal_url);
+    println!("[Billing Portal] Got portal URL");
     
     Ok(portal_url)
 }
@@ -970,7 +998,7 @@ async fn create_billing_portal_session(
 /// Open a URL in the system's default browser
 #[tauri::command]
 async fn open_url(url: String) -> Result<(), String> {
-    println!("[Open URL] Opening: {}", url);
+    println!("[Open URL] Opening: {}", url_host_for_log(&url));
     
     #[cfg(target_os = "macos")]
     {
@@ -1034,7 +1062,6 @@ async fn supabase_sign_up(
         .map_err(|e| format!("❌ Failed to read sign up response: {}", e))?;
 
     println!("[Auth] Sign up response status: {}", status);
-    println!("[Auth] Sign up response body: {}", response_text);
 
     let data: serde_json::Value = serde_json::from_str(&response_text)
         .map_err(|e| format!("❌ Failed to parse sign up response: {}", e))?;
@@ -1090,7 +1117,6 @@ async fn supabase_sign_in(
         .map_err(|e| format!("❌ Failed to read sign in response: {}", e))?;
 
     println!("[Auth] Sign in response status: {}", status);
-    println!("[Auth] Sign in response body: {}", response_text);
 
     let data: serde_json::Value = serde_json::from_str(&response_text)
         .map_err(|e| format!("❌ Failed to parse sign in response: {}", e))?;
@@ -1117,11 +1143,14 @@ async fn fetch_models(access_token: String) -> Result<serde_json::Value, String>
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
+    // get-models is public config; signed-out screens (sign-up) fetch it with the anon key.
+    let bearer = if access_token.is_empty() { SUPABASE_ANON_KEY } else { access_token.as_str() };
+
     let response = client
-        .post(format!("{}/functions/v1/get-models", SUPABASE_URL))
+        .post(format!("{}/functions/v1/get-models?v=2", SUPABASE_URL))
         .header("Content-Type", "application/json")
         .header("apikey", SUPABASE_ANON_KEY)
-        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Authorization", format!("Bearer {}", bearer))
         .send()
         .await
         .map_err(|e| format!("Failed to fetch models: {}", e))?;
@@ -1129,8 +1158,17 @@ async fn fetch_models(access_token: String) -> Result<serde_json::Value, String>
     let body = response.text().await
         .map_err(|e| format!("Failed to read models response: {}", e))?;
 
-    serde_json::from_str(&body)
-        .map_err(|e| format!("Failed to parse models response: {}", e))
+    let config: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Failed to parse models response: {}", e))?;
+
+    if let Some(list) = config["free_allowed_domains"].as_array() {
+        let domains: Vec<String> = list.iter().filter_map(|d| d.as_str().map(String::from)).collect();
+        if let Ok(mut stored) = FREE_ALLOWED_DOMAINS.lock() {
+            *stored = domains;
+        }
+    }
+
+    Ok(config)
 }
 
 /// Query AI via the Supabase Edge Function proxy
@@ -1147,6 +1185,7 @@ async fn query_ai_via_proxy(
     println!("[Rust AI Proxy] Starting request to ai-proxy...");
     println!("[Rust AI Proxy] Model: {}", model);
     println!("[Rust AI Proxy] Prompt length: {} chars", prompt.len());
+    dump_prompt(&prompt, &[]);
     println!("[Rust AI Proxy] Source URL: {:?}", source_url);
     
     
@@ -1164,7 +1203,6 @@ async fn query_ai_via_proxy(
         "model": model,
         "messages": messages,
         "stream": false,
-        "max_tokens": 16384,
         "source_url": source_url
     });
 
@@ -1244,11 +1282,11 @@ async fn query_ai_via_proxy(
     })
 }
 
-/// Query AI via proxy with an image (base64 encoded)
+/// Query AI via proxy with one or more images (base64 encoded) after the prompt text
 #[tauri::command]
 async fn query_ai_via_proxy_with_image(
     prompt: String,
-    image_path: String,
+    image_paths: Vec<String>,
     model: String,
     access_token: String,
     source_url: Option<String>,
@@ -1258,17 +1296,22 @@ async fn query_ai_via_proxy_with_image(
     println!("[Rust AI Proxy Image] Starting request to ai-proxy...");
     println!("[Rust AI Proxy Image] Model: {}", model);
     println!("[Rust AI Proxy Image] Prompt length: {} chars", prompt.len());
-    println!("[Rust AI Proxy Image] Image path: {}", image_path);
+    dump_prompt(&prompt, &image_paths);
+    println!("[Rust AI Proxy Image] Image paths: {:?}", image_paths);
     println!("[Rust AI Proxy Image] Source URL: {:?}", source_url);
 
-
-    // Read and encode image
-    let image_data = std::fs::read(&image_path)
-        .map_err(|e| format!("Failed to read image: {}", e))?;
-    
-    let mime_type = ai::detect_image_mime_type(&image_data)?;
-    let base64_image = general_purpose::STANDARD.encode(&image_data);
-    println!("[Rust AI Proxy Image] Image size: {} bytes, mime: {}", image_data.len(), mime_type);
+    let images = load_images_for_ai(image_paths).await?;
+    let mut content = vec![serde_json::json!({ "type": "text", "text": prompt })];
+    for image in &images {
+        let mime_type = ai::detect_image_mime_type(image)?;
+        println!("[Rust AI Proxy Image] Image size: {} bytes, mime: {}", image.len(), mime_type);
+        content.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": {
+                "url": format!("data:{};base64,{}", mime_type, general_purpose::STANDARD.encode(image))
+            }
+        }));
+    }
 
     // Use static client (reuses TLS connections)
     let client = &*AI_PROXY_CLIENT;
@@ -1276,15 +1319,7 @@ async fn query_ai_via_proxy_with_image(
     let messages = serde_json::json!([
         {
             "role": "user",
-            "content": [
-                { "type": "text", "text": prompt },
-                { 
-                    "type": "image_url", 
-                    "image_url": { 
-                        "url": format!("data:{};base64,{}", mime_type, base64_image)
-                    }
-                }
-            ]
+            "content": content
         }
     ]);
 
@@ -1292,7 +1327,6 @@ async fn query_ai_via_proxy_with_image(
         "model": model,
         "messages": messages,
         "stream": false,
-        "max_tokens": 16384,
         "source_url": source_url
     });
 
@@ -1371,152 +1405,6 @@ async fn query_ai_via_proxy_with_image(
     })
 }
 
-/// Query AI via proxy with audio (base64 encoded)
-/// Audio is sent directly to Gemini model via OpenRouter - no transcription needed
-#[tauri::command]
-async fn query_ai_via_proxy_with_audio(
-    prompt: String,
-    audio_path: String,
-    model: String,
-    access_token: String,
-) -> Result<AIProxyResponse, String> {
-    const SUPABASE_URL: &str = "https://uudwpcjxbwtszhhcgybj.supabase.co";
-
-    println!("[Rust AI Proxy Audio] Starting request to ai-proxy...");
-    println!("[Rust AI Proxy Audio] Model: {}", model);
-    println!("[Rust AI Proxy Audio] Prompt length: {} chars", prompt.len());
-    println!("[Rust AI Proxy Audio] Audio path: {}", audio_path);
-
-    // Read and encode audio
-    let audio_data = std::fs::read(&audio_path)
-        .map_err(|e| format!("Failed to read audio file: {}", e))?;
-    
-    // Validate audio file size (must have actual content)
-    if audio_data.len() < 1000 {
-        return Err(format!(
-            "Audio file is too small ({} bytes). Recording may have failed or been too short.",
-            audio_data.len()
-        ));
-    }
-    
-    let mime_type = audio::detect_audio_mime_type(&audio_data)?;
-    let base64_audio = general_purpose::STANDARD.encode(&audio_data);
-    println!("[Rust AI Proxy Audio] Audio size: {} bytes, mime: {}", audio_data.len(), mime_type);
-
-    // Use static client (reuses TLS connections)
-    let client = &*AI_PROXY_CLIENT;
-
-    // Build multimodal message with audio
-    // OpenRouter expects input_audio format per docs:
-    // https://openrouter.ai/docs/guides/overview/multimodal/audio
-    let audio_format = match mime_type {
-        "audio/wav" | "audio/x-wav" => "wav",
-        "audio/mp3" | "audio/mpeg" => "mp3",
-        "audio/ogg" => "ogg",
-        "audio/flac" => "flac",
-        "audio/aac" => "aac",
-        "audio/m4a" => "m4a",
-        _ => "wav", // default to wav
-    };
-    
-    let messages = serde_json::json!([
-        {
-            "role": "user",
-            "content": [
-                { "type": "text", "text": prompt },
-                { 
-                    "type": "input_audio", 
-                    "input_audio": { 
-                        "data": base64_audio,
-                        "format": audio_format
-                    }
-                }
-            ]
-        }
-    ]);
-
-    let payload = serde_json::json!({
-        "model": model,
-        "messages": messages,
-        "stream": false,
-        "max_tokens": 16384
-    });
-
-    println!("[Rust AI Proxy Audio] Sending POST to {}/functions/v1/ai-proxy", SUPABASE_URL);
-    let start = std::time::Instant::now();
-
-    let response = client
-        .post(format!("{}/functions/v1/ai-proxy", SUPABASE_URL))
-        .header("Authorization", format!("Bearer {}", access_token))
-        .header("Content-Type", "application/json")
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| {
-            let elapsed = start.elapsed();
-            println!("[Rust AI Proxy Audio] Request FAILED after {:?}", elapsed);
-            if e.is_timeout() {
-                println!("[Rust AI Proxy Audio] Error type: TIMEOUT");
-                "❌ AI request timed out after 50 seconds. Please try again.".to_string()
-            } else {
-                println!("[Rust AI Proxy Audio] Error type: {}", e);
-                format!("❌ AI Proxy request failed: {}", e)
-            }
-        })?;
-
-    let elapsed = start.elapsed();
-    println!("[Rust AI Proxy Audio] Response received after {:?}", elapsed);
-
-    let status = response.status();
-    println!("[Rust AI Proxy Audio] Response status: {}", status);
-
-    println!("[Rust AI Proxy Audio] Reading response body...");
-    let body_start = std::time::Instant::now();
-    let response_text = response.text().await
-        .map_err(|e| {
-            println!("[Rust AI Proxy Audio] Body read FAILED after {:?}", body_start.elapsed());
-            format!("❌ Failed to read AI Proxy response: {}", e)
-        })?;
-
-    println!("[Rust AI Proxy Audio] Body read in {:?}, length: {} chars", body_start.elapsed(), response_text.len());
-
-    println!("[Rust AI Proxy Audio] Parsing JSON response...");
-    let proxy_response: serde_json::Value = serde_json::from_str(&response_text)
-        .unwrap_or_else(|e| {
-            println!("[Rust AI Proxy Audio] JSON parse error: {}", e);
-            serde_json::json!({ "error": response_text })
-        });
-
-    if !status.is_success() {
-        let error_msg = proxy_response["error"]
-            .as_str()
-            .unwrap_or(&response_text);
-        println!("[Rust AI Proxy Audio] Non-success status, error: {}", error_msg);
-        return Err(format!("❌ AI Proxy Error ({}): {}", status.as_u16(), error_msg));
-    }
-
-    // Parse usage info
-    let usage = proxy_response["usage"].as_object().map(|u| AIProxyUsage {
-        requests_used: u.get("requests_used").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-        requests_limit: u.get("requests_limit").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-        period_end: u.get("period_end").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        is_paid: u.get("is_paid").and_then(|v| v.as_bool()).unwrap_or(false),
-    });
-
-    let ai_response_text = proxy_response["response"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-
-    println!("[Rust AI Proxy Audio] SUCCESS! Response length: {} chars", ai_response_text.len());
-
-    Ok(AIProxyResponse {
-        response: ai_response_text,
-        usage,
-        error: None,
-    })
-}
-
 // ============================================================================
 // LIVE TRANSCRIPTION COMMANDS
 // ============================================================================
@@ -1525,19 +1413,15 @@ async fn query_ai_via_proxy_with_audio(
 async fn start_live_transcription(
     app_handle: tauri::AppHandle,
     deepgram_key: String,
+    model: String,
     language: String,
 ) -> Result<(), String> {
-    transcription::start_live_transcription(app_handle, deepgram_key, language).await
+    transcription::start_live_transcription(app_handle, deepgram_key, model, language).await
 }
 
 #[tauri::command]
 fn stop_live_transcription() -> Result<String, String> {
     transcription::stop_live_transcription()
-}
-
-#[tauri::command]
-fn is_live_transcribing() -> bool {
-    transcription::is_transcribing()
 }
 
 /// Query AI via proxy with multi-turn conversation history.
@@ -1563,8 +1447,7 @@ async fn query_ai_via_proxy_conversation(
     let payload = serde_json::json!({
         "model": model,
         "messages": messages,
-        "stream": false,
-        "max_tokens": 16384
+        "stream": false
     });
 
     let start = std::time::Instant::now();
@@ -1668,60 +1551,6 @@ async fn delete_document_placeholder(app: tauri::AppHandle, id: String) -> Resul
 }
 
 // ============================================================================
-// GOOGLE OAUTH COMMANDS
-// ============================================================================
-
-#[tauri::command]
-fn start_google_oauth() -> Result<String, String> {
-    let (redirect_uri, code_receiver) = oauth_server::start_oauth_server()?;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let auth_url = rt.block_on(OAUTH_SERVICE.get_auth_url(&redirect_uri));
-    
-    println!("🔐 Auth URL: {}", auth_url);
-    
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("open").arg(&auth_url).spawn().ok();
-    
-    #[cfg(target_os = "windows")]
-    std::process::Command::new("cmd").args(["/C", "start", &auth_url]).spawn().ok();
-    
-    // Wait for code (blocks this thread for up to 120 seconds)
-    let (code, state) = code_receiver.recv_timeout(std::time::Duration::from_secs(120))
-        .map_err(|_| "Authentication timeout - please try again".to_string())?;
-    
-    println!("✅ Got authorization code");
-    
-    // Exchange code for tokens (PKCE desktop flow; no client_secret needed)
-    match rt.block_on(OAUTH_SERVICE.exchange_code(&code, &state, &redirect_uri)) {
-        Ok(tokens) => {
-            println!(
-                "✅ OAuth token exchange success. refresh_token_present={} user_email={}",
-                tokens.refresh_token.is_some(),
-                tokens.user_email.clone().unwrap_or_else(|| "<unknown>".to_string())
-            );
-        }
-        Err(e) => {
-            println!("❌ OAuth token exchange failed: {}", e);
-            return Err(e);
-        }
-    }
-    
-    // Save tokens
-    let token_path = std::env::temp_dir().join("cracking_interview_google_tokens.json");
-    rt.block_on(OAUTH_SERVICE.save_tokens(token_path.to_str().unwrap()))?;
-    
-    println!("✅ Tokens saved");
-    Ok("Google Sign-In successful! Tokens saved.".to_string())
-}
-
-#[tauri::command]
-fn get_google_token_status() -> Result<bool, String> {
-    let token_path = std::env::temp_dir().join("cracking_interview_google_tokens.json");
-    Ok(token_path.exists())
-}
-
-
-// ============================================================================
 // APP SETTINGS – Window opacity & stealth toggle
 // ============================================================================
 
@@ -1766,6 +1595,37 @@ async fn set_window_opacity(app: tauri::AppHandle, opacity: f64) -> Result<(), S
     let _ = &win;
 
     println!("[AppSettings] Window opacity set to {:.0}%", clamped * 100.0);
+    Ok(())
+}
+
+/// Windows stealth windows are non-activating (WS_EX_NOACTIVATE) so clicking the app never takes
+/// focus from the exam tab, but that also means the window can never receive keyboard input.
+/// While the user is in a text field, the frontend enables this mode: the window may activate
+/// and takes keyboard focus; leaving the field restores non-activating. No-op elsewhere.
+#[tauri::command]
+async fn set_keyboard_input_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        if !STEALTH_ENABLED.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        let win = app.get_webview_window("main").ok_or("Could not find main window")?;
+        let hwnd_raw = win.hwnd().map_err(|e| format!("HWND error: {}", e))?;
+        unsafe {
+            let hwnd = HWND(hwnd_raw.0 as *mut _);
+            let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let no_activate = WS_EX_NOACTIVATE.0 as isize;
+            let new_style = if enabled { ex_style & !no_activate } else { ex_style | no_activate };
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
+        }
+        if enabled {
+            win.set_focus().map_err(|e| format!("Focus error: {}", e))?;
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (&app, enabled);
     Ok(())
 }
 
@@ -1866,6 +1726,50 @@ fn set_macos_activation_policy(policy: i64) {
     }
 }
 
+/// macOS: let the always-on-top window also appear over other apps' full-screen windows.
+/// A full-screen app lives in its own Space, so the window must be allowed to join every Space
+/// (CanJoinAllSpaces) including full-screen ones (FullScreenAuxiliary). Since macOS 10.14 this
+/// only works when the app has no Dock icon (accessory policy), which stealth mode sets.
+#[cfg(target_os = "macos")]
+fn apply_macos_fullscreen_overlay(win: &tauri::WebviewWindow) {
+    use std::ffi::c_void;
+
+    const CAN_JOIN_ALL_SPACES: u64 = 1 << 0;
+    const MOVE_TO_ACTIVE_SPACE: u64 = 1 << 1;
+    const FULL_SCREEN_PRIMARY: u64 = 1 << 7;
+    const FULL_SCREEN_AUXILIARY: u64 = 1 << 8;
+
+    extern "C" {
+        fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
+        fn objc_msgSend();
+    }
+    type GetU64 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> u64;
+    type SetU64 = unsafe extern "C" fn(*mut c_void, *mut c_void, u64);
+
+    unsafe {
+        let ns_window = match win.ns_window() {
+            Ok(ptr) if !ptr.is_null() => ptr as *mut c_void,
+            _ => {
+                println!("⚠️ [macOS] Could not get NSWindow for full-screen overlay");
+                return;
+            }
+        };
+        let get_sel = sel_registerName(b"collectionBehavior\0".as_ptr() as *const _);
+        let set_sel = sel_registerName(b"setCollectionBehavior:\0".as_ptr() as *const _);
+        let get: GetU64 = std::mem::transmute(objc_msgSend as *const ());
+        let set: SetU64 = std::mem::transmute(objc_msgSend as *const ());
+
+        // MoveToActiveSpace conflicts with CanJoinAllSpaces, and FullScreenPrimary with
+        // FullScreenAuxiliary, so those bits are cleared.
+        let current = get(ns_window, get_sel);
+        let updated = (current | CAN_JOIN_ALL_SPACES | FULL_SCREEN_AUXILIARY)
+            & !MOVE_TO_ACTIVE_SPACE
+            & !FULL_SCREEN_PRIMARY;
+        set(ns_window, set_sel, updated);
+        println!("🪟 [macOS] collectionBehavior {:#x} → {:#x} (visible over full-screen apps)", current, updated);
+    }
+}
+
 /// macOS: Exclude window from screen capture (Zoom, Teams, screenshots, etc.)
 /// by setting NSWindow.sharingType = NSWindowSharingNone (0).
 /// This is the ONLY reliable way to hide window content on macOS.
@@ -1931,6 +1835,7 @@ fn apply_macos_screen_capture_protection(win: &tauri::WebviewWindow) {
 /// macOS: Restore window to normal visibility (allow screen capture)
 /// by setting NSWindow.sharingType = NSWindowSharingReadWrite (1).
 #[cfg(target_os = "macos")]
+#[allow(dead_code)]
 fn restore_macos_screen_capture_visibility(win: &tauri::WebviewWindow) {
     use std::ffi::c_void;
 
@@ -1998,11 +1903,11 @@ fn apply_windows_stealth(win: &tauri::WebviewWindow) {
             println!("🕵️ [stealth-windows] Window excluded from screen capture");
         }
 
-        // ---- Hide from taskbar + Alt+Tab ----
+        // ---- Hide from taskbar + Alt+Tab + Prevent activation on click ----
         let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        let new_style = (ex_style | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
+        let new_style = (ex_style | WS_EX_TOOLWINDOW.0 as isize | WS_EX_NOACTIVATE.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
-        println!("🕵️ [stealth-windows] Window hidden from taskbar & Alt+Tab");
+        println!("🕵️ [stealth-windows] Window hidden from taskbar, Alt+Tab & set to non-activating");
     }
 }
 
@@ -2020,9 +1925,9 @@ fn remove_windows_stealth(win: &tauri::WebviewWindow) {
         let hwnd = HWND(hwnd_raw.0 as *mut _);
         // WDA_NONE = 0 — re-enable screen capture
         let _ = SetWindowDisplayAffinity(hwnd, WINDOW_DISPLAY_AFFINITY(0));
-        // Remove WS_EX_TOOLWINDOW, add WS_EX_APPWINDOW
+        // Remove WS_EX_TOOLWINDOW and WS_EX_NOACTIVATE, add WS_EX_APPWINDOW
         let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        let new_style = (ex_style & !(WS_EX_TOOLWINDOW.0 as isize)) | (WS_EX_APPWINDOW.0 as isize);
+        let new_style = (ex_style & !(WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_NOACTIVATE.0 as isize)) | (WS_EX_APPWINDOW.0 as isize);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
         println!("[AppSettings] Windows stealth protections removed");
     }
@@ -2033,15 +1938,8 @@ fn remove_windows_stealth(win: &tauri::WebviewWindow) {
 // ============================================================================
 
 fn main() {
-    // Load environment variables from .env file (must be in project root)
-    if let Err(e) = dotenv::from_filename("../.env") {
-        println!("⚠️  Warning: Could not load .env file: {}", e);
-        println!("💡 Google OAuth will not work without GOOGLE_CLIENT_ID");
-    } else {
-        println!("✅ Loaded environment variables from .env");
-    }
-    
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_chrome_tabs,
@@ -2049,29 +1947,24 @@ fn main() {
             open_chrome_cdp,
             get_chrome_connection_mode,
             extract_tab_text,
+            get_tab_images,
+            scroll_drawing_into_view,
             activate_tab,
             capture_tab_screenshot,
             get_tab_thumbnail,
             get_displays,
             capture_display_screenshot,
             get_display_thumbnail,
-            start_audio_recording,
-            stop_audio_recording,
             warm_audio_capture,
             cooldown_audio_capture,
-            is_audio_recording,
-            stop_audio_recording_and_transcribe,
-            transcribe_audio_file,
             query_ai,
             query_ai_with_image,
-            query_ai_with_audio,
+            validate_gemini_key,
             query_ai_via_proxy,
             query_ai_via_proxy_with_image,
-            query_ai_via_proxy_with_audio,
             query_ai_via_proxy_conversation,
             start_live_transcription,
             stop_live_transcription,
-            is_live_transcribing,
             extract_document_text,
             save_document_placeholder,
             get_document_placeholders,
@@ -2084,18 +1977,22 @@ fn main() {
             fetch_models,
             set_window_opacity,
             set_stealth_mode,
+            set_keyboard_input_mode,
             open_external_url,
-            start_google_oauth,
-            get_google_token_status,
-            clear_google_tokens,
             resize_window,
             get_window_inner_size,
             get_os,
             get_hotkeys,
             set_hotkeys,
             reset_hotkeys_to_default,
+            get_stealth_status,
+            request_accessibility,
+            refresh_stealth_status,
+            get_setup_status,
+            request_screen_recording,
+            open_privacy_settings,
+            restart_app,
             move_window_by,
-            frontend_log,
         ])
         .setup(|app| {
             println!("🚀 CrackingInterview starting...");
@@ -2109,6 +2006,11 @@ fn main() {
             let stealth_mode = load_stealth_preference(app.handle()).unwrap_or(true);
 
             STEALTH_ENABLED.store(stealth_mode, Ordering::Relaxed);
+
+            #[cfg(target_os = "macos")]
+            if let Some(win) = app.get_webview_window("main") {
+                apply_macos_fullscreen_overlay(&win);
+            }
 
             if stealth_mode {
                 println!("🕵️ Stealth mode ENABLED — hiding from screen capture and Dock/Taskbar");
@@ -2164,24 +2066,24 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
-}
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
 
-
-#[tauri::command]
-fn clear_google_tokens() -> Result<String, String> {
-    let token_path = std::env::temp_dir().join("cracking_interview_google_tokens.json");
-    
-    if token_path.exists() {
-        std::fs::remove_file(token_path)
-            .map_err(|e| format!("Failed to delete tokens: {}", e))?;
-        println!("✅ Google tokens cleared");
-        Ok("Signed out successfully".to_string())
-    } else {
-        Ok("No tokens to clear".to_string())
+    // macOS only floats a window over other apps' full-screen windows if the app is Dock-less
+    // from launch. `setup` runs after launch (tao launches as .regular), which is too late, so the
+    // launch policy is set here, before run().
+    #[cfg(target_os = "macos")]
+    if load_stealth_preference(app.handle()).unwrap_or(true) {
+        app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     }
+
+    app.run(|_app_handle, event| {
+        if let tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } = event {
+            stealth_hotkey::teardown_stealth_hotkeys();
+        }
+    });
 }
+
 
 // ============================================================================
 // WINDOW MOVE COMMANDS
@@ -2204,9 +2106,31 @@ async fn move_window_by(window: tauri::Window, dx: i32, dy: i32) -> Result<(), S
     for i in 1..=steps {
         let x = start_x + (step_dx * i as f64).round() as i32;
         let y = start_y + (step_dy * i as f64).round() as i32;
-        window
-            .set_position(Position::Physical(PhysicalPosition { x, y }))
-            .map_err(|e| e.to_string())?;
+
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::*;
+            if let Ok(h) = window.hwnd() {
+                unsafe {
+                    let hwnd = HWND(h.0 as *mut _);
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND(std::ptr::null_mut()),
+                        x, y, 0, 0,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
+            } else {
+                let _ = window.set_position(Position::Physical(PhysicalPosition { x, y }));
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            window
+                .set_position(Position::Physical(PhysicalPosition { x, y }))
+                .map_err(|e| e.to_string())?;
+        }
         sleep(Duration::from_millis(10)).await;
     }
 
@@ -2219,10 +2143,39 @@ async fn move_window_by(window: tauri::Window, dx: i32, dy: i32) -> Result<(), S
 
 #[tauri::command]
 async fn resize_window(window: tauri::Window, width: f64, height: f64) -> Result<(), String> {
-    use tauri::Size;
     println!("🪟 resize_window called: {}x{}", width, height);
-    window.set_size(Size::Logical(tauri::LogicalSize { width, height }))
-        .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        if let Ok(h) = window.hwnd() {
+            let scale = window.scale_factor().unwrap_or(1.0);
+            let phys_w = (width * scale).round() as i32;
+            let phys_h = (height * scale).round() as i32;
+            unsafe {
+                let hwnd = HWND(h.0 as *mut _);
+                let _ = SetWindowPos(
+                    hwnd,
+                    HWND(std::ptr::null_mut()),
+                    0, 0, phys_w, phys_h,
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+        } else {
+            use tauri::Size;
+            window.set_size(Size::Logical(tauri::LogicalSize { width, height }))
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        use tauri::Size;
+        window.set_size(Size::Logical(tauri::LogicalSize { width, height }))
+            .map_err(|e| e.to_string())?;
+    }
+
     if let (Ok(physical), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
         let logical: tauri::LogicalSize<f64> = physical.to_logical(scale);
         println!(
@@ -2263,13 +2216,6 @@ fn get_window_inner_size(window: tauri::Window) -> Result<WindowInnerSize, Strin
     })
 }
 
-/// Simple logger so frontend can write to Rust stdout (useful for debugging in `tauri dev` terminals).
-#[tauri::command]
-fn frontend_log(message: String) -> Result<(), String> {
-    println!("🖥️ FE: {}", message);
-    Ok(())
-}
-
 /// Used by the Settings UI to show OS-specific hotkeys without requiring a frontend OS plugin.
 #[tauri::command]
 fn get_os() -> Result<String, String> {
@@ -2277,8 +2223,61 @@ fn get_os() -> Result<String, String> {
 }
 
 // ============================================================================
-// HOTKEY CONFIG COMMANDS
+// HOTKEY CONFIG & STEALTH STATUS COMMANDS
 // ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StealthStatus {
+    pub swallowing_active: bool,
+    pub blur_prevention_active: bool,
+    pub macos_accessibility_granted: bool,
+}
+
+#[tauri::command]
+fn get_stealth_status() -> Result<StealthStatus, String> {
+    let stealth_enabled = STEALTH_ENABLED.load(Ordering::Relaxed);
+    Ok(StealthStatus {
+        swallowing_active: stealth_enabled && stealth_hotkey::is_swallowing_active(),
+        blur_prevention_active: true,
+        macos_accessibility_granted: stealth_hotkey::is_accessibility_granted(),
+    })
+}
+
+#[tauri::command]
+fn request_accessibility() -> Result<bool, String> {
+    Ok(stealth_hotkey::request_accessibility_permission())
+}
+
+#[tauri::command]
+fn get_setup_status() -> setup::SetupStatus {
+    setup::status()
+}
+
+#[tauri::command]
+fn request_screen_recording() -> bool {
+    setup::request_screen_recording()
+}
+
+#[tauri::command]
+fn open_privacy_settings(pane: String) -> Result<(), String> {
+    setup::open_privacy_settings(&pane)
+}
+
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
+#[tauri::command]
+fn refresh_stealth_status(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, HotkeysState>,
+) -> Result<StealthStatus, String> {
+    if let Ok(guard) = state.0.lock() {
+        stealth_hotkey::refresh_stealth_hotkeys(&app, &guard);
+    }
+    get_stealth_status()
+}
 
 #[tauri::command]
 fn get_hotkeys(state: tauri::State<'_, HotkeysState>) -> Result<HotkeysConfig, String> {
@@ -2297,17 +2296,7 @@ fn reset_hotkeys_to_default(
     let defaults = default_hotkeys();
     // Unregister current, register defaults
     let current = get_hotkeys(state.clone())?;
-    unregister_hotkey_best_effort(&app, &current.text);
-    unregister_hotkey_best_effort(&app, &current.screenshot);
-    unregister_hotkey_best_effort(&app, &current.audio_toggle);
-    unregister_hotkey_best_effort(&app, &current.scroll_up);
-    unregister_hotkey_best_effort(&app, &current.scroll_down);
-    unregister_hotkey_best_effort(&app, &current.move_up);
-    unregister_hotkey_best_effort(&app, &current.move_down);
-    unregister_hotkey_best_effort(&app, &current.move_left);
-    unregister_hotkey_best_effort(&app, &current.move_right);
-    unregister_hotkey_best_effort(&app, &current.toggle_visibility);
-    unregister_hotkey_best_effort(&app, &current.quit_app);
+    unregister_all_fallback_hotkeys(&app, &current);
 
     register_hotkeys(&app, &defaults)?;
     save_hotkeys_to_disk(&app, &defaults)?;
@@ -2420,17 +2409,7 @@ fn set_hotkeys(
     let previous = get_hotkeys(state.clone())?;
 
     // Remove previous registrations, then attempt to register the new ones.
-    unregister_hotkey_best_effort(&app, &previous.text);
-    unregister_hotkey_best_effort(&app, &previous.screenshot);
-    unregister_hotkey_best_effort(&app, &previous.audio_toggle);
-    unregister_hotkey_best_effort(&app, &previous.scroll_up);
-    unregister_hotkey_best_effort(&app, &previous.scroll_down);
-    unregister_hotkey_best_effort(&app, &previous.move_up);
-    unregister_hotkey_best_effort(&app, &previous.move_down);
-    unregister_hotkey_best_effort(&app, &previous.move_left);
-    unregister_hotkey_best_effort(&app, &previous.move_right);
-    unregister_hotkey_best_effort(&app, &previous.toggle_visibility);
-    unregister_hotkey_best_effort(&app, &previous.quit_app);
+    unregister_all_fallback_hotkeys(&app, &previous);
 
     let next = HotkeysConfig {
         text,

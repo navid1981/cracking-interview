@@ -1,0 +1,49 @@
+<!doctype html>
+<!-- Modeled on LeetCode (plan §4.3): Monaco only renders visible lines, a second empty
+     plaintext editor exists, tab labels are duplicated for mobile, nav/discussion noise. -->
+<html>
+<head><meta charset="utf-8"><title>Two Sum - LeetCode</title>
+<style>
+  .monaco-editor { position: relative; height: 120px; overflow: hidden; font-family: monospace; }
+  .view-line { position: absolute; left: 40px; }
+  .line-numbers { position: absolute; left: 0; width: 30px; }
+</style>
+</head>
+<body>
+  <nav>Problem List <a href="#">Premium</a> <a href="#">Log in</a></nav>
+  <div class="tabs-desktop"><span>Description</span> <span>Editorial</span> <span>Solutions</span></div>
+  <div class="tabs-mobile" style="display:none"><span>Description</span> <span>Editorial</span> <span>Solutions</span></div>
+  <div class="description">
+    <h1>1. Two Sum</h1>
+    <p>Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.</p>
+    <pre>Input: nums = [2,7,11,15], target = 9
+Output: [0,1]</pre>
+    <ul><li><code>2 &lt;= nums.length &lt;= 10<sup>4</sup></code></li></ul>
+    <p>Follow-up: less than O(n<sup>2</sup>) time? Use a<sub>i</sub> notation.</p>
+  </div>
+  <div class="monaco-editor" id="editor-code">
+    <div class="line-numbers"><div>1</div><div>2</div><div>3</div></div>
+    <div class="view-lines">
+      <div class="view-line" style="top:19px">public:</div>
+      <div class="view-line" style="top:0px">class Solution {</div>
+    </div>
+    <textarea class="inputarea">partial</textarea>
+  </div>
+  <div class="monaco-editor" id="editor-testcase"><div class="view-lines"></div></div>
+  <div class="discussion"><button type="button">Run</button> <button type="button">Submit</button></div>
+  <script>
+    const code = 'class Solution {\npublic:\n    vector<int> twoSum(vector<int>& nums, int target) {\n        \n    }\n};';
+    const codeModel = { getValue: () => code, getLanguageId: () => 'cpp' };
+    const testModel = { getValue: () => '', getLanguageId: () => 'plaintext' };
+    window.monaco = {
+      editor: {
+        getEditors: () => [
+          { getDomNode: () => document.getElementById('editor-testcase'), getModel: () => testModel },
+          { getDomNode: () => document.getElementById('editor-code'), getModel: () => codeModel },
+        ],
+        getModels: () => [testModel, codeModel],
+      },
+    };
+  </script>
+</body>
+</html>

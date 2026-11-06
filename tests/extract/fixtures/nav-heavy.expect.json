@@ -1,0 +1,14 @@
+{
+  "contains": [
+    "BinaryGap",
+    "Find longest sequence of zeros in binary representation of an integer.",
+    "class Solution { public int solution(int N); }",
+    "returns the length of its longest binary gap."
+  ],
+  "notContains": ["Lesson 7", "newsletter", "cookies", "Log in", "TWEETFILLER", "Developer Training"],
+  "root": "main",
+  "minFramesSkipped": 2,
+  "images": 0,
+  "drawn": 0,
+  "code": 0
+}

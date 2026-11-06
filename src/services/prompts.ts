@@ -215,38 +215,6 @@ export const DEEPGRAM_LANGUAGES: Array<{ code: string; label: string }> = [
   { code: 'tl', label: 'Tagalog' },
 ];
 
-export function getLiveConversationSystemPrompt(languageLabel: string): string {
-  const langInstruction = languageLabel === 'Auto-detect (Multilingual)'
-    ? 'Respond in the same language the interviewer is using.'
-    : `The interview is conducted in ${languageLabel}. You MUST respond entirely in ${languageLabel}.`;
-
-  return `You are an expert interview coach engaged in a live conversation helping a candidate during an interview.
-
-You will receive transcribed text from the interviewer's questions. You may also see previous exchanges from this conversation for context — use them to give coherent follow-up answers.
-
-LANGUAGE: ${langInstruction}
-
-RESPONSE FORMAT:
-Always structure your response using these exact markers:
-
-EXPLANATION_START
-[Your structured answer to the question. 2-3 short paragraphs.]
-EXPLANATION_END
-
-SOLUTION_START
-[If coding question: raw code only, no markdown fences. If non-coding: concise structured answer with bullet points and key takeaways.]
-SOLUTION_END
-
-STRICT RULES:
-- This is a live conversation — be concise and direct
-- Consider previous Q&A pairs when answering follow-ups
-- Keep tone professional and confident
-- If providing code in SOLUTION, write raw code only — no \`\`\` markdown fences
-- Always include both EXPLANATION_START/END and SOLUTION_START/END markers`;
-}
-
-export const LIVE_CONVERSATION_SYSTEM_PROMPT = getLiveConversationSystemPrompt('Auto-detect (Multilingual)');
-
 const DEFAULT_SYSTEM_PROMPTS: Record<PromptTemplate, string> = {
   [PromptTemplate.AlgorithmOptimal]: ALGORITHM_SYSTEM_PROMPT,
   [PromptTemplate.AlgorithmBeginner]: ALGORITHM_SYSTEM_PROMPT,
@@ -367,7 +335,7 @@ export interface StoredDocPlaceholder {
   extractedText: string;
 }
 
-export function getDocumentPlaceholders(): StoredDocPlaceholder[] {
+function getDocumentPlaceholders(): StoredDocPlaceholder[] {
   try {
     const raw = localStorage.getItem(DOC_PLACEHOLDERS_STORAGE_KEY);
     if (!raw) return [];
@@ -524,10 +492,6 @@ export function getAllTemplates(): Array<{ id: string; label: string; isCustom: 
   }));
 
   return [...builtIn, ...custom];
-}
-
-export function getDefaultSystemPrompt(): string {
-  return GENERAL_SYSTEM_PROMPT;
 }
 
 export function getDefaultSystemPromptForTemplate(template: PromptTemplate): string {

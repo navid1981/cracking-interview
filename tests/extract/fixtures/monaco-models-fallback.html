@@ -1,0 +1,15 @@
+<!doctype html>
+<!-- Older Monaco builds have no getEditors(): the script must fall back to getModels(),
+     skipping the empty plaintext model and picking the code model. -->
+<html>
+<head><meta charset="utf-8"><title>Monaco without getEditors</title></head>
+<body>
+  <p>Implement the function below so it returns the sum of a and b.</p>
+  <div class="monaco-editor" style="height:80px"><div class="view-lines"><div class="view-line">def solve(a, b):</div></div></div>
+  <script>
+    const empty = { getValue: () => '', getLanguageId: () => 'plaintext' };
+    const py = { getValue: () => 'def solve(a, b):\n    # write your code here\n    pass', getLanguageId: () => 'python' };
+    window.monaco = { editor: { getModels: () => [empty, py] } };
+  </script>
+</body>
+</html>

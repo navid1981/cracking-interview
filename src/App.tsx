@@ -8,6 +8,14 @@ import PromptEditor from './components/PromptEditor';
 import PromptListView from './components/PromptListView';
 import DocumentManager, { DocumentPlaceholder } from './components/DocumentManager';
 import AuthScreen from './components/AuthScreen';
+import SetupChecklist from './components/SetupChecklist';
+import { useSetupStatus } from './hooks/useSetupStatus';
+import { useKeyboardInputMode } from './hooks/useKeyboardInputMode';
+import AppSettingsTab from './components/settings/AppSettingsTab';
+import HotkeysSettingsTab from './components/settings/HotkeysSettingsTab';
+import { getMessageActions, MESSAGE_ACTION_LABELS, MessageActionKind } from './services/messageActions';
+import { HotkeysConfig, formatHotkey } from './services/hotkeys';
+import { TabExtraction, MAX_QUESTION_IMAGES, needsTabScreenshot, isWhiteboard } from './services/tabExtraction';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts, StoredDocPlaceholder } from './services/prompts';
 import { 
   onAuthStateChange, 
@@ -21,6 +29,7 @@ import {
   EDGE_FUNCTION_URL,
   SUPABASE_API_KEY,
 } from './services/supabase';
+import { ModelConfig, loadCachedModels, fetchRemoteModelConfig, allowsAllDomains, isFreeTierUrlAllowed } from './services/modelConfig';
 import type { User, Session } from '@supabase/supabase-js';
 import packageJson from '../package.json';
 import './App.css';
@@ -55,6 +64,16 @@ function isDisplay(source: InputSource): source is DisplayInfo {
   return 'width' in source && 'height' in source;
 }
 
+function isChromeTab(source: InputSource): source is ChromeTab {
+  return 'url' in source && !isDisplay(source);
+}
+
+function decodeHtmlEntities(text: string): string {
+  const div = document.createElement('div');
+  div.innerHTML = text;
+  return div.textContent || div.innerText || text;
+}
+
 function isAudio(source: InputSource): source is AudioSource {
   return (source as any).source_type === 'audio';
 }
@@ -64,48 +83,6 @@ interface AIConfig {
   gemini_api_key?: string;  // BYO API key for free users who exhausted tries
 }
 
-interface ModelInfo {
-  id: string;
-  name: string;
-  provider: string;
-}
-
-interface ModelConfig {
-  pro_models: ModelInfo[];
-  free_model: ModelInfo;
-  default_pro_model: string;
-}
-
-const DEFAULT_MODEL_CONFIG: ModelConfig = {
-  pro_models: [
-    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', provider: 'OpenAI' },
-    { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic' },
-    { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google' },
-    { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
-  ],
-  free_model: { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google' },
-  default_pro_model: 'gpt-5.2-codex',
-};
-
-function loadCachedModels(): ModelConfig {
-  try {
-    const cached = localStorage.getItem('cached_models');
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (parsed.pro_models?.length && parsed.free_model?.id) return parsed;
-    }
-  } catch { /* ignore */ }
-  return DEFAULT_MODEL_CONFIG;
-}
-
-// Allowed domains for free users
-const FREE_TIER_ALLOWED_DOMAINS = [
-  'leetcode.com',
-  'codewars.com',
-  'codeforces.com',
-  'neetcode.io',
-];
-
 interface Announcement {
   id: string;
   title: string;
@@ -113,6 +90,8 @@ interface Announcement {
 }
 
 function App() {
+  useKeyboardInputMode();
+
   // ========== AUTH STATE ==========
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [_authSession, setAuthSession] = useState<Session | null>(null);
@@ -125,7 +104,9 @@ function App() {
   const [showAnnouncement, setShowAnnouncement] = useState(true);
   const announcementDismissedRef = useRef(false);
   const [showAudioPromptWarning, setShowAudioPromptWarning] = useState(false);
-  const [modelConfig, setModelConfig] = useState<ModelConfig>(loadCachedModels);
+  const [modelConfig, setModelConfig] = useState<ModelConfig | null>(loadCachedModels);
+  const modelConfigRef = useRef<ModelConfig | null>(modelConfig);
+  useEffect(() => { modelConfigRef.current = modelConfig; }, [modelConfig]);
 
   // ========== APP STATE ==========
   const [cdpStatus, setCdpStatus] = useState('🔴 Chrome Not Running');
@@ -154,15 +135,14 @@ function App() {
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
     const storedModel = localStorage.getItem('ai_model');
     const cached = loadCachedModels();
-    const validIds = [...cached.pro_models.map(m => m.id), cached.free_model.id];
     
     // Reset if stored model is no longer in the available list
-    if (storedModel && !validIds.includes(storedModel)) {
+    if (storedModel && (!cached || !cached.pro_models.some(m => m.id === storedModel))) {
       localStorage.removeItem('ai_model');
     }
     
     return {
-      selected_model: localStorage.getItem('ai_model') || cached.default_pro_model,
+      selected_model: localStorage.getItem('ai_model') || cached?.default_pro_model || '',
       gemini_api_key: localStorage.getItem('gemini_api_key') || undefined,
     };
   });
@@ -180,6 +160,38 @@ function App() {
       // Silent fail - non-critical
     }
   }, [aiConfig.selected_model, aiConfig.gemini_api_key]);
+
+  // The BYO key is only stored in aiConfig (and shown as Active) after Google accepts it.
+  const [byoKeyDraft, setByoKeyDraft] = useState('');
+  const [byoKeyVerifying, setByoKeyVerifying] = useState(false);
+  const [byoKeyError, setByoKeyError] = useState('');
+
+  const handleSaveByoKey = async () => {
+    const key = byoKeyDraft.trim();
+    if (!key || byoKeyVerifying) return;
+    setByoKeyError('');
+    const models = await ensureModelConfig();
+    if (!models) {
+      setByoKeyError('❌ Could not load AI models from the server. Check your connection and try again.');
+      return;
+    }
+    setByoKeyVerifying(true);
+    try {
+      await invoke('validate_gemini_key', { apiKey: key, model: models.byo_model.id });
+      setAiConfig(prev => ({ ...prev, gemini_api_key: key }));
+      setByoKeyDraft('');
+    } catch (e) {
+      setByoKeyError(String(e));
+    } finally {
+      setByoKeyVerifying(false);
+    }
+  };
+
+  const handleRemoveByoKey = () => {
+    setAiConfig(prev => ({ ...prev, gemini_api_key: undefined }));
+    setByoKeyDraft('');
+    setByoKeyError('');
+  };
   
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'account' | 'models' | 'prompts' | 'hotkeys' | 'app'>('models');
@@ -224,6 +236,38 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+
+  // Ensure Stealth Mode is strictly disabled and unswitchable for non-Pro users.
+  // For Pro users, default Stealth Mode to ON.
+  useEffect(() => {
+    if (authLoading) return;
+
+    if (!isPro) {
+      if (stealthMode) {
+        setStealthMode(false);
+        localStorage.setItem('stealth_mode', 'false');
+        invoke('set_stealth_mode', { enabled: false }).catch(() => {});
+      }
+      localStorage.removeItem('pro_stealth_default_applied');
+    } else {
+      // Pro user: default Stealth Mode switch to ON
+      const proDefaultApplied = localStorage.getItem('pro_stealth_default_applied');
+      if (!proDefaultApplied) {
+        localStorage.setItem('pro_stealth_default_applied', 'true');
+        setStealthMode(true);
+        localStorage.setItem('stealth_mode', 'true');
+        invoke('set_stealth_mode', { enabled: true })
+          .then(() => {
+            invoke('get_stealth_status')
+              .then(status => setStealthStatus(status as any))
+              .catch(() => {});
+          })
+          .catch(() => {});
+      }
+    }
+  }, [authLoading, isPro]);
+
   const [previousWindowSize, setPreviousWindowSize] = useState<{width: number, height: number} | null>(null);
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [audioSeconds, setAudioSeconds] = useState(0);
@@ -244,12 +288,15 @@ function App() {
   const lastTranscriptTimeRef = useRef<number>(0);
   const isLiveTranscribingRef = useRef(false);
   const liveTranscriptFinalRef = useRef('');
-  const MAX_SESSION_SECONDS = 5400; // 90 minutes per session
-  const sessionMaxSecondsRef = useRef(MAX_SESSION_SECONDS);
+  // Set from server config (`audio_session_max_seconds`) and remaining quota when a session starts
+  const sessionMaxSecondsRef = useRef(Infinity);
   const audioSecondsRef = useRef(0);
 
-  const [hotkeysDraft, setHotkeysDraft] = useState<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
+  const [hotkeysDraft, setHotkeysDraft] = useState<HotkeysConfig>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
+  // Saved hotkeys (the draft above may hold unsaved edits from the HotKeys tab).
+  const [activeHotkeys, setActiveHotkeys] = useState<HotkeysConfig | null>(null);
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
+  const [stealthStatus, setStealthStatus] = useState<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean } | null>(null);
   
   // Prompt editing state
   const [promptEditMode, setPromptEditMode] = useState<'list' | 'edit'>('list');
@@ -289,8 +336,7 @@ function App() {
         lastProcessedUserId = session.user.id;
         const sub = await getUserSubscription(session.user.id);
         setSubscription(sub);
-        const stats = await getUsageStats(session.user.id, sub);
-        setUsageStats(stats);
+        setUsageStats(await loadUsageStats(session.user.id, sub, await ensureModelConfig()));
         
         // Fetch announcement
         await fetchAnnouncement(session.user.email, sub);
@@ -332,6 +378,85 @@ function App() {
   useEffect(() => {
     allSourcesRef.current = allSources;
   }, [allSources]);
+
+  // Refs let the background tab refresh (timer/focus listeners) read current state.
+  const selectedTabRef = useRef<InputSource | null>(null);
+  const cdpReadyRef = useRef(false);
+  const isLoadingRef = useRef(false);
+  const quietRefreshInFlightRef = useRef(false);
+  // Background tabs often can't be screenshotted; try each tab+URL once instead of every cycle.
+  const thumbnailAttemptedRef = useRef<Set<string>>(new Set());
+  useEffect(() => { selectedTabRef.current = selectedTab; }, [selectedTab]);
+  useEffect(() => { cdpReadyRef.current = cdpReady; }, [cdpReady]);
+  useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
+
+  // Background refresh of Chrome tabs: no spinner, keeps the selection (updated in place so its
+  // URL/title stay current), and only re-captures thumbnails for new tabs or tabs that navigated.
+  const refreshChromeTabsQuietly = async () => {
+    if (!cdpReadyRef.current || quietRefreshInFlightRef.current || isLoadingRef.current) return;
+    quietRefreshInFlightRef.current = true;
+    try {
+      const tabs = await Promise.race([
+        invoke<ChromeTab[]>('get_chrome_tabs'),
+        new Promise<ChromeTab[]>((_, reject) => setTimeout(() => reject('timeout'), 5000)),
+      ]);
+      const previousTabs = new Map(
+        allSourcesRef.current.filter(isChromeTab).map(t => [t.id, t] as const)
+      );
+      const merged = await Promise.all(tabs.map(async (tab): Promise<ChromeTab> => {
+        const previous = previousTabs.get(tab.id);
+        if (previous?.thumbnail && previous.url === tab.url) return { ...tab, thumbnail: previous.thumbnail };
+        const attemptKey = `${tab.id}|${tab.url}`;
+        if (thumbnailAttemptedRef.current.has(attemptKey)) return { ...tab, thumbnail: previous?.thumbnail };
+        thumbnailAttemptedRef.current.add(attemptKey);
+        try {
+          const thumbnail = await Promise.race([
+            invoke<string>('get_tab_thumbnail', { tabId: tab.id }),
+            new Promise<string>((_, reject) => setTimeout(() => reject('timeout'), 6000)),
+          ]);
+          return { ...tab, thumbnail };
+        } catch {
+          return { ...tab, thumbnail: previous?.thumbnail };
+        }
+      }));
+
+      const changed = merged.length !== previousTabs.size || merged.some(t => {
+        const p = previousTabs.get(t.id);
+        return !p || p.url !== t.url || p.title !== t.title || p.thumbnail !== t.thumbnail;
+      });
+      if (!changed || !cdpReadyRef.current) return;
+
+      const combined: InputSource[] = [...merged, ...allSourcesRef.current.filter(s => !isChromeTab(s))];
+      allSourcesRef.current = combined;
+      setAllSources(combined);
+
+      const selected = selectedTabRef.current;
+      if (selected && isChromeTab(selected)) {
+        const updated = merged.find(t => t.id === selected.id);
+        if (updated) {
+          setSelectedTab(updated);
+          if (updated.title !== selected.title) {
+            const title = decodeHtmlEntities(updated.title?.trim() || updated.url);
+            setMessage(prev => prev.startsWith('Selected: ') ? `Selected: ${title}` : prev);
+          }
+        } else if (combined.length > 0) {
+          setSelectedTab(combined[0]);
+          setMessage('Selected tab was closed, auto-selected first source');
+        }
+      }
+    } catch {
+      // Keep the current list on transient CDP errors; the next refresh will retry.
+    } finally {
+      quietRefreshInFlightRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    if (!cdpReady) return;
+    const onFocus = () => { refreshChromeTabsQuietly(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [cdpReady]);
 
   // Cleanup audio timer on unmount.
   useEffect(() => {
@@ -401,7 +526,7 @@ function App() {
     subscriptionRef.current = subscription;
   }, [subscription]);
 
-  // Auto-stop recording when session time limit is reached (90 min or remaining quota)
+  // Auto-stop recording when session time limit is reached (server session cap or remaining quota)
   const sessionStopTriggeredRef = useRef(false);
   useEffect(() => {
     if (isLiveTranscribing && audioSeconds >= sessionMaxSecondsRef.current && !sessionStopTriggeredRef.current) {
@@ -463,7 +588,55 @@ function App() {
     }
   };
 
-  const fetchDeepgramKey = async (): Promise<{ key: string; remaining_seconds: number } | null> => {
+  const fetchModelConfig = async (accessToken: string): Promise<ModelConfig | null> => {
+    const config = await fetchRemoteModelConfig(accessToken);
+    if (!config) return null;
+    setModelConfig(config);
+    modelConfigRef.current = config;
+    const currentModel = localStorage.getItem('ai_model');
+    if (!currentModel || !config.pro_models.some(m => m.id === currentModel)) {
+      setAiConfig(prev => ({ ...prev, selected_model: config.default_pro_model }));
+      localStorage.setItem('ai_model', config.default_pro_model);
+    }
+    return config;
+  };
+
+  /** Returns the server-provided model config, fetching it if it was never loaded. */
+  const ensureModelConfig = async (): Promise<ModelConfig | null> => {
+    if (modelConfigRef.current) return modelConfigRef.current;
+    const accessToken = getAccessToken();
+    if (!accessToken) return null;
+    return fetchModelConfig(accessToken);
+  };
+
+  /** Usage stats need the server-provided Pro limits; without config they stay unknown. */
+  const loadUsageStats = async (
+    userId: string,
+    sub: UserSubscription | null,
+    config: ModelConfig | null,
+  ): Promise<UsageStats | null> => {
+    if (!config) return null;
+    return getUsageStats(userId, sub, {
+      requests: config.pro_request_limit,
+      audioSeconds: config.pro_audio_seconds_limit,
+    });
+  };
+
+  useEffect(() => {
+    if (modelConfig && authUser && !usageStats) {
+      void loadUsageStats(authUser.id, subscriptionRef.current, modelConfig).then(stats => {
+        if (stats) setUsageStats(prev => prev ?? stats);
+      });
+    }
+  }, [modelConfig, authUser]);
+
+  useEffect(() => {
+    if (showSettings && authUser && !modelConfigRef.current) {
+      void ensureModelConfig();
+    }
+  }, [showSettings, authUser]);
+
+  const fetchDeepgramKey = async (): Promise<{ key: string; model: string; remaining_seconds: number } | null> => {
     try {
       const accessToken = getAccessToken();
       if (!accessToken) return null;
@@ -494,7 +667,11 @@ function App() {
           audio_seconds_limit: data.audio_seconds_limit,
         } : prev);
       }
-      return { key: data.key, remaining_seconds: data.remaining_seconds ?? MAX_SESSION_SECONDS };
+      if (!data.model) {
+        setMessage('❌ Transcription model not provided by the server. Please try again later.');
+        return null;
+      }
+      return { key: data.key, model: data.model, remaining_seconds: data.remaining_seconds ?? Infinity };
     } catch (e) {
       setMessage(`❌ Error fetching transcription key: ${e}`);
       return null;
@@ -509,10 +686,15 @@ function App() {
     }
 
     setMessage('🎙️ Starting live transcription…');
+    const models = await ensureModelConfig();
+    if (!models) {
+      setMessage('❌ Could not load limits from the server. Check your connection and try again.');
+      return;
+    }
     const dgResult = await fetchDeepgramKey();
     if (!dgResult) return;
 
-    const effectiveMax = Math.min(MAX_SESSION_SECONDS, dgResult.remaining_seconds);
+    const effectiveMax = Math.min(models.audio_session_max_seconds, dgResult.remaining_seconds);
     if (effectiveMax <= 0) {
       setMessage('❌ Monthly audio limit reached. Check your usage in Settings.');
       return;
@@ -529,6 +711,7 @@ function App() {
 
       await invoke('start_live_transcription', {
         deepgramKey: dgResult.key,
+        model: dgResult.model,
         language: interviewLanguage,
       });
 
@@ -757,7 +940,8 @@ function App() {
         return;
       }
 
-      const model = aiConfig.selected_model;
+      // An empty/unknown model is replaced server-side by DEFAULT_PRO_MODEL.
+      const model = aiConfig.selected_model || modelConfigRef.current?.default_pro_model || '';
 
       // Build messages array with conversation history (use ref to avoid stale closure)
       const currentHistory = conversationHistoryRef.current;
@@ -969,26 +1153,44 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (showSettings && settingsTab === 'hotkeys') {
-      loadHotkeys();
+    if (showSettings) {
+      if (settingsTab === 'hotkeys') {
+        loadHotkeys();
+      }
+      if (settingsTab === 'hotkeys' || settingsTab === 'app') {
+        invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('get_stealth_status')
+          .then(setStealthStatus)
+          .catch(() => {});
+      }
     }
   }, [showSettings, settingsTab]);
 
 
   const loadHotkeys = async () => {
     try {
-      const cfg = await invoke<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('get_hotkeys');
+      const cfg = await invoke<HotkeysConfig>('get_hotkeys');
       setHotkeysDraft(cfg);
+      setActiveHotkeys(cfg);
       setHotkeysStatus('');
+      try {
+        const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('get_stealth_status');
+        setStealthStatus(status);
+      } catch {
+        // ignore
+      }
     } catch (e) {
       setHotkeysStatus(`Failed to load hotkeys: ${String(e)}`);
     }
   };
 
+  useEffect(() => {
+    invoke<HotkeysConfig>('get_hotkeys').then(setActiveHotkeys).catch(() => {});
+  }, []);
+
   const saveHotkeys = async () => {
     try {
       setHotkeysStatus('Saving...');
-      const updated = await invoke<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('set_hotkeys', {
+      const updated = await invoke<HotkeysConfig>('set_hotkeys', {
         textHotkey: hotkeysDraft.text,
         screenshotHotkey: hotkeysDraft.screenshot,
         audioToggleHotkey: hotkeysDraft.audio_toggle,
@@ -1002,7 +1204,14 @@ function App() {
         quitAppHotkey: hotkeysDraft.quit_app,
       });
       setHotkeysDraft(updated);
+      setActiveHotkeys(updated);
       setHotkeysStatus('Saved.');
+      try {
+        const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('get_stealth_status');
+        setStealthStatus(status);
+      } catch {
+        // ignore
+      }
     } catch (e) {
       setHotkeysStatus(`❌ ${String(e)}`);
     }
@@ -1011,15 +1220,89 @@ function App() {
   const resetHotkeys = async () => {
     try {
       setHotkeysStatus('Resetting...');
-      const updated = await invoke<{ text: string; screenshot: string; audio_toggle: string; scroll_up: string; scroll_down: string; move_up: string; move_down: string; move_left: string; move_right: string; toggle_visibility: string; quit_app: string }>('reset_hotkeys_to_default');
+      const updated = await invoke<HotkeysConfig>('reset_hotkeys_to_default');
       setHotkeysDraft(updated);
+      setActiveHotkeys(updated);
       setHotkeysStatus('Reset to defaults.');
+      try {
+        const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('get_stealth_status');
+        setStealthStatus(status);
+      } catch {
+        // ignore
+      }
     } catch (e) {
       setHotkeysStatus(`❌ ${String(e)}`);
     }
   };
 
-  const handleOpenSettings = async () => {
+  const handleRequestAccessibility = async () => {
+    try {
+      await invoke('request_accessibility');
+      // Wait a moment for System Settings or user toggle, then refresh status
+      setTimeout(async () => {
+        try {
+          const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('refresh_stealth_status');
+          setStealthStatus(status);
+        } catch {
+          // ignore
+        }
+      }, 1000);
+    } catch (e) {
+      console.error('Failed to request accessibility:', e);
+    }
+  };
+
+  const setup = useSetupStatus(cdpReady, isPro, () => { handleRefreshStealthStatus(); });
+
+  const handleOpacityChange = (opacity: number) => {
+    setWindowOpacity(opacity);
+    localStorage.setItem('window_opacity', opacity.toString());
+    invoke('set_window_opacity', { opacity }).catch(console.error);
+  };
+
+  const handleThemeChange = (next: 'light' | 'dark') => {
+    setTheme(next);
+    localStorage.setItem('app_theme', next);
+    document.documentElement.setAttribute('data-theme', next);
+  };
+
+  const handleStealthModeChange = (enabled: boolean) => {
+    setStealthMode(enabled);
+    localStorage.setItem('stealth_mode', enabled.toString());
+    invoke('set_stealth_mode', { enabled })
+      .then(() => invoke<typeof stealthStatus>('get_stealth_status'))
+      .then(status => setStealthStatus(status))
+      .catch(console.error);
+  };
+
+  const handleShowSetup = () => {
+    setup.show();
+    if (showSettings) handleCloseSettings();
+  };
+
+  const setupChecklistProps = {
+    steps: setup.steps,
+    requested: setup.requested,
+    isOpeningChrome,
+    onOpenChrome: () => { openChromeCdp(); },
+    onDownloadChrome: () => { invoke('open_url', { url: 'https://www.google.com/chrome/' }); },
+    onGrant: setup.grant,
+    onRestart: () => { invoke('restart_app'); },
+    onRecheck: setup.recheck,
+  };
+
+  const handleRefreshStealthStatus = async () => {
+    try {
+      const status = await invoke<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean }>('refresh_stealth_status');
+      setStealthStatus(status);
+    } catch (e) {
+      console.error('Failed to refresh stealth status:', e);
+    }
+  };
+
+  const handleOpenSettings = () => openSettingsAt('models');
+
+  const openSettingsAt = async (tab: typeof settingsTab) => {
     
     try {
       const currentSize = await invoke<{ width: number; height: number }>('get_window_inner_size');
@@ -1047,7 +1330,7 @@ function App() {
     }
 
     // Open modal AFTER resize attempt.
-    setSettingsTab('models');
+    setSettingsTab(tab);
     setShowSettings(true);
   };
 
@@ -1153,27 +1436,10 @@ function App() {
         
         // Fetch subscription and usage data
         if (session.user?.id) {
+          const configPromise = fetchModelConfig(session.access_token);
           const sub = await getUserSubscription(session.user.id);
           setSubscription(sub);
-          const stats = await getUsageStats(session.user.id, sub);
-          setUsageStats(stats);
-          
-          // Fetch available models from server (fire-and-forget, don't block login)
-          invoke<ModelConfig>('fetch_models', { accessToken: session.access_token })
-            .then((config) => {
-              if (config?.pro_models?.length && config?.free_model?.id) {
-                setModelConfig(config);
-                localStorage.setItem('cached_models', JSON.stringify(config));
-                // If current model is no longer available, reset to default
-                const validIds = [...config.pro_models.map((m: ModelInfo) => m.id), config.free_model.id];
-                const currentModel = localStorage.getItem('ai_model') || config.default_pro_model;
-                if (!validIds.includes(currentModel)) {
-                  setAiConfig(prev => ({ ...prev, selected_model: config.default_pro_model }));
-                  localStorage.setItem('ai_model', config.default_pro_model);
-                }
-              }
-            })
-            .catch(() => { /* use cached/default models */ });
+          setUsageStats(await loadUsageStats(session.user.id, sub, await configPromise));
 
           // Fetch announcement
           await fetchAnnouncement(session.user.email, sub);
@@ -1237,7 +1503,7 @@ function App() {
 
   // Helper to check if user can use AI proxy (has quota remaining)
   // Returns { allowed, reason, useBYOKey } - useBYOKey indicates free user should use their own Gemini key
-  const canUseAIProxy = (): { allowed: boolean; reason?: string; useBYOKey?: boolean } => {
+  const canUseAIProxy = (freeCallLimit: number): { allowed: boolean; reason?: string; useBYOKey?: boolean } => {
     if (!subscription) {
       return { allowed: false, reason: 'Not signed in' };
     }
@@ -1254,16 +1520,15 @@ function App() {
       }
       return { allowed: true };
     } else {
-      // Free user - check lifetime quota (3 calls)
       const lifetimeUsed = subscription.lifetime_ai_calls || 0;
-      if (lifetimeUsed >= 3) {
+      if (lifetimeUsed >= freeCallLimit) {
         // Check if user has their own Gemini API key
         if (aiConfig.gemini_api_key) {
           return { allowed: true, useBYOKey: true };
         }
         return { 
           allowed: false, 
-          reason: 'Free trial expired (3 lifetime calls used). Add your own Gemini API key or subscribe to continue.'
+          reason: `Free trial expired (${freeCallLimit} lifetime calls used). Add your own Gemini API key or subscribe to continue.`
         };
       }
       return { allowed: true };
@@ -1396,8 +1661,12 @@ function App() {
       const combined: InputSource[] = [...chromeTabs, ...displaysWithThumbnails, audioSource];
       setAllSources(combined);
       
+      const currentSelection = selectedTab ? combined.find(s => s.id === selectedTab.id) : undefined;
+      if (currentSelection) {
+        setSelectedTab(currentSelection);
+      }
       // If selected tab is no longer in the list, select first available source
-      if (selectedTab && !combined.find(s => s.id === selectedTab.id)) {
+      else if (selectedTab) {
         if (combined.length > 0) {
           setSelectedTab(combined[0]);
           setMessage('Previous selection unavailable, auto-selected first source');
@@ -1423,7 +1692,25 @@ function App() {
     announcementDismissedRef.current = true;
     setShowAnnouncement(false);
     
-    const sourceToUse = selectedTab ?? (allSources.length > 0 ? allSources[0] : null);
+    let sourceToUse = selectedTab ?? (allSources.length > 0 ? allSources[0] : null);
+
+    // The tab may have navigated since the list was last refreshed; use its current URL/title.
+    if (sourceToUse && isChromeTab(sourceToUse) && cdpReady) {
+      try {
+        const tabs = await Promise.race([
+          invoke<ChromeTab[]>('get_chrome_tabs'),
+          new Promise<ChromeTab[]>((_, reject) => setTimeout(() => reject('timeout'), 2000)),
+        ]);
+        const current = tabs.find(t => t.id === sourceToUse!.id);
+        if (current) {
+          sourceToUse = { ...current, thumbnail: sourceToUse.thumbnail };
+          setSelectedTab(sourceToUse);
+        }
+      } catch {
+        // Fall back to the cached tab info.
+      }
+    }
+
     if (!selectedTab && sourceToUse) {
       // Keep UI selection in sync so the user can see what was used.
       setSelectedTab(sourceToUse);
@@ -1449,6 +1736,12 @@ function App() {
     // Determine user tier
     const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
 
+    const models = await ensureModelConfig();
+    if (!models) {
+      setMessage('❌ Could not load AI models from the server. Check your connection and try again.');
+      return;
+    }
+
     // Free user restrictions
     if (!isPro) {
       // Free users can only use Chrome tabs (no display capture)
@@ -1461,12 +1754,8 @@ function App() {
       if (!isAudio(sourceToUse)) {
         const tab = sourceToUse as ChromeTab;
         const url = tab.url || '';
-        const isAllowedDomain = FREE_TIER_ALLOWED_DOMAINS.some(domain => 
-          url.includes(domain)
-        );
-        
-        if (!isAllowedDomain) {
-          setMessage(`⚠️ Free tier only works on: ${FREE_TIER_ALLOWED_DOMAINS.join(', ')}. Upgrade to Pro for unlimited access.`);
+        if (!isFreeTierUrlAllowed(models, url)) {
+          setMessage(`⚠️ Free tier only works on: ${models.free_allowed_domains.join(', ')}. Upgrade to Pro for unlimited access.`);
           return;
         }
       }
@@ -1479,7 +1768,7 @@ function App() {
     }
 
     // Check quota before making request
-    const quotaCheck = canUseAIProxy();
+    const quotaCheck = canUseAIProxy(models.free_call_limit);
     if (!quotaCheck.allowed) {
       setMessage(`⚠️ ${quotaCheck.reason}`);
       return;
@@ -1511,8 +1800,9 @@ function App() {
       }
     }
 
-    // Determine which model to use
-    const modelToUse = useBYOKey ? modelConfig.free_model.id : (isPro ? aiConfig.selected_model : modelConfig.free_model.id);
+    const modelToUse = useBYOKey
+      ? models.byo_model.id
+      : (isPro ? (aiConfig.selected_model || models.default_pro_model) : models.free_model.id);
 
     setIsLoading(true);
     setAiResponse('');
@@ -1538,7 +1828,7 @@ function App() {
         // Display capture is Pro-only, never uses BYO key
         const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
           prompt,
-          imagePath: screenshotPath,
+          imagePaths: [screenshotPath],
           model: modelToUse,
           accessToken,
         });
@@ -1582,11 +1872,11 @@ function App() {
           const tabUrl = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
           responseText = await invoke<string>('query_ai_with_image', {
             prompt,
-            imagePath: screenshotPath,
-            config: { 
+            imagePaths: [screenshotPath],
+            config: {
               selected_model: modelToUse, 
               gemini_api_key: aiConfig.gemini_api_key || '', 
-              claude_api_key: '' 
+              max_output_tokens: models.max_output_tokens,
             },
             sourceUrl: tabUrl,
           });
@@ -1595,7 +1885,7 @@ function App() {
           const tabUrl = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
           const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
             prompt,
-            imagePath: screenshotPath,
+            imagePaths: [screenshotPath],
             model: modelToUse,
             accessToken,
             sourceUrl: tabUrl,
@@ -1623,36 +1913,56 @@ function App() {
         setSolvePhase('extract');
         setMessage('📝 Extracting text...');
         await invoke('activate_tab', { tabId: sourceToUse.id });
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        const text = await invoke<string>('extract_tab_text', { tabId: sourceToUse.id });
-        
+
+        // The extraction script itself waits (max 300ms) for the page to settle.
+        const tabId = sourceToUse.id;
+        const tabUrl = (sourceToUse as ChromeTab).url;
+        const extraction = await invoke<TabExtraction>('extract_tab_text', { tabId });
+        const text = extraction.text;
+
+        // Pictures go along with the text: original image files from Chrome's own copy, and a
+        // tab screenshot for drawn content (charts, whiteboards) or near-empty pages.
+        const imagePaths: string[] = [];
+        let wantScreenshot = needsTabScreenshot(extraction);
+        if (extraction.images.length > 0) {
+          setMessage('🖼️ Collecting question images...');
+          const pageImages = await invoke<(string | null)[]>('get_tab_images', {
+            tabId,
+            urls: extraction.images.map(img => img.src),
+          });
+          for (const path of pageImages) if (path) imagePaths.push(path);
+          if (pageImages.some(path => !path)) wantScreenshot = true;
+        }
+        if (wantScreenshot && imagePaths.length < MAX_QUESTION_IMAGES) {
+          setMessage(isWhiteboard(extraction) ? '🖼️ Whiteboard detected — capturing the visible area...' : '📸 Capturing the page...');
+          if (extraction.drawn.length > 0) {
+            const scrolled = await invoke<string>('scroll_drawing_into_view', { tabId, rect: extraction.drawn[0] });
+            if (scrolled === 'scrolled') await new Promise(resolve => setTimeout(resolve, 150));
+          }
+          imagePaths.push(await invoke<string>('capture_tab_screenshot', { tabId }));
+        }
+
         setSolvePhase('asking');
         setMessage('🤖 Asking AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage, text);
-        
+
         if (useBYOKey) {
           // Use direct Gemini API with user's own key
           // Pass source_url for domain validation in Rust
-          const tabUrl = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
-          responseText = await invoke<string>('query_ai', {
-            prompt,
-            config: { 
-              selected_model: modelToUse, 
-              gemini_api_key: aiConfig.gemini_api_key || '', 
-              claude_api_key: '' 
-            },
-            sourceUrl: tabUrl,
-          });
+          const config = {
+            selected_model: modelToUse,
+            gemini_api_key: aiConfig.gemini_api_key || '',
+            max_output_tokens: models.max_output_tokens,
+          };
+          responseText = imagePaths.length > 0
+            ? await invoke<string>('query_ai_with_image', { prompt, imagePaths, config, sourceUrl: tabUrl })
+            : await invoke<string>('query_ai', { prompt, config, sourceUrl: tabUrl });
         } else {
           // Pass source_url for server-side domain validation
-          const tabUrlForProxy = !isDisplay(sourceToUse) && !isAudio(sourceToUse) ? (sourceToUse as ChromeTab).url : undefined;
-          const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy', {
-            prompt,
-            model: modelToUse,
-            accessToken,
-            sourceUrl: tabUrlForProxy,
-          });
+          type ProxyResponse = { response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string };
+          const proxyResponse = imagePaths.length > 0
+            ? await invoke<ProxyResponse>('query_ai_via_proxy_with_image', { prompt, imagePaths, model: modelToUse, accessToken, sourceUrl: tabUrl })
+            : await invoke<ProxyResponse>('query_ai_via_proxy', { prompt, model: modelToUse, accessToken, sourceUrl: tabUrl });
           
           if (proxyResponse.error) {
             throw new Error(proxyResponse.error);
@@ -1689,6 +1999,31 @@ function App() {
     solveWithAIRef.current = solveWithAI;
   });
 
+  const runMessageAction = (kind: MessageActionKind) => {
+    switch (kind) {
+      case 'add_api_key':
+      case 'fix_api_key':
+        openSettingsAt('models');
+        break;
+      case 'upgrade':
+      case 'view_usage':
+        openSettingsAt('account');
+        break;
+      case 'open_chrome':
+        openChromeCdp();
+        break;
+      case 'download_chrome':
+        invoke('open_url', { url: 'https://www.google.com/chrome/' });
+        break;
+      case 'sign_in':
+        handleSignOut();
+        break;
+      case 'screen_permission':
+        setup.grant('screen_recording');
+        break;
+    }
+  };
+
   // ========== AUTH LOADING STATE ==========
   if (authLoading) {
     return (
@@ -1709,6 +2044,22 @@ function App() {
   // ========== MAIN APP (LOGGED IN) ==========
   // Pro users include 'active' and 'cancelling' (still have access until period end)
   const isPaidUser = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+  const freeCallLimit = modelConfig?.free_call_limit;
+  const freeCallLimitLabel = freeCallLimit ?? '…';
+  const freeCallsUsed = subscription?.lifetime_ai_calls || 0;
+  const freeCallsExhausted = freeCallLimit !== undefined && freeCallsUsed >= freeCallLimit;
+  const freeSitesRestricted = !modelConfig || !allowsAllDomains(modelConfig);
+  const usingByoKey = !isPaidUser && freeCallsExhausted && !!aiConfig.gemini_api_key;
+  const proRequestLimitLabel = usageStats?.requests_limit ?? modelConfig?.pro_request_limit ?? '…';
+  const proAudioHoursLabel = modelConfig ? +(modelConfig.pro_audio_seconds_limit / 3600).toFixed(1) : '…';
+  const proModelNames = modelConfig?.pro_models.map(m => m.name).join(', ') ?? '';
+  const solveKind = !selectedTab ? null : isAudio(selectedTab) ? 'audio' : (isDisplay(selectedTab) || useScreenshot) ? 'screenshot' : 'text';
+  const solveHotkeyRaw = !activeHotkeys || !solveKind ? '' : solveKind === 'audio' ? activeHotkeys.audio_toggle : activeHotkeys[solveKind];
+  const solveHotkey = formatHotkey(solveHotkeyRaw, runtimePlatform === 'macos');
+  const withHotkey = (label: string, hotkey?: string) =>
+    hotkey ? `${label} · solve now with ${formatHotkey(hotkey, runtimePlatform === 'macos')}` : label;
+  const solveActionLabel = solveKind === 'audio' ? 'Start / stop recording' : solveKind === 'screenshot' ? 'Solve from screenshot' : 'Solve from text';
+  const messageActions = getMessageActions(message, { isPro: isPaidUser, isMac: runtimePlatform === 'macos', cdpReady });
 
   return (
     <div className="app-container">
@@ -1719,19 +2070,34 @@ function App() {
         <div className="header-right">
           {/* Quota Display */}
           {subscription && (
-            <span className="quota-badge" title={
-              isPaidUser
-                ? `${usageStats?.requests_used ?? '?'} of ${usageStats?.requests_limit ?? 150} AI calls used this month${usageStats?.period_end ? ` · Resets ${usageStats.period_end.toLocaleDateString()}` : ''}`
-                : (subscription.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key
-                  ? 'Using your own Gemini API key (unlimited)'
-                  : `${subscription.lifetime_ai_calls || 0} of 3 lifetime free calls used`
-            }>
+            <span
+              className="quota-badge"
+              title={
+                isPaidUser
+                  ? `${usageStats?.requests_used ?? '?'} of ${proRequestLimitLabel} AI calls used this month${usageStats?.period_end ? ` · Resets ${usageStats.period_end.toLocaleDateString()}` : ''}`
+                  : usingByoKey
+                    ? 'Using your own Gemini API key (unlimited) · Click to manage it in AI Models'
+                    : `${freeCallsUsed} of ${freeCallLimitLabel} lifetime free calls used`
+              }
+              {...(!isPaidUser && {
+                role: 'button',
+                tabIndex: 0,
+                style: { cursor: 'pointer' },
+                onClick: handleOpenSettings,
+                onKeyDown: (e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleOpenSettings();
+                  }
+                },
+              })}
+            >
               {isPaidUser ? (
                 <>📊 {usageStats ? `${usageStats.requests_used}/${usageStats.requests_limit} calls` : '...'}</>
-              ) : (subscription.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key ? (
+              ) : usingByoKey ? (
                 <>🔑 BYO Key</>
               ) : (
-                <>🎁 {subscription.lifetime_ai_calls || 0}/3 calls</>
+                <>🎁 {freeCallsUsed}/{freeCallLimitLabel} calls</>
               )}
             </span>
           )}
@@ -1739,6 +2105,15 @@ function App() {
             <span className="quota-badge" title={`${(usageStats.audio_seconds_used / 3600).toFixed(1)} of ${usageStats.audio_seconds_limit / 3600} audio hours used this month`}>
               🎙️ {(usageStats.audio_seconds_used / 3600).toFixed(1)}/{usageStats.audio_seconds_limit / 3600}h
             </span>
+          )}
+          {setup.oneTimeMissing > 0 && (
+            <button
+              className="setup-badge"
+              onClick={handleShowSetup}
+              title="Some setup steps are missing. Click to see them."
+            >
+              ⚠ Setup {setup.steps.filter(s => s.done).length}/{setup.steps.length}
+            </button>
           )}
           {cdpReady ? (
             <span
@@ -1825,6 +2200,7 @@ function App() {
                 }
               }}
               disabled={false}
+              onOpen={refreshChromeTabsQuietly}
             />
             <button
               onClick={fetchTabs}
@@ -1837,15 +2213,64 @@ function App() {
           </div>
         </div>
 
-        <button 
-          onClick={() => solveWithAI('auto')}
-          disabled={isLoading || !selectedTab}
-          className="solve-button"
-        >
-          {selectedTab && isAudio(selectedTab)
-            ? (isRecordingAudio ? `⏹️ Stop (${audioSeconds}s)` : '🎙️ Record')
-            : `${selectedTab && (isDisplay(selectedTab) || useScreenshot) ? '📸' : '📝'} Solve`}
-        </button>
+        <div className="solve-group">
+          {selectedTab && !isAudio(selectedTab) && (() => {
+            const displayLocked = isDisplay(selectedTab);
+            const screenshotActive = displayLocked || useScreenshot;
+            const lockedHint = 'Displays always use Screenshot Capture';
+            // Same `useScreenshot` setting as Settings → AI Models → Input Mode, so both stay in sync.
+            return (
+              <div
+                className={`mode-segment ${screenshotActive ? 'is-screenshot' : ''} ${displayLocked ? 'is-locked' : ''}`}
+                role="radiogroup"
+                aria-label="Input mode"
+              >
+                <span className="mode-segment-thumb" aria-hidden="true" />
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!screenshotActive}
+                  aria-label="Text Extraction"
+                  className={`mode-segment-btn ${!screenshotActive ? 'active' : ''}`}
+                  onClick={() => setUseScreenshot(false)}
+                  disabled={isLoading || displayLocked}
+                  title={displayLocked ? lockedHint : withHotkey('Text Extraction', activeHotkeys?.text)}
+                >
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 3v5h5M9 13h6M9 17h4" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={screenshotActive}
+                  aria-label="Screenshot Capture"
+                  className={`mode-segment-btn ${screenshotActive ? 'active' : ''}`}
+                  onClick={() => setUseScreenshot(true)}
+                  disabled={isLoading || displayLocked}
+                  title={displayLocked ? lockedHint : withHotkey('Screenshot Capture', activeHotkeys?.screenshot)}
+                >
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 8a2 2 0 0 1 2-2h1.5l1.5-2h6l1.5 2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+                    <circle cx="12" cy="12.5" r="3.5" />
+                  </svg>
+                </button>
+              </div>
+            );
+          })()}
+          <button 
+            onClick={() => solveWithAI('auto')}
+            disabled={isLoading || !selectedTab}
+            className="solve-button"
+            title={solveHotkey ? `${solveActionLabel} (${solveHotkey})` : undefined}
+            aria-keyshortcuts={solveHotkeyRaw || undefined}
+          >
+            {selectedTab && isAudio(selectedTab)
+              ? (isRecordingAudio ? `⏹️ Stop (${audioSeconds}s)` : '🎙️ Record')
+              : `${selectedTab && (isDisplay(selectedTab) || useScreenshot) ? '📸' : '📝'} Solve`}
+          </button>
+        </div>
       </div>
 
       {isRecordingAudio && !isLiveTranscribing && (
@@ -1883,6 +2308,14 @@ function App() {
       <div className="content" ref={contentScrollRef}>
         <div className="main-section">
           
+          {setup.showCard && (
+            <SetupChecklist
+              variant="card"
+              {...setupChecklistProps}
+              onHide={setup.hide}
+            />
+          )}
+
           {announcement && showAnnouncement && (
             <div className="info-banner announcement">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1958,10 +2391,12 @@ function App() {
                 const currentIdx = phaseOrder.indexOf(solvePhase);
 
                 const modelName = (() => {
-                  const actualModelId = isPaidUser ? aiConfig.selected_model : modelConfig.free_model.id;
-                  const allModels = [...modelConfig.pro_models, modelConfig.free_model];
-                  const found = allModels.find(m => m.id === actualModelId);
-                  return found ? found.name : actualModelId;
+                  if (!modelConfig) return '';
+                  if (!isPaidUser) {
+                    return usingByoKey ? modelConfig.byo_model.name : modelConfig.free_model.name;
+                  }
+                  const found = modelConfig.pro_models.find(m => m.id === aiConfig.selected_model);
+                  return found ? found.name : aiConfig.selected_model;
                 })();
                 const promptLabel = getTemplateLabel(selectedTemplate);
 
@@ -1988,8 +2423,12 @@ function App() {
                     </div>
                     {solvePhase === 'asking' && (
                       <div className="stepper-info">
-                        <span className="stepper-info-model">🧠 {modelName}</span>
-                        <span className="stepper-info-divider">·</span>
+                        {modelName && (
+                          <>
+                            <span className="stepper-info-model">🧠 {modelName}</span>
+                            <span className="stepper-info-divider">·</span>
+                          </>
+                        )}
                         <span className="stepper-info-prompt">📋 {promptLabel}</span>
                       </div>
                     )}
@@ -2003,6 +2442,15 @@ function App() {
           {message && !isRecordingAudio && (solvePhase === 'idle' || solvePhase === 'error') && (
             <div className="message-box">
               {message}
+              {messageActions.length > 0 && (
+                <div className="message-actions">
+                  {messageActions.map(kind => (
+                    <button key={kind} className="message-action-btn" onClick={() => runMessageAction(kind)}>
+                      {MESSAGE_ACTION_LABELS[kind]}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -2121,7 +2569,7 @@ function App() {
                       {(() => {
                         const pct = isPaidUser && usageStats
                           ? Math.min(100, (usageStats.requests_used / usageStats.requests_limit) * 100)
-                          : Math.min(100, ((subscription?.lifetime_ai_calls || 0) / 3) * 100);
+                          : freeCallLimit ? Math.min(100, (freeCallsUsed / freeCallLimit) * 100) : 0;
                         const barColor = pct < 50
                           ? `linear-gradient(90deg, #4caf50, #66bb6a)`
                           : pct < 80
@@ -2138,12 +2586,12 @@ function App() {
                     <div className="usage-text">
                       {isPaidUser ? (
                         <>
-                          <span>{usageStats?.requests_used || 0} / {usageStats?.requests_limit || 150} requests</span>
+                          <span>{usageStats?.requests_used || 0} / {proRequestLimitLabel} requests</span>
                           <span className="usage-reset">Resets {usageStats?.period_end?.toLocaleDateString()}</span>
                         </>
                       ) : (
                         <>
-                          <span>{subscription?.lifetime_ai_calls || 0} / 3 lifetime free calls used</span>
+                          <span>{freeCallsUsed} / {freeCallLimitLabel} lifetime free calls used</span>
                         </>
                       )}
                     </div>
@@ -2179,10 +2627,11 @@ function App() {
                     <div className="upgrade-section">
                       <h4>🚀 Upgrade to Pro</h4>
                       <ul className="upgrade-benefits">
-                        <li>✓ 150 AI requests per month</li>
-                        <li>✓ 10 hours audio recording per month</li>
-                        <li>✓ GPT-5.2 Codex, Claude 4.5, Gemini 3, Grok 4.1</li>
-                        <li>✓ Any website + screen capture</li>
+                        <li>✓ Stealth mode: Undetectable and fully private plus hidden hotkeys</li>
+                        <li>✓ {proRequestLimitLabel} AI requests per month</li>
+                        <li>✓ {proAudioHoursLabel} hours audio recording per month</li>
+                        {proModelNames && <li>✓ {proModelNames}</li>}
+                        <li>✓ Screen capture for display</li>
                         <li>✓ Audio input with transcription</li>
                       </ul>
                       <button 
@@ -2240,8 +2689,10 @@ function App() {
                         value={aiConfig.selected_model}
                         onChange={(e) => setAiConfig({...aiConfig, selected_model: e.target.value})}
                         className="input-field"
+                        disabled={!modelConfig}
                       >
-                        {modelConfig.pro_models.map(model => (
+                        {!modelConfig && <option value="">Loading models…</option>}
+                        {modelConfig?.pro_models.map(model => (
                           <option key={model.id} value={model.id}>
                             {model.name} ({model.provider})
                           </option>
@@ -2249,31 +2700,62 @@ function App() {
                       </select>
                     ) : (
                       <div className="input-field" style={{ backgroundColor: 'var(--input-disabled-bg)', cursor: 'not-allowed' }}>
-                        {(subscription?.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key 
-                          ? 'Gemini 2.5 Flash (Google) - Your API Key'
-                          : `${modelConfig.free_model.name} (${modelConfig.free_model.provider}) - Free Tier`}
+                        {!modelConfig
+                          ? 'Loading models…'
+                          : usingByoKey
+                            ? `${modelConfig.byo_model.name} (${modelConfig.byo_model.provider}) - Your API Key`
+                            : `${modelConfig.free_model.name} (${modelConfig.free_model.provider}) - Free Tier`}
                       </div>
                     )}
                   </div>
 
-                  {/* BYO API Key section - shown when free user exhausted 3 tries */}
-                  {!isPaidUser && (subscription?.lifetime_ai_calls || 0) >= 3 && (
+                  {/* BYO API Key section - shown when free user exhausted their free calls */}
+                  {!isPaidUser && freeCallsExhausted && (
                     <div className="form-group" style={{ marginTop: '16px', padding: '16px', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '1px solid #0ea5e9' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#0369a1', fontWeight: 600 }}>
                         🔑 Bring Your Own API Key
                         {aiConfig.gemini_api_key && <span style={{ color: '#16a34a', fontSize: '12px' }}>✓ Active</span>}
                       </label>
                       <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>
-                        Your 3 free tries are used. Add your own Gemini API key to continue using AI (with same domain restrictions).
+                        Your {freeCallLimitLabel} free tries are used. Add your own Gemini API key to continue using AI{freeSitesRestricted ? ' (with same domain restrictions)' : ''}.
                       </p>
-                      <input
-                        type="password"
-                        value={aiConfig.gemini_api_key || ''}
-                        onChange={(e) => setAiConfig({...aiConfig, gemini_api_key: e.target.value || undefined})}
-                        placeholder="Enter your Gemini API key"
-                        className="input-field"
-                        style={{ marginBottom: '8px' }}
-                      />
+                      <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                        <input
+                          type="password"
+                          value={byoKeyDraft}
+                          onChange={(e) => { setByoKeyDraft(e.target.value); setByoKeyError(''); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSaveByoKey(); } }}
+                          placeholder={aiConfig.gemini_api_key
+                            ? `Saved key ••••${aiConfig.gemini_api_key.slice(-4)} · paste a new key to replace`
+                            : 'Paste your Gemini API key'}
+                          className="input-field"
+                          style={{ flex: 1, margin: 0 }}
+                          disabled={byoKeyVerifying}
+                        />
+                        <button
+                          className="action-btn primary"
+                          onClick={handleSaveByoKey}
+                          disabled={!byoKeyDraft.trim() || byoKeyVerifying}
+                          style={{ whiteSpace: 'nowrap' }}
+                        >
+                          {byoKeyVerifying ? '⏳ Verifying…' : 'Save & Verify'}
+                        </button>
+                        {aiConfig.gemini_api_key && !byoKeyDraft && (
+                          <button
+                            className="action-btn"
+                            onClick={handleRemoveByoKey}
+                            disabled={byoKeyVerifying}
+                            style={{ whiteSpace: 'nowrap' }}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      {byoKeyError && (
+                        <p style={{ fontSize: '12px', color: '#dc2626', margin: '0 0 8px 0', whiteSpace: 'pre-wrap' }}>
+                          {byoKeyError}
+                        </p>
+                      )}
                       <button 
                         onClick={() => invoke('open_url', { url: 'https://aistudio.google.com/app/apikey' })}
                         style={{ 
@@ -2290,7 +2772,7 @@ function App() {
                       </button>
                       {aiConfig.gemini_api_key && (
                         <p style={{ fontSize: '11px', color: '#16a34a', marginTop: '8px' }}>
-                          ✓ Using Gemini 2.5 Flash with your own key. Domain restrictions still apply.
+                          ✓ Using {modelConfig?.byo_model.name ?? 'the free-tier model'} with your own key.{freeSitesRestricted ? ' Domain restrictions still apply.' : ''}
                         </p>
                       )}
                     </div>
@@ -2300,14 +2782,20 @@ function App() {
                     <div className="info-note" style={{ marginTop: '16px' }}>
                       <h4 style={{ marginBottom: '8px' }}>🔒 Free Tier Limitations</h4>
                       <ul style={{ fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
-                        <li>{(subscription?.lifetime_ai_calls || 0) >= 3 && aiConfig.gemini_api_key 
-                          ? 'Gemini 2.5 Flash (with your API key)' 
-                          : 'Grok Code Fast model only'}</li>
-                        <li>{(subscription?.lifetime_ai_calls || 0) >= 3 
-                          ? (aiConfig.gemini_api_key ? 'Unlimited with your API key' : '3 lifetime AI requests (used)')
-                          : `${3 - (subscription?.lifetime_ai_calls || 0)} of 3 free requests remaining`}</li>
-                        <li>Chrome tabs only (no screen capture)</li>
-                        <li>Only works on: {FREE_TIER_ALLOWED_DOMAINS.join(', ')}</li>
+                        {modelConfig && (
+                          <li>{usingByoKey
+                            ? `${modelConfig.byo_model.name} (with your API key)`
+                            : `${modelConfig.free_model.name} model only`}</li>
+                        )}
+                        {freeCallLimit !== undefined && (
+                          <li>{freeCallsExhausted
+                            ? (aiConfig.gemini_api_key ? 'Unlimited with your API key' : `${freeCallLimit} lifetime AI requests (used)`)
+                            : `${freeCallLimit - freeCallsUsed} of ${freeCallLimit} free requests remaining`}</li>
+                        )}
+                        <li>Chrome tabs only (no display screen capture)</li>
+                        {modelConfig && !allowsAllDomains(modelConfig) && (
+                          <li>Only works on: {modelConfig.free_allowed_domains.join(', ')}</li>
+                        )}
                       </ul>
                       <button 
                         className="action-btn primary"
@@ -2324,9 +2812,9 @@ function App() {
                     <div className="info-note" style={{ marginTop: '16px' }}>
                       <h4 style={{ marginBottom: '8px' }}>✨ Pro Features</h4>
                       <ul style={{ fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
-                        <li>All 4 premium AI models</li>
-                        <li>150 requests per month</li>
-                        <li>Any Chrome tab or website</li>
+                        <li>Stealth Mode with Anti-Detection Protection</li>
+                        <li>{modelConfig ? `All ${modelConfig.pro_models.length} premium AI models` : 'All premium AI models'}</li>
+                        <li>{proRequestLimitLabel} requests per month</li>
                         <li>Display/screen capture</li>
                         <li>Audio input with transcription</li>
                       </ul>
@@ -2410,229 +2898,31 @@ function App() {
               )}
 
               {settingsTab === 'hotkeys' && (
-                <div className="hotkeys-panel">
-                  {/* Solve Section */}
-                  <div className="hotkeys-section">
-                    <div className="hotkeys-section-title">🎯 Solve</div>
-                    <div className="hotkeys-two-col">
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Extract text → Solve</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.text}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, text: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + 1' : runtimePlatform === 'windows' ? 'Alt + 1' : 'Ctrl + 1'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Screenshot → Solve</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.screenshot}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, screenshot: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + 2' : runtimePlatform === 'windows' ? 'Alt + 2' : 'Ctrl + 2'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Audio Start/Stop → Solve</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.audio_toggle}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, audio_toggle: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + 3' : runtimePlatform === 'windows' ? 'Alt + 3' : 'Ctrl + 3'}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Navigation Section */}
-                  <div className="hotkeys-section">
-                    <div className="hotkeys-section-title">🧭 Navigation</div>
-                    <div className="hotkeys-two-col">
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Scroll up (Explanation)</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.scroll_up}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_up: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Up' : 'Ctrl + Up'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Scroll down (Explanation)</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.scroll_down}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, scroll_down: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Down' : 'Ctrl + Down'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Move window up</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.move_up}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_up: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Up' : runtimePlatform === 'windows' ? 'Alt + Shift + Up' : 'Ctrl + Shift + Up'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Move window down</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.move_down}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_down: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Down' : runtimePlatform === 'windows' ? 'Alt + Shift + Down' : 'Ctrl + Shift + Down'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Move window left</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.move_left}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_left: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Left' : runtimePlatform === 'windows' ? 'Alt + Shift + Left' : 'Ctrl + Shift + Left'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Move window right</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.move_right}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, move_right: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Right' : runtimePlatform === 'windows' ? 'Alt + Shift + Right' : 'Ctrl + Shift + Right'}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* App Section */}
-                  <div className="hotkeys-section">
-                    <div className="hotkeys-section-title">⚙️ App</div>
-                    <div className="hotkeys-two-col">
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Show/Hide app window</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.toggle_visibility}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, toggle_visibility: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + H' : runtimePlatform === 'windows' ? 'Alt + Shift + H' : 'Ctrl + Shift + H'}
-                        />
-                      </div>
-                      <div className="hotkey-field">
-                        <div className="hotkey-label">Quit app</div>
-                        <input
-                          className="input-field hotkey-input"
-                          value={hotkeysDraft.quit_app}
-                          onChange={(e) => setHotkeysDraft({ ...hotkeysDraft, quit_app: e.target.value })}
-                          placeholder={runtimePlatform === 'macos' ? 'Command + Shift + Q' : runtimePlatform === 'windows' ? 'Alt + Shift + Q' : 'Ctrl + Shift + Q'}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{display: 'flex', gap: '8px', marginTop: '10px'}}>
-                    <button className="action-btn primary" style={{flex: 1}} onClick={saveHotkeys}>
-                      Save
-                    </button>
-                    <button className="action-btn secondary" style={{flex: 1}} onClick={resetHotkeys}>
-                      Reset to defaults
-                    </button>
-                  </div>
-
-                  {hotkeysStatus && (
-                    <div style={{marginTop: '8px', fontSize: '11px', color: hotkeysStatus.startsWith('❌') ? '#c62828' : '#666'}}>
-                      {hotkeysStatus}
-                    </div>
-                  )}
-
-                  <p style={{fontSize: '11px', color: '#999', marginTop: '8px', lineHeight: '1.4'}}>
-                    Display Input Source auto-uses Screenshot even with the Extract hotkey. Avoid Shift-only shortcuts (e.g. Shift+L).
-                  </p>
-                </div>
+                <HotkeysSettingsTab
+                  draft={hotkeysDraft}
+                  onDraftChange={setHotkeysDraft}
+                  platform={runtimePlatform}
+                  status={hotkeysStatus}
+                  onSave={saveHotkeys}
+                  onReset={resetHotkeys}
+                />
               )}
 
               {settingsTab === 'app' && (
-                <>
-                  {/* Transparency */}
-                  <div className="app-settings-group">
-                    <div className="app-settings-label">Transparency</div>
-                    <div className="app-settings-desc">Adjust the window opacity from fully visible to semi-transparent.</div>
-                    <div className="opacity-slider-row">
-                      <input
-                        type="range"
-                        min="10"
-                        max="100"
-                        value={Math.round(windowOpacity * 100)}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value) / 100;
-                          setWindowOpacity(val);
-                          localStorage.setItem('window_opacity', val.toString());
-                          invoke('set_window_opacity', { opacity: val }).catch(console.error);
-                        }}
-                        className="opacity-slider"
-                      />
-                      <span className="opacity-value">{Math.round(windowOpacity * 100)}%</span>
-                    </div>
-                  </div>
-
-                  {/* Theme */}
-                  <div className="app-settings-group">
-                    <div className="app-settings-label">Theme</div>
-                    <div className="app-settings-desc">Switch between light and dark appearance.</div>
-                    <div className="theme-toggle-group">
-                      <button
-                        className={`theme-toggle-btn ${theme === 'light' ? 'active' : ''}`}
-                        onClick={() => {
-                          setTheme('light');
-                          localStorage.setItem('app_theme', 'light');
-                          document.documentElement.setAttribute('data-theme', 'light');
-                        }}
-                      >
-                        ☀️ Light
-                      </button>
-                      <button
-                        className={`theme-toggle-btn ${theme === 'dark' ? 'active' : ''}`}
-                        onClick={() => {
-                          setTheme('dark');
-                          localStorage.setItem('app_theme', 'dark');
-                          document.documentElement.setAttribute('data-theme', 'dark');
-                        }}
-                      >
-                        🌙 Dark
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Stealth Mode */}
-                  <div className="app-settings-group">
-                    <div className="app-settings-label">Stealth Mode</div>
-                    <div className="app-settings-desc">
-                      Hidden from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows).
-                    </div>
-                    <div className="stealth-toggle-row">
-                      <label className="toggle-switch">
-                        <input
-                          type="checkbox"
-                          checked={stealthMode}
-                          onChange={(e) => {
-                            const enabled = e.target.checked;
-                            setStealthMode(enabled);
-                            localStorage.setItem('stealth_mode', enabled.toString());
-                            invoke('set_stealth_mode', { enabled }).catch(console.error);
-                          }}
-                        />
-                        <span className="toggle-switch-slider" />
-                      </label>
-                      <span className="stealth-label">{stealthMode ? 'Enabled' : 'Disabled'}</span>
-                    </div>
-                    {runtimePlatform === 'macos' && (
-                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px' }}>
-                        Stealth changes take effect after restarting the app.
-                      </p>
-                    )}
-                  </div>
-                </>
+                <AppSettingsTab
+                  windowOpacity={windowOpacity}
+                  onOpacityChange={handleOpacityChange}
+                  theme={theme}
+                  onThemeChange={handleThemeChange}
+                  isPro={isPro}
+                  stealthMode={stealthMode}
+                  onStealthModeChange={handleStealthModeChange}
+                  hotkeySwallowingActive={!!stealthStatus?.swallowing_active}
+                  isMac={runtimePlatform === 'macos'}
+                  onRequestAccessibility={handleRequestAccessibility}
+                  onRefreshStealthStatus={handleRefreshStealthStatus}
+                  setupChecklist={setupChecklistProps}
+                />
               )}
             </div>
           </div>

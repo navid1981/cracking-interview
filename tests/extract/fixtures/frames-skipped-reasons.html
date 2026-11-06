@@ -1,0 +1,14 @@
+<!doctype html>
+<!-- Frames the extractor cannot or should not read are recorded with a reason (debug dump):
+     an opaque/cross-origin frame (data: URL), a tiny frame, a denylisted widget. A display:none frame is dropped earlier
+     by the walker and is not counted. -->
+<html>
+<head><meta charset="utf-8"><title>Skipped frames</title></head>
+<body>
+  <p>Read the passage in the frame and answer.</p>
+  <iframe width="400" height="200" src="data:text/html,<p>hidden from the page</p>"></iframe>
+  <iframe width="20" height="20" srcdoc="<p>tiny</p>"></iframe>
+  <iframe width="400" height="200" style="display:none" srcdoc="<p>hidden</p>"></iframe>
+  <iframe width="400" height="200" src="https://www.google.com/recaptcha/api2/anchor"></iframe>
+</body>
+</html>

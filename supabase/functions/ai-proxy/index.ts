@@ -6,9 +6,9 @@
  * Features:
  * - Authenticates requests via Supabase JWT
  * - Checks user subscription status
- * - Enforces monthly quota (150 requests for paid users)
- * - Enforces lifetime quota (3 calls for free users)
- * - Free users can only use Grok Code Fast model
+ * - Enforces billing-period quota for paid users (PRO_MONTHLY_REQUEST_LIMIT, see _shared/limits.ts)
+ * - Enforces lifetime quota for free users (FREE_LIFETIME_CALL_LIMIT, see _shared/limits.ts)
+ * - Free users are forced to FREE_MODEL (see _shared/models.ts)
  * - Logs usage to api_usage table
  * - Supports streaming responses
  */
@@ -16,16 +16,18 @@
 // Direct import for Supabase Dashboard deployment
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PRO_MODEL_IDS, MODEL_MAP, FREE_MODEL as FREE_MODEL_INFO, DEFAULT_PRO_MODEL } from "../_shared/models.ts";
+import {
+  FREE_LIFETIME_CALL_LIMIT as FREE_LIFETIME_LIMIT,
+  PRO_MONTHLY_REQUEST_LIMIT as MONTHLY_REQUEST_LIMIT,
+  FREE_TIER_ALLOWED_DOMAINS,
+  isFreeTierUrlAllowed,
+  MAX_OUTPUT_TOKENS,
+} from "../_shared/limits.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-// Monthly request limit for paid subscribers
-const MONTHLY_REQUEST_LIMIT = 150;
-// Lifetime limit for free users
-const FREE_LIFETIME_LIMIT = 3;
 
 // Model constants from shared config
 const FREE_MODEL = FREE_MODEL_INFO.id;
@@ -33,9 +35,6 @@ const PRO_MODELS = PRO_MODEL_IDS;
 
 // Timeout for OpenRouter API calls (50 seconds)
 const API_TIMEOUT_MS = 50000;
-
-// Allowed domains for free tier users
-const FREE_TIER_ALLOWED_DOMAINS = ['leetcode.com', 'codewars.com', 'codeforces.com', 'neetcode.io'];
 
 interface AIRequest {
   model: string;
@@ -184,7 +183,8 @@ async function processRequest(
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
-  let { model, messages, stream = false, max_tokens = 16384, source_url } = body;
+  let { model, messages, stream = false, max_tokens = MAX_OUTPUT_TOKENS, source_url } = body;
+  max_tokens = Math.min(max_tokens, MAX_OUTPUT_TOKENS);
   
   console.log('[ai-proxy] Requested model:', model);
   console.log('[ai-proxy] Messages count:', messages?.length);
@@ -194,8 +194,7 @@ async function processRequest(
 
   // Free users - validate domain restriction
   if (!isPaid && source_url) {
-    const isAllowedDomain = FREE_TIER_ALLOWED_DOMAINS.some(domain => source_url.includes(domain));
-    if (!isAllowedDomain) {
+    if (!isFreeTierUrlAllowed(source_url)) {
       console.log(`[ai-proxy] Free user attempted to use blocked domain: ${source_url}`);
       return new Response(
         JSON.stringify({ 

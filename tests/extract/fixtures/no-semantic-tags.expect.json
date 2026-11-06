@@ -1,0 +1,11 @@
+{
+  "contains": [
+    "BinaryGap",
+    "A binary gap within a positive integer N is any maximal sequence of consecutive zeros. See binary representation for details.",
+    "class Solution { public int solution(int N); }"
+  ],
+  "notContains": ["Lesson 7", "Stacks and Queues", "Log in", "FAQ", "[blank]"],
+  "images": 0,
+  "drawn": 0,
+  "code": 0
+}

@@ -16,6 +16,15 @@ cargo update
 cargo tree
 ./target/release/cracking-interview
 
+  Useful variations
+  yarn test:extract --show monaco-react-multifile   # print the full extracted output of one page
+  yarn test:extract --url <page-url>                # run the extractor on a live URL
+
+  Rust tests, from src-tauri/:
+  cargo test                                  # unit tests
+  cargo test -- --ignored chrome_integration  # real Rust code against headless Chrome
+
+---------------------------
 # 1. Check your certificates
 security find-identity -v -p codesigning
 output:

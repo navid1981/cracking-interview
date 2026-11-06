@@ -1,0 +1,17 @@
+{
+  "contains": [
+    "1. Two Sum",
+    "Input: nums = [2,7,11,15], target = 9\nOutput: [0,1]",
+    "2 <= nums.length <= 10^4",
+    "less than O(n^2) time? Use a_i notation.",
+    "[code editor 1: see below]",
+    "--- Code editor 1 (cpp) ---\nclass Solution {\npublic:\n    vector<int> twoSum(vector<int>& nums, int target) {",
+    "--- End of code editor 1 ---"
+  ],
+  "notContains": ["Problem List", "Premium", "[code editor 2", "partial", "Submit"],
+  "maxCount": { "Editorial": 1 },
+  "code": 1,
+  "codeLanguages": ["cpp"],
+  "images": 0,
+  "drawn": 0
+}

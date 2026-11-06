@@ -1,0 +1,15 @@
+{
+  "contains": [
+    "Read the passage in the frame and answer."
+  ],
+  "notContains": [
+    "hidden from the page",
+    "tiny"
+  ],
+  "skippedFrameReasons": [
+    "cross-origin",
+    "denylisted",
+    "too-small"
+  ],
+  "minFramesSkipped": 3
+}

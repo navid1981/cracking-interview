@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- The fiber tree holds an unrelated (detached) editor before the real one. The extractor must match by DOM node, not take the first editor. -->
+<html>
+<head><meta charset="utf-8"><title>Unrelated editor first</title></head>
+<body>
+  <p>Complete the function.</p>
+  <div class="monaco-editor" id="ed"><div class="view-lines"><div class="view-line">x</div></div></div>
+  <script>
+    const model = (path, lang, value, scheme) => ({ uri: { scheme: scheme || 'file', path }, getValue: () => value, getLanguageId: () => lang });
+    const real = model('/w/main.go', 'go', 'func Solve() int { return 0 }');
+    const decoy = model('/w/decoy.go', 'go', 'package decoy');
+    const detached = document.createElement('div');
+    const decoyEd = { getModel: () => decoy, getDomNode: () => detached };
+    const realEd = { getModel: () => real, getDomNode: () => document.getElementById('ed') };
+    const el = document.getElementById('ed');
+    const leaf = { return: null, child: null, sibling: null, memoizedProps: null, stateNode: null,
+      memoizedState: { memoizedState: decoyEd, next: { memoizedState: realEd, next: null } } };
+    const root = { return: null, child: leaf, sibling: null, memoizedProps: null, stateNode: null, memoizedState: null };
+    leaf.return = root;
+    el['__reactFiber$t'] = leaf;
+  </script>
+</body>
+</html>

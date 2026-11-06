@@ -1,0 +1,14 @@
+{
+  "contains": [
+    "--- Code editor 1 (add.ts, typescript) ---\nexport const add = (a, b) => a - b;",
+    "--- Project file add.test.ts (typescript) ---\nexpect(add(1, 2)).toBe(3);"
+  ],
+  "notContains": [
+    "yarn lockfile",
+    "module.exports"
+  ],
+  "maxCount": {
+    "export const add = (a, b) => a - b;": 1
+  },
+  "code": 2
+}

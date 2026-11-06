@@ -1,6 +1,6 @@
 {
   "name": "cracking-interview",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "CrackingInterview - Cross-platform coding interview assistant",
   "author": "Cracking Interview LLC",
   "license": "UNLICENSED",
@@ -10,6 +10,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test:extract": "node --experimental-websocket tests/extract/run.mjs",
     "tauri": "tauri",
     "tauri:dev": "source ~/.zshrc && tauri dev",
     "tauri:build": "source ~/.zshrc && tauri build"

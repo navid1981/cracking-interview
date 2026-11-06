@@ -1,0 +1,7 @@
+{
+  "contains": [
+    "Fix the bug in this function.",
+    "--- Code editor 1 ---\nfunction add(a, b) {\n  // adds two numbers\n  return a - b;\n}"
+  ],
+  "code": 1
+}

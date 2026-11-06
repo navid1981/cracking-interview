@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- No editor API exposed at all: fall back to the rendered lines, sorted by position. -->
+<html>
+<head><meta charset="utf-8"><title>Monaco with no API</title>
+<style>.view-line { position: absolute; }</style>
+</head>
+<body>
+  <p>Fix the bug in this function.</p>
+  <div class="monaco-editor" style="position:relative;height:80px">
+    <div class="view-lines">
+      <div class="view-line" style="top:38px">  return a - b;</div>
+      <div class="view-line" style="top:0px">function add(a, b) {</div>
+      <div class="view-line" style="top:57px">}</div>
+      <div class="view-line" style="top:19px">  // adds two numbers</div>
+    </div>
+  </div>
+</body>
+</html>

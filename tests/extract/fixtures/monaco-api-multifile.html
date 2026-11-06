@@ -1,0 +1,20 @@
+<!doctype html>
+<!-- window.monaco is exposed with getEditors() and getModels(): the open file plus the other project files, minus lockfiles. -->
+<html>
+<head><meta charset="utf-8"><title>Monaco API, many files</title></head>
+<body>
+  <p>Fix the failing add test.</p>
+  <div class="monaco-editor" id="ed"><div class="view-lines"><div class="view-line">export const add</div></div></div>
+  <script>
+    const model = (path, lang, value, scheme) => ({ uri: { scheme: scheme || 'file', path }, getValue: () => value, getLanguageId: () => lang });
+    const add = model('/work/src/add.ts', 'typescript', 'export const add = (a, b) => a - b;');
+    const models = [
+      add,
+      model('/work/src/add.test.ts', 'typescript', "expect(add(1, 2)).toBe(3);"),
+      model('/work/yarn.lock', 'plaintext', '# yarn lockfile v1'),
+      model('/work/node_modules/x/index.js', 'javascript', 'module.exports = 1;'),
+    ];
+    window.monaco = { editor: { getEditors: () => [{ getDomNode: () => document.getElementById('ed'), getModel: () => add }], getModels: () => models } };
+  </script>
+</body>
+</html>

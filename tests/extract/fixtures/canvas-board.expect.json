@@ -1,0 +1,12 @@
+{
+  "contains": [
+    "[chart/drawing: see screenshot]",
+    "[Hidden text copy kept by the page, unordered:]",
+    "Interview task: scale to 10M users",
+    "Load balancer"
+  ],
+  "notContains": ["Share"],
+  "images": 0,
+  "drawn": 1,
+  "code": 0
+}

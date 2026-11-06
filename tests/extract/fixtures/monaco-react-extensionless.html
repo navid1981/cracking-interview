@@ -1,0 +1,24 @@
+<!doctype html>
+<!-- Files without an extension keep their names; in-memory (pathless) models do not get a fake file name. -->
+<html>
+<head><meta charset="utf-8"><title>Dockerfile and Makefile</title></head>
+<body>
+  <p>Fix the build.</p>
+  <div class="monaco-editor" id="ed"><div class="view-lines"><div class="view-line">FROM</div></div></div>
+  <script>
+    const model = (path, lang, value, scheme) => ({ uri: { scheme: scheme || 'file', path }, getValue: () => value, getLanguageId: () => lang });
+    const attach = (el, editor) => {
+      const leaf = { return: null, child: null, sibling: null, memoizedProps: null, stateNode: null, memoizedState: { memoizedState: editor, next: null } };
+      const root = { return: null, child: leaf, sibling: null, memoizedProps: null, stateNode: null, memoizedState: null };
+      leaf.return = root;
+      el['__reactFiber$t'] = leaf;
+    };
+    const open = model('/w/Dockerfile', 'dockerfile', 'FROM node:20');
+    const models = [open,
+      model('/w/Makefile', 'makefile', 'build:\n\tnpm run build'),
+      model('/1', 'plaintext', 'sample input', 'inmemory'),
+    ];
+    attach(document.getElementById('ed'), { getModel: () => open, getDomNode: () => document.getElementById('ed'), _svc: { getModels: () => models } });
+  </script>
+</body>
+</html>

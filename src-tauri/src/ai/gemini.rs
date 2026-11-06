@@ -35,6 +35,13 @@ fn parse_retry_after_seconds(msg: &str) -> Option<f64> {
     num.parse::<f64>().ok()
 }
 
+fn generation_config(max_output_tokens: Option<u32>) -> serde_json::Value {
+    match max_output_tokens {
+        Some(n) => json!({ "maxOutputTokens": n }),
+        None => json!({}),
+    }
+}
+
 fn is_quota_message(msg: &str) -> bool {
     let m = msg.to_lowercase();
     m.contains("quota exceeded") || m.contains("exceeded your current quota") || m.contains("rate limit")
@@ -96,20 +103,73 @@ async fn post_with_retry(request: reqwest::RequestBuilder) -> Result<serde_json:
             continue;
         }
 
-        // Non-retryable error
-        if !msg.is_empty() {
-            if is_quota_message(msg) {
-                return Err(format!(
-                    "❌ Gemini API quota/rate-limit: {}\n\nTip: If you’re using Google Sign-In (OAuth), you may still hit shared free-tier limits. To use your own quota, paste your own Gemini API key in Settings → AI Models.",
-                    msg
-                ));
-            }
-            return Err(format!("❌ Gemini API Error: {}", msg));
-        }
-        return Err(format!("❌ Gemini API Error: HTTP {} {}", status.as_u16(), status.canonical_reason().unwrap_or("")));
+        return Err(error_message(status, &json, &text));
     }
 
     Err("❌ Gemini API Error: The model is overloaded. Please try again later.".to_string())
+}
+
+fn error_message(status: reqwest::StatusCode, json: &serde_json::Value, text: &str) -> String {
+    let msg = json["error"]["message"].as_str().unwrap_or("");
+    if !msg.is_empty() {
+        if is_quota_message(msg) {
+            return format!(
+                "❌ Gemini API quota/rate-limit: {}\n\nTip: Check the quota for your Gemini API key in Google AI Studio.",
+                msg
+            );
+        }
+        return format!("❌ Gemini API Error: {}", msg);
+    }
+    // Google always returns JSON errors; an HTML body means a firewall/proxy answered instead.
+    if text.trim_start().starts_with('<') {
+        return format!(
+            "❌ Gemini API blocked by your network (HTTP {}). A firewall or corporate proxy is blocking generativelanguage.googleapis.com. Try a different network.",
+            status.as_u16()
+        );
+    }
+    format!("❌ Gemini API Error: HTTP {} {}", status.as_u16(), status.canonical_reason().unwrap_or(""))
+}
+
+/// Checks that `api_key` is valid and can access `model`, without generating content (no quota use).
+pub async fn validate_key(api_key: &str, model: &str) -> Result<(), String> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err("⚠️ Please enter an API key.".to_string());
+    }
+    if model.trim().is_empty() {
+        return Err("⚠️ No AI model configured. Please sign in again so the model list can be loaded.".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))?;
+
+    let resp = client
+        .get(format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}?key={}",
+            model, api_key
+        ))
+        .send()
+        .await
+        .map_err(|e| format!("❌ Could not reach Google to verify the key: {}", e))?;
+
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    let text = resp.text().await.unwrap_or_default();
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    let msg = json["error"]["message"].as_str().unwrap_or("").to_lowercase();
+
+    if msg.contains("api key not valid") || msg.contains("api_key_invalid") {
+        return Err("❌ Invalid API key. Copy it again from Google AI Studio.".to_string());
+    }
+    if status.as_u16() == 404 {
+        return Err(format!("❌ This key can't access the required model ({}).", model));
+    }
+    Err(error_message(status, &json, &text))
 }
 
 /// Query Gemini with text only
@@ -117,13 +177,11 @@ pub async fn query_with_text(
     prompt: &str,
     api_key: &str,
     model: &str,
+    max_output_tokens: Option<u32>,
 ) -> Result<String, String> {
     if api_key.is_empty() {
         return Err("⚠️ Gemini API key not configured.".to_string());
     }
-    
-    // Check if this is an OAuth token (starts with "ya29.") or API key
-    let is_oauth = api_key.starts_with("ya29.");
     
     // Note: danger_accept_invalid_certs is used to work around corporate proxy SSL interception
     let client = reqwest::Client::builder()
@@ -135,143 +193,46 @@ pub async fn query_with_text(
         "contents": [{
             "parts": [{"text": prompt}]
         }],
-        "generationConfig": {
-            "maxOutputTokens": 16384
-        }
+        "generationConfig": generation_config(max_output_tokens)
     });
     
-    let request = if is_oauth {
-        // OAuth token - use Authorization header
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            model
-        );
-        
-        println!("🔐 Using OAuth token with Authorization header");
-        
-        client
-            .post(&endpoint)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .json(&payload)
-    } else {
-        // API key - use query parameter
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
-        );
-        
-        println!("🔑 Using API key in query parameter");
-        
-        client
-            .post(&endpoint)
-            .json(&payload)
-    };
+    let request = client
+        .post(generate_content_url(model, api_key))
+        .json(&payload);
     
     let json = post_with_retry(request).await?;
-    
+
     // Extract text from response
-    if let Some(text) = json["candidates"][0]["content"]["parts"][0]["text"].as_str() {
-        Ok(text.to_string())
+    if let Some(text) = extract_text(&json) {
+        Ok(text)
     } else if let Some(error) = json["error"]["message"].as_str() {
         Err(format!("❌ Gemini API Error: {}", error))
     } else {
-        Err("⚠️ No response from Gemini".to_string())
+        Err(no_response_reason(&json))
     }
 }
 
-/// Query Gemini with image (screenshot)
-pub async fn query_with_image(
+/// Query Gemini with one or more images (screenshots / page images) plus the prompt text.
+pub async fn query_with_images(
     prompt: &str,
-    image_data: &[u8],
+    images: &[Vec<u8>],
     api_key: &str,
     model: &str,
-) -> Result<String, String> {
-    if api_key.is_empty() {
-        return Err("⚠️ Gemini API key not configured.".to_string());
-    }
-    
-    // Check if this is an OAuth token or API key
-    let is_oauth = api_key.starts_with("ya29.");
-    
-    // Base64 encode image
-    let base64_image = general_purpose::STANDARD.encode(image_data);
-    let mime_type = detect_image_mime_type(image_data)?;
-    
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| format!("Client build failed: {}", e))?;
-    
-    let payload = json!({
-        "contents": [{
-            "parts": [
-                {"text": prompt},
-                {
-                    "inline_data": {
-                        "mime_type": mime_type,
-                        "data": base64_image
-                    }
-                }
-            ]
-        }],
-        "generationConfig": {
-            "maxOutputTokens": 16384
-        }
-    });
-    
-    let request = if is_oauth {
-        // OAuth token - use Authorization header
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            model
-        );
-        
-        client
-            .post(&endpoint)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .json(&payload)
-    } else {
-        // API key - use query parameter
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
-        );
-        
-        client
-            .post(&endpoint)
-            .json(&payload)
-    };
-    
-    let json = post_with_retry(request).await?;
-    
-    if let Some(text) = json["candidates"][0]["content"]["parts"][0]["text"].as_str() {
-        Ok(text.to_string())
-    } else if let Some(error) = json["error"]["message"].as_str() {
-        Err(format!("❌ Gemini API Error: {}", error))
-    } else {
-        Err("⚠️ No response from Gemini".to_string())
-    }
-}
-
-/// Query Gemini with audio (system audio recording).
-///
-/// Gemini supports audio as inline data, similar to images.
-/// We use `audio/wav` since we record a WAV file on disk.
-pub async fn query_with_audio(
-    prompt: &str,
-    audio_data: &[u8],
-    api_key: &str,
-    model: &str,
+    max_output_tokens: Option<u32>,
 ) -> Result<String, String> {
     if api_key.is_empty() {
         return Err("⚠️ Gemini API key not configured.".to_string());
     }
 
-    // OAuth token vs API key
-    let is_oauth = api_key.starts_with("ya29.");
-
-    // Base64 encode audio
-    let base64_audio = general_purpose::STANDARD.encode(audio_data);
+    let mut parts = vec![json!({"text": prompt})];
+    for image in images {
+        parts.push(json!({
+            "inline_data": {
+                "mime_type": detect_image_mime_type(image)?,
+                "data": general_purpose::STANDARD.encode(image)
+            }
+        }));
+    }
 
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
@@ -279,48 +240,62 @@ pub async fn query_with_audio(
         .map_err(|e| format!("Client build failed: {}", e))?;
 
     let payload = json!({
-        "contents": [{
-            "parts": [
-                {"text": prompt},
-                {
-                    "inline_data": {
-                        "mime_type": "audio/wav",
-                        "data": base64_audio
-                    }
-                }
-            ]
-        }],
-        "generationConfig": {
-            "maxOutputTokens": 16384
-        }
+        "contents": [{ "parts": parts }],
+        "generationConfig": generation_config(max_output_tokens)
     });
-
-    let request = if is_oauth {
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            model
-        );
-        client
-            .post(&endpoint)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .json(&payload)
-    } else {
-        let endpoint = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            model, api_key
-        );
-        client
-            .post(&endpoint)
-            .json(&payload)
-    };
-
+    
+    let request = client
+        .post(generate_content_url(model, api_key))
+        .json(&payload);
+    
     let json = post_with_retry(request).await?;
 
-    if let Some(text) = json["candidates"][0]["content"]["parts"][0]["text"].as_str() {
-        Ok(text.to_string())
+    if let Some(text) = extract_text(&json) {
+        Ok(text)
     } else if let Some(error) = json["error"]["message"].as_str() {
         Err(format!("❌ Gemini API Error: {}", error))
     } else {
-        Err("⚠️ No response from Gemini".to_string())
+        Err(no_response_reason(&json))
     }
+}
+
+/// Joins all text parts of the first candidate (Gemini splits "thinking" output
+/// across multiple parts, so the answer isn't always in parts[0]).
+fn extract_text(json: &serde_json::Value) -> Option<String> {
+    let parts = json["candidates"][0]["content"]["parts"].as_array()?;
+    let text: String = parts
+        .iter()
+        .filter(|p| p["thought"].as_bool() != Some(true))
+        .filter_map(|p| p["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("");
+    if text.is_empty() { None } else { Some(text) }
+}
+
+/// Explains why no text came back when the HTTP call itself succeeded
+/// (blocked prompt, safety filter, or the model running out of tokens
+/// while "thinking" before it produced any visible text).
+fn no_response_reason(json: &serde_json::Value) -> String {
+    if let Some(reason) = json["promptFeedback"]["blockReason"].as_str() {
+        return format!("⚠️ Gemini blocked the prompt ({}).", reason);
+    }
+    if let Some(reason) = json["candidates"][0]["finishReason"].as_str() {
+        if reason == "MAX_TOKENS" {
+            return "⚠️ Gemini ran out of output tokens before producing a response. Try increasing the max output tokens in AI Models settings.".to_string();
+        }
+        if reason == "RECITATION" {
+            return "⚠️ Gemini withheld its answer because it matched memorized training content too closely. Try again, or rephrase the question slightly.".to_string();
+        }
+        if reason != "STOP" {
+            return format!("⚠️ Gemini stopped without a response ({}).", reason);
+        }
+    }
+    "⚠️ No response from Gemini".to_string()
+}
+
+fn generate_content_url(model: &str, api_key: &str) -> String {
+    format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+        model, api_key
+    )
 }
