@@ -394,34 +394,38 @@ pub(crate) fn reapply_stealth_after_show(win: &tauri::WebviewWindow) {
 /// The window stays "visible" to Windows at all times so the display affinity is preserved.
 #[cfg(target_os = "windows")]
 pub(crate) fn toggle_window_offscreen_win32(win: &tauri::WebviewWindow) {
-    if resilience::USER_HIDDEN.load(Ordering::Relaxed) {
-        // Restore: move window back to saved position without stealing focus
-        let x = resilience::SAVED_X.load(Ordering::Relaxed);
-        let y = resilience::SAVED_Y.load(Ordering::Relaxed);
-        use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::*;
-        if let Ok(h) = win.hwnd() {
-            unsafe {
-                let hwnd = HWND(h.0 as *mut _);
-                let _ = SetWindowPos(
-                    hwnd,
-                    HWND_TOPMOST,
-                    x, y, 0, 0,
-                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                );
+    let (cur_x, cur_y) = win
+        .outer_position()
+        .map(|p| (p.x, p.y))
+        .unwrap_or((-30000, -30000));
+
+    match resilience::compute_offscreen_toggle(cur_x, cur_y) {
+        resilience::OffscreenToggleAction::RestoreTo { x, y } => {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::*;
+            if let Ok(h) = win.hwnd() {
+                unsafe {
+                    let hwnd = HWND(h.0 as *mut _);
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND_TOPMOST,
+                        x,
+                        y,
+                        0,
+                        0,
+                        SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    );
+                }
             }
+            println!(
+                "🕵️ [toggle-win32] Window restored to ({}, {}) without focus",
+                x, y
+            );
         }
-        resilience::USER_HIDDEN.store(false, Ordering::Relaxed);
-        println!("🕵️ [toggle-win32] Window restored to ({}, {}) without focus", x, y);
-    } else {
-        // Hide: save current position, move far off-screen
-        if let Ok(pos) = win.outer_position() {
-            resilience::SAVED_X.store(pos.x, Ordering::Relaxed);
-            resilience::SAVED_Y.store(pos.y, Ordering::Relaxed);
+        resilience::OffscreenToggleAction::HideAt { x, y } => {
+            let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+            println!("🕵️ [toggle-win32] Window moved off-screen (hidden)");
         }
-        let _ = win.set_position(tauri::PhysicalPosition::new(-30000, -30000));
-        resilience::USER_HIDDEN.store(true, Ordering::Relaxed);
-        println!("🕵️ [toggle-win32] Window moved off-screen (hidden)");
     }
 }
 
@@ -2167,6 +2171,7 @@ async fn move_window_by(window: tauri::Window, dx: i32, dy: i32) -> Result<(), S
         sleep(Duration::from_millis(10)).await;
     }
 
+    resilience::session::update_window_state_in_snapshot(window.app_handle());
     Ok(())
 }
 
@@ -2220,6 +2225,7 @@ async fn resize_window(window: tauri::Window, width: f64, height: f64) -> Result
             physical.height
         );
     }
+    resilience::session::update_window_state_in_snapshot(window.app_handle());
     Ok(())
 }
 
@@ -2298,8 +2304,19 @@ fn open_privacy_settings(pane: String) -> Result<(), String> {
 
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) {
-    resilience::authorize_quit(&app);
-    app.restart();
+    let under_guardian = std::env::args().any(|a| a == "--gui");
+    if under_guardian && resilience::enabled() {
+        // Set only the in-memory flag so our own ExitRequested guard allows the exit,
+        // without writing authorized-quit.json on disk — allowing `--guardian` to
+        // cleanly respawn `--gui --restore-session` in 500ms without losing supervision.
+        resilience::AUTHORIZED_QUIT.store(true, Ordering::SeqCst);
+        resilience::session::update_window_state_in_snapshot(&app);
+        stealth_hotkey::teardown_stealth_hotkeys();
+        app.exit(0);
+    } else {
+        resilience::authorize_quit(&app);
+        app.restart();
+    }
 }
 
 #[tauri::command]

@@ -23,6 +23,44 @@ pub static SAVED_X: AtomicI32 = AtomicI32::new(0);
 pub static SAVED_Y: AtomicI32 = AtomicI32::new(0);
 pub static LAST_USER_INTERACTION_MS: AtomicU64 = AtomicU64::new(0);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OffscreenToggleAction {
+    RestoreTo { x: i32, y: i32 },
+    HideAt { x: i32, y: i32 },
+}
+
+pub fn record_onscreen_position_if_valid(x: i32, y: i32) {
+    if x > -10000 && y > -10000 {
+        SAVED_X.store(x, Ordering::SeqCst);
+        SAVED_Y.store(y, Ordering::SeqCst);
+    }
+}
+
+pub fn consume_offscreen_restore_coords_if_hidden() -> Option<(i32, i32)> {
+    if USER_HIDDEN.swap(false, Ordering::SeqCst) {
+        Some((SAVED_X.load(Ordering::SeqCst), SAVED_Y.load(Ordering::SeqCst)))
+    } else {
+        None
+    }
+}
+
+pub fn compute_offscreen_toggle(current_x: i32, current_y: i32) -> OffscreenToggleAction {
+    if USER_HIDDEN.load(Ordering::SeqCst) {
+        USER_HIDDEN.store(false, Ordering::SeqCst);
+        OffscreenToggleAction::RestoreTo {
+            x: SAVED_X.load(Ordering::SeqCst),
+            y: SAVED_Y.load(Ordering::SeqCst),
+        }
+    } else {
+        record_onscreen_position_if_valid(current_x, current_y);
+        USER_HIDDEN.store(true, Ordering::SeqCst);
+        OffscreenToggleAction::HideAt {
+            x: -30000,
+            y: -30000,
+        }
+    }
+}
+
 const AUTHORIZED_QUIT_FILE: &str = "authorized-quit.json";
 const KILLED_BY_OS_FILE: &str = "killed-by-os.json";
 const RESILIENCE_CONFIG_FILE: &str = "resilience.json";
@@ -641,5 +679,46 @@ mod tests {
         assert!(active_len < 250, "Active log should have been rotated");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_offscreen_hide_never_corrupts_saved_coords_after_bring_to_front() {
+        USER_HIDDEN.store(false, Ordering::SeqCst);
+        SAVED_X.store(200, Ordering::SeqCst);
+        SAVED_Y.store(150, Ordering::SeqCst);
+
+        // 1. User presses Toggle Visibility at (400, 300) -> hides to (-30000, -30000) and saves (400, 300)
+        assert_eq!(
+            compute_offscreen_toggle(400, 300),
+            OffscreenToggleAction::HideAt {
+                x: -30000,
+                y: -30000
+            }
+        );
+        assert!(USER_HIDDEN.load(Ordering::SeqCst));
+        assert_eq!(SAVED_X.load(Ordering::SeqCst), 400);
+        assert_eq!(SAVED_Y.load(Ordering::SeqCst), 300);
+
+        // 2. User presses SolveText while hidden -> bring_to_front_without_focus consumes restore coords (400, 300)
+        assert_eq!(consume_offscreen_restore_coords_if_hidden(), Some((400, 300)));
+        assert!(!USER_HIDDEN.load(Ordering::SeqCst));
+
+        // 3. Even if an OS query returns (-30000, -30000) during a hide transition, SAVED_X/Y are never overwritten with -30000
+        assert_eq!(
+            compute_offscreen_toggle(-30000, -30000),
+            OffscreenToggleAction::HideAt {
+                x: -30000,
+                y: -30000
+            }
+        );
+        assert_eq!(SAVED_X.load(Ordering::SeqCst), 400);
+        assert_eq!(SAVED_Y.load(Ordering::SeqCst), 300);
+
+        // 4. Subsequent Toggle Visibility restores to (400, 300)
+        assert_eq!(
+            compute_offscreen_toggle(-30000, -30000),
+            OffscreenToggleAction::RestoreTo { x: 400, y: 300 }
+        );
+        assert!(!USER_HIDDEN.load(Ordering::SeqCst));
     }
 }

@@ -54,6 +54,8 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
             std::thread::sleep(Duration::from_millis(300));
 
             if super::quit_was_authorized() {
+                crate::stealth_hotkey::teardown_stealth_hotkeys();
+                app.exit(0);
                 break;
             }
             if !super::enabled() {

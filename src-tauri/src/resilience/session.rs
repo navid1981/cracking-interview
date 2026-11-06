@@ -124,6 +124,57 @@ pub fn save_snapshot_with_window(
     snapshot.save_to_dir(&dir)
 }
 
+/// Updates the existing `session-snapshot.json` on disk with the latest window geometry and `USER_HIDDEN` state.
+pub fn update_window_state_in_snapshot(app: &tauri::AppHandle) {
+    let Some(dir) = super::get_config_dir() else {
+        return;
+    };
+    let mut rect_opt: Option<WindowRect> = None;
+    if let Some(win) = app.get_webview_window("main") {
+        if let (Ok(pos), Ok(size)) = (win.outer_position(), win.inner_size()) {
+            if pos.x > -10000 && pos.y > -10000 {
+                super::record_onscreen_position_if_valid(pos.x, pos.y);
+                rect_opt = Some(WindowRect {
+                    x: pos.x,
+                    y: pos.y,
+                    width: size.width,
+                    height: size.height,
+                });
+            }
+        }
+    }
+    let stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed);
+    let hidden = super::USER_HIDDEN.load(Ordering::Relaxed);
+    let _ = update_window_state_in_snapshot_dir(&dir, rect_opt, stealth, hidden);
+}
+
+pub fn update_window_state_in_snapshot_dir(
+    config_dir: &Path,
+    rect: Option<WindowRect>,
+    stealth_enabled: bool,
+    user_hidden: bool,
+) -> Result<(), String> {
+    let mut snap = SessionSnapshot::load_from_dir(config_dir).unwrap_or(SessionSnapshot {
+        schema_version: SNAPSHOT_SCHEMA_VERSION,
+        saved_at_unix_ms: super::now_unix_ms(),
+        window_rect: None,
+        stealth_enabled,
+        user_hidden,
+        selected_model: None,
+        active_template_id: None,
+        programming_language: None,
+        active_mode: None,
+        last_response_markdown: None,
+    });
+    snap.saved_at_unix_ms = super::now_unix_ms();
+    if let Some(r) = rect {
+        snap.window_rect = Some(r);
+    }
+    snap.stealth_enabled = stealth_enabled;
+    snap.user_hidden = user_hidden;
+    snap.save_to_dir(config_dir)
+}
+
 pub fn load_snapshot_if_restore_mode() -> Option<SessionSnapshot> {
     let is_restore = std::env::args().any(|a| a == "--restore-session");
     if !is_restore {
@@ -133,7 +184,7 @@ pub fn load_snapshot_if_restore_mode() -> Option<SessionSnapshot> {
     SessionSnapshot::load_from_dir(&dir)
 }
 
-/// Restores window geometry on startup when launched with `--restore-session`.
+/// Restores window geometry and `user_hidden` state on startup when launched with `--restore-session`.
 pub fn apply_restored_window_rect(app: &tauri::AppHandle) {
     let Some(snap) = load_snapshot_if_restore_mode() else {
         return;
@@ -143,6 +194,7 @@ pub fn apply_restored_window_rect(app: &tauri::AppHandle) {
     };
     if let Some(rect) = snap.window_rect {
         if rect.x > -10000 && rect.y > -10000 {
+            super::record_onscreen_position_if_valid(rect.x, rect.y);
             let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
                 x: rect.x,
                 y: rect.y,
@@ -155,7 +207,22 @@ pub fn apply_restored_window_rect(app: &tauri::AppHandle) {
             }));
         }
     }
-    super::log_event("Restored window geometry from session-snapshot.json");
+    if snap.user_hidden {
+        super::USER_HIDDEN.store(true, Ordering::SeqCst);
+        #[cfg(target_os = "windows")]
+        if crate::STEALTH_ENABLED.load(Ordering::Relaxed) {
+            let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                x: -30000,
+                y: -30000,
+            }));
+            super::log_event("Restored user_hidden offscreen state from session-snapshot.json");
+            return;
+        }
+        let _ = win.hide();
+        super::log_event("Restored user_hidden window state from session-snapshot.json");
+    } else {
+        super::log_event("Restored window geometry from session-snapshot.json");
+    }
 }
 
 #[cfg(test)]
@@ -261,6 +328,59 @@ mod tests {
 
         let raw_bytes = fs::read(dir.join("session-snapshot.json")).unwrap();
         assert!(raw_bytes.len() <= MAX_SNAPSHOT_BYTES);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_update_window_state_preserves_ui_fields_and_updates_user_hidden() {
+        let dir = temp_test_dir("win_update");
+        let initial = SessionSnapshot {
+            schema_version: SNAPSHOT_SCHEMA_VERSION,
+            saved_at_unix_ms: 1000,
+            window_rect: Some(WindowRect {
+                x: 10,
+                y: 20,
+                width: 550,
+                height: 900,
+            }),
+            stealth_enabled: true,
+            user_hidden: false,
+            selected_model: Some("gemini-pro".to_string()),
+            active_template_id: Some("system_design".to_string()),
+            programming_language: Some("Python".to_string()),
+            active_mode: Some("screenshot".to_string()),
+            last_response_markdown: Some("existing answer".to_string()),
+        };
+        initial.save_to_dir(&dir).unwrap();
+
+        update_window_state_in_snapshot_dir(
+            &dir,
+            Some(WindowRect {
+                x: 300,
+                y: 400,
+                width: 600,
+                height: 850,
+            }),
+            true,
+            true,
+        )
+        .unwrap();
+
+        let updated = SessionSnapshot::load_from_dir(&dir).unwrap();
+        assert!(updated.user_hidden);
+        assert_eq!(
+            updated.window_rect,
+            Some(WindowRect {
+                x: 300,
+                y: 400,
+                width: 600,
+                height: 850,
+            })
+        );
+        // Preserves UI fields
+        assert_eq!(updated.selected_model.as_deref(), Some("gemini-pro"));
+        assert_eq!(updated.last_response_markdown.as_deref(), Some("existing answer"));
 
         let _ = fs::remove_dir_all(&dir);
     }

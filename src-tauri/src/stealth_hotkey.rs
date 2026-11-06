@@ -208,9 +208,10 @@ pub fn request_accessibility_permission() -> bool {
 /// Bring the main window to the front without stealing focus from Chrome or the active app.
 /// Blur prevention is ALWAYS active so test tabs never register a window.blur event.
 pub fn bring_to_front_without_focus(win: &tauri::WebviewWindow) {
-    crate::resilience::USER_HIDDEN.store(false, Ordering::Relaxed);
+    let restored_coords = crate::resilience::consume_offscreen_restore_coords_if_hidden();
     #[cfg(target_os = "macos")]
     {
+        let _ = restored_coords;
         use std::ffi::c_void;
         extern "C" {
             fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
@@ -242,12 +243,27 @@ pub fn bring_to_front_without_focus(win: &tauri::WebviewWindow) {
                 let hwnd = HWND(h.0 as *mut _);
                 // SW_SHOWNOACTIVATE (4): Displays window without activating it.
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                let _ = SetWindowPos(
-                    hwnd,
-                    HWND_TOPMOST,
-                    0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                );
+                if let Some((rx, ry)) = restored_coords {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND_TOPMOST,
+                        rx,
+                        ry,
+                        0,
+                        0,
+                        SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    );
+                } else {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND_TOPMOST,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    );
+                }
             }
         }
     }
@@ -266,6 +282,7 @@ pub fn toggle_visibility_without_focus(app: &tauri::AppHandle) {
         {
             if crate::STEALTH_ENABLED.load(Ordering::Relaxed) {
                 crate::toggle_window_offscreen_win32(&win);
+                crate::resilience::session::update_window_state_in_snapshot(app);
                 return;
             }
         }
@@ -286,6 +303,7 @@ pub fn toggle_visibility_without_focus(app: &tauri::AppHandle) {
                 crate::reapply_stealth_after_show(&win);
             }
         }
+        crate::resilience::session::update_window_state_in_snapshot(app);
     }
 }
 

@@ -210,7 +210,6 @@ fn spawn_worker_on_desktop(desktop_name: &str, config_dir: & std::path::Path) ->
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let wv2_dir = config_dir.join("WebView2_DeskWorker");
     let _ = std::fs::create_dir_all(&wv2_dir);
-    std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &wv2_dir);
 
     let mut cmd_line: Vec<u16> = format!(
         "\"{}\" --gui --restore-session --desktop-worker \"{}\"\0",
@@ -442,6 +441,8 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
             std::thread::sleep(Duration::from_millis(250));
 
             if super::quit_was_authorized() {
+                crate::stealth_hotkey::teardown_stealth_hotkeys();
+                app.exit(0);
                 break;
             }
             if !super::enabled() || super::USER_HIDDEN.load(Ordering::Relaxed) {
