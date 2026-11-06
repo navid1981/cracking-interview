@@ -23,6 +23,7 @@ pub static SAVED_X: AtomicI32 = AtomicI32::new(0);
 pub static SAVED_Y: AtomicI32 = AtomicI32::new(0);
 pub static LAST_USER_INTERACTION_MS: AtomicU64 = AtomicU64::new(0);
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OffscreenToggleAction {
     RestoreTo { x: i32, y: i32 },
@@ -49,6 +50,7 @@ pub fn consume_offscreen_restore_coords_if_hidden() -> Option<(i32, i32)> {
 /// Blocking stops the hide/show tug-of-war that makes the window flicker and
 /// leaves the WebView painting white; the user's own hide and an authorized
 /// quit are always allowed through.
+#[allow(dead_code)]
 pub fn should_block_external_hide(user_hidden: bool, authorized_quit: bool, enabled: bool) -> bool {
     enabled && !user_hidden && !authorized_quit
 }
@@ -60,6 +62,7 @@ pub fn should_block_external_hide(user_hidden: bool, authorized_quit: bool, enab
 /// them again, leaving a permanent white window with a live DOM. The
 /// self-healer re-shows exactly these classes. Host containers
 /// (`Chrome_WidgetWin_0`, `WRY_WEBVIEW`) are managed by wry/Chromium.
+#[allow(dead_code)]
 pub fn is_webview_render_surface_class(class: &str) -> bool {
     matches!(
         class,
@@ -69,6 +72,7 @@ pub fn is_webview_render_surface_class(class: &str) -> bool {
 
 /// Removes the Win32 `SWP_HIDEWINDOW` (0x80) bit from `WINDOWPOS.flags` when
 /// `block` is set, leaving every other flag unchanged.
+#[allow(dead_code)]
 pub fn strip_hide_window_flag(flags: u32, block: bool) -> u32 {
     if block {
         flags & !0x80
@@ -77,6 +81,7 @@ pub fn strip_hide_window_flag(flags: u32, block: bool) -> u32 {
     }
 }
 
+#[allow(dead_code)]
 pub fn compute_offscreen_toggle(current_x: i32, current_y: i32) -> OffscreenToggleAction {
     if USER_HIDDEN.load(Ordering::SeqCst) {
         USER_HIDDEN.store(false, Ordering::SeqCst);
@@ -158,6 +163,7 @@ pub fn record_frontend_heartbeat() {
 
 /// True when a frontend that has booted at least once has stopped beating
 /// for longer than `threshold_ms` (WebView renderer / JS presumed dead).
+#[allow(dead_code)]
 pub fn frontend_heartbeat_is_stale(last_ms: u64, now_ms: u64, threshold_ms: u64) -> bool {
     last_ms != 0 && now_ms > last_ms && now_ms - last_ms > threshold_ms
 }
@@ -198,6 +204,7 @@ impl ResilienceConfig {
         }
     }
 
+    #[allow(dead_code)]
     pub fn should_apply_process_dacl(&self) -> bool {
         self.enabled && self.harden_process_dacl
     }
@@ -332,15 +339,44 @@ pub fn should_yield_to_assessment(app: &tauri::AppHandle) -> bool {
     }
 }
 
-/// Pure yield decision: yield when yielding is enabled and either an AAC
-/// assessment session (`assessmentagent`) or SEB itself (legacy kiosk mode,
-/// where SEB terminates apps directly) is present on macOS.
+/// Pure yield decision:
+/// - In background polling (`on_termination_request == false`), yield ONLY if SEB
+///   itself (`SafeExamBrowser` / `SEBVerificator`) is actively running. We must NOT
+///   yield on background polling just because `/usr/libexec/assessmentagent` is alive,
+///   because macOS keeps `assessmentagent` running as an idle launchd daemon even when
+///   no `AEAssessmentSession` is active.
+/// - When an actual termination request arrives (`on_termination_request == true`,
+///   via `ExitRequested` or `SIGTERM`), yield if either `assessmentagent` or SEB is present.
 pub fn should_yield_to_lockdown(
     yield_enabled: bool,
     assessment_active: bool,
     seb_active: bool,
 ) -> bool {
     yield_enabled && (assessment_active || seb_active)
+}
+
+pub fn should_proactively_yield_to_seb(app: &tauri::AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let dir = app
+            .path()
+            .app_config_dir()
+            .ok()
+            .or_else(get_config_dir);
+        let yield_cfg = dir
+            .as_ref()
+            .map(|d| ResilienceConfig::load_from_dir(d).yield_to_assessment)
+            .unwrap_or(true);
+        if !yield_cfg {
+            return false;
+        }
+        should_yield_to_lockdown(yield_cfg, false, is_macos_seb_active())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        false
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -476,6 +512,7 @@ pub fn validate_external_http_url(raw: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
+#[allow(dead_code)]
 pub fn extract_exe_from_command_template(cmd: &str) -> Option<String> {
     let trimmed = cmd.trim();
     if trimmed.is_empty() {
@@ -496,6 +533,7 @@ pub fn extract_exe_from_command_template(cmd: &str) -> Option<String> {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopSwitchAction {
     NoOp,
@@ -504,6 +542,7 @@ pub enum DesktopSwitchAction {
     ReturnToDefault { terminate_worker: bool },
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct DesktopSwitchState {
     pub active_custom_desktop: Option<String>,
@@ -512,6 +551,7 @@ pub struct DesktopSwitchState {
     pub access_denied_logged: bool,
 }
 
+#[allow(dead_code)]
 impl DesktopSwitchState {
     pub fn on_poll(
         &mut self,

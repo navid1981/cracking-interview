@@ -87,9 +87,9 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
             lockdown_check_counter += 1;
             if lockdown_check_counter >= 10 {
                 lockdown_check_counter = 0;
-                if super::should_yield_to_assessment(&app) {
+                if super::should_proactively_yield_to_seb(&app) {
                     super::log_event(
-                        "Detected macOS lockdown (AAC/SEB); yielding for post-lockdown recovery",
+                        "Detected macOS SEB lockdown; yielding for post-lockdown recovery",
                     );
                     super::mark_killed_by_os(&app);
                     crate::stealth_hotkey::teardown_stealth_hotkeys();
