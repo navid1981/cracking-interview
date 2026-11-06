@@ -1,46 +1,32 @@
-[2026-11-06T10:21:06.505600300+00:00] [pid=9976] Guardian supervisor started
-[2026-11-06T10:21:07.328998+00:00] [pid=13392] Installed window-proc hide-protection subclass
-[2026-11-06T10:21:07.343776300+00:00] [pid=13392] [webview-diag] page-load Started url=http://tauri.localhost/
-[2026-11-06T10:21:07.690383200+00:00] [pid=13392] [webview-diag] page-load Finished url=http://tauri.localhost/
-[2026-11-06T10:21:07.694168600+00:00] [pid=13392] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
-[2026-11-06T10:21:07.730997800+00:00] [pid=13392] [webview-diag] frontend IPC alive: get_session_snapshot called
-[2026-11-06T10:21:28.760121+00:00] [pid=9976] Detected Win32 desktop switch -> 'ZGMuifTYxVQIkpzE'; spawning shadow worker
-[2026-11-06T10:21:28.767352500+00:00] [pid=9976] Spawned desktop worker (PID=26244) on WinSta0\ZGMuifTYxVQIkpzE
-[2026-11-06T10:21:28.782927500+00:00] [pid=26244] [webview-diag] desktop worker: WebView2 software rendering forced (--disable-gpu)
-[2026-11-06T10:21:29.534817100+00:00] [pid=26244] Restored window geometry from session-snapshot.json
-[2026-11-06T10:21:29.536473+00:00] [pid=26244] Installed window-proc hide-protection subclass
-[2026-11-06T10:21:29.551190600+00:00] [pid=26244] [webview-diag] page-load Started url=http://tauri.localhost/
-[2026-11-06T10:21:29.890907800+00:00] [pid=26244] [webview-diag] page-load Finished url=http://tauri.localhost/
-[2026-11-06T10:21:29.894033300+00:00] [pid=26244] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
-[2026-11-06T10:21:29.930797100+00:00] [pid=26244] [webview-diag] frontend IPC alive: get_session_snapshot called
-[2026-11-06T10:21:34.718293500+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:21:34.719154900+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:21:40.737143300+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:21:40.737958+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:21:41.094889500+00:00] [pid=9976] OpenInputDesktop denied access to active desktop; standing by for return to Default
-[2026-11-06T10:21:44.157517+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:21:44.158219600+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:21:46.444151800+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:21:46.444908500+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:21:47.407287400+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:21:47.407938300+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:21:50.558406400+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:21:50.559041500+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:21:53.764628400+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:21:53.765335400+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:21:56.940469400+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:21:56.940970200+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:22:00.202456100+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:22:00.203278100+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:22:03.372039500+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:22:03.372515300+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:22:06.511077+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:22:06.511623300+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:22:09.687694700+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:22:09.688619+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:22:12.954098400+00:00] [pid=26244] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-06T10:22:12.954734800+00:00] [pid=26244] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-06T10:22:14.482298700+00:00] [pid=9976] Active input desktop returned to Default; shadow worker cleaned up
-[2026-11-06T10:22:16.867849600+00:00] [pid=13392] Blocked external SC_CLOSE via window-proc subclass
-[2026-11-06T10:22:23.860384400+00:00] [pid=13392] User authorized application quit
-[2026-11-06T10:22:23.885468700+00:00] [pid=9976] Guardian observed authorized quit; exiting cleanly
+[2026-11-06T10:38:58.359233800+00:00] [pid=29868] Guardian supervisor started
+[2026-11-06T10:38:59.189031200+00:00] [pid=18332] Installed window-proc hide-protection subclass
+[2026-11-06T10:38:59.206883700+00:00] [pid=18332] [webview-diag] page-load Started url=http://tauri.localhost/
+[2026-11-06T10:38:59.580514800+00:00] [pid=18332] [webview-diag] page-load Finished url=http://tauri.localhost/
+[2026-11-06T10:38:59.584273800+00:00] [pid=18332] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
+[2026-11-06T10:38:59.603443200+00:00] [pid=18332] [webview-diag] frontend IPC alive: get_session_snapshot called
+[2026-11-06T10:39:11.612214700+00:00] [pid=29868] Detected Win32 desktop switch -> 'SwttnZWmFulKrX'; spawning shadow worker
+[2026-11-06T10:39:11.618560600+00:00] [pid=29868] Spawned desktop worker (PID=14872) on WinSta0\SwttnZWmFulKrX
+[2026-11-06T10:39:11.632034400+00:00] [pid=14872] [webview-diag] desktop worker started (WebView2 args via tauri.conf additionalBrowserArgs)
+[2026-11-06T10:39:12.303198500+00:00] [pid=14872] Restored window geometry from session-snapshot.json
+[2026-11-06T10:39:12.306187+00:00] [pid=14872] Installed window-proc hide-protection subclass
+[2026-11-06T10:39:12.320148100+00:00] [pid=14872] [webview-diag] page-load Started url=http://tauri.localhost/
+[2026-11-06T10:39:12.666100400+00:00] [pid=14872] [webview-diag] page-load Finished url=http://tauri.localhost/
+[2026-11-06T10:39:12.669836700+00:00] [pid=14872] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
+[2026-11-06T10:39:12.691915500+00:00] [pid=14872] [webview-diag] frontend IPC alive: get_session_snapshot called
+[2026-11-06T10:39:17.339673500+00:00] [pid=14872] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
+[2026-11-06T10:39:17.340211200+00:00] [pid=14872] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
+[2026-11-06T10:39:23.388064500+00:00] [pid=14872] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
+[2026-11-06T10:39:23.388848600+00:00] [pid=14872] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
+[2026-11-06T10:39:23.553433+00:00] [pid=14872] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
+[2026-11-06T10:39:23.553991600+00:00] [pid=14872] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
+[2026-11-06T10:39:26.776070900+00:00] [pid=14872] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
+[2026-11-06T10:39:26.776803200+00:00] [pid=14872] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
+[2026-11-06T10:39:30.004316+00:00] [pid=14872] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
+[2026-11-06T10:39:30.004811700+00:00] [pid=14872] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
+[2026-11-06T10:39:33.198158800+00:00] [pid=14872] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
+[2026-11-06T10:39:33.198908900+00:00] [pid=14872] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
+[2026-11-06T10:39:36.490450200+00:00] [pid=14872] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
+[2026-11-06T10:39:36.491008100+00:00] [pid=14872] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
+[2026-11-06T10:39:38.084138300+00:00] [pid=29868] Active input desktop returned to Default; shadow worker cleaned up
+[2026-11-06T10:39:56.159253+00:00] [pid=18332] User authorized application quit
+[2026-11-06T10:39:56.186217400+00:00] [pid=29868] Guardian observed authorized quit; exiting cleanly
