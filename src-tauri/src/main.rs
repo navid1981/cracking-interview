@@ -4,7 +4,6 @@
 mod chrome;
 mod ai;
 mod screenshot;
-pub(crate) mod screenshot_win32;
 pub(crate) mod audio;
 mod transcription;
 mod documents;
