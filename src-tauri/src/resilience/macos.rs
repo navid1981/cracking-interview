@@ -185,6 +185,7 @@ pub fn set_launch_agent_enabled_in_dir(
     Ok(plist_path)
 }
 
+#[allow(dead_code)]
 pub fn set_launch_agent_enabled(enabled: bool) -> Result<(), String> {
     let home = std::env::var_os("HOME").ok_or("HOME environment variable not set")?;
     let launch_agents_dir = std::path::PathBuf::from(home)

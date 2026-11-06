@@ -1983,14 +1983,14 @@ fn main() {
             save_session_snapshot,
             get_session_snapshot,
         ])
-        .on_window_event(|window, event| {
+        .on_window_event(|_window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if resilience::enabled() && !resilience::quit_was_authorized() {
                     resilience::log_event("Blocked external CloseRequested / WM_CLOSE");
                     api.prevent_close();
                     #[cfg(target_os = "windows")]
                     if !resilience::USER_HIDDEN.load(Ordering::Relaxed) {
-                        if let Some(win) = window.app_handle().get_webview_window("main") {
+                        if let Some(win) = _window.app_handle().get_webview_window("main") {
                             stealth_hotkey::bring_to_front_without_focus(&win);
                             reapply_stealth_after_show(&win);
                         }

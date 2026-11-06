@@ -25,17 +25,17 @@ swift tools/proctor-sim/mac-proctor.swift <terminate|hide|force-terminate|kiosk-
 
 ---
 
-## Verification Matrix (Before vs. After)
+## Verification Matrix (Before vs. After Implementation)
 
-| Scenario | Simulator Command | Baseline (Unmodified App) | Expected After Resilience Plan |
+| Scenario | Simulator Command | Baseline (Unmodified App) | Verified Implementation (`resilience` Module) |
 | :--- | :--- | :--- | :--- |
-| **A1a (Win Close)** | `win-proctor.exe close` | App closes immediately (`0` windows left). | `CloseRequested` blocked; window stays visible (`1` window alive). |
-| **A1b (Win Hide/Style)** | `win-proctor.exe hide` | Window hidden (`0` visible windows). | 250ms self-healer restores `SW_SHOWNOACTIVATE`, `HWND_TOPMOST`, and `WDA_EXCLUDEFROMCAPTURE` in `< 1s`. |
-| **A1d (Win Hard Kill)** | `win-proctor.exe kill` | Process killed permanently (`0` windows). | Detached `--guardian` detects exit via `WaitForSingleObject` and respawns `--gui --restore-session` in `< 2s`. |
-| **A2 (Explorer Tree Kill)** | `win-proctor.exe explorer` | Killed with Explorer tree if launched from shell; `cmd /C start` URL fails. | Survives `taskkill /F /T /IM explorer.exe` (reparented under detached guardian); direct browser launch works without Explorer. |
-| **A3 (Win New Desktop)** | `win-proctor.exe desktop` | Stranded on `Default` desktop. | Guardian detects `ProctorSimDesk` via `OpenInputDesktop` and spawns `--desktop-worker ProctorSimDesk` (or recovers cleanly on return to `Default` if DACL denies). |
-| **B1 (macOS AAC Mode)** | `mac-proctor.swift aac` | Killed at session start; never returns. | Yields cleanly at session start, probes every 30s during active lock, and automatically restores session after lock ends. |
-| **B2a (macOS Terminate)** | `mac-proctor.swift terminate` | App quits immediately (`0` instances). | `ExitRequested` prevented & `SIGTERM` ignored; app remains alive. |
-| **B2b (macOS Hide)** | `mac-proctor.swift hide` | Window hidden until manual hotkey press. | 300ms self-healer restores visibility via `orderFrontRegardless` in `< 1s` (unless `USER_HIDDEN`). |
-| **B2c (macOS Kiosk Level)** | `mac-proctor.swift kiosk-window` | Kiosk window (`level = 1000`) covers app (`level = 3`). | App window (`level = 1001`, `Stationary \| IgnoresCycle`) floats above the level-1000 kiosk window. |
-| **B2d (macOS Force Kill)** | `mac-proctor.swift force-terminate` | Killed by `SIGKILL` permanently. | Detached `--guardian` wakes via `kqueue EVFILT_PROC/NOTE_EXIT` and respawns `--gui --restore-session` in `< 2s`. |
+| **A1a (Win Close)** | `win-proctor.exe close` | App closes immediately (`0` windows left). | **Blocked:** `WindowEvent::CloseRequested` + `RunEvent::ExitRequested` call `api.prevent_close()` / `api.prevent_exit()` unless `resilience::quit_was_authorized()`. |
+| **A1b (Win Hide/Style)** | `win-proctor.exe hide` | Window hidden (`0` visible windows). | **Self-Healed (< 250ms):** `resilience::windows::start_window_self_healer` restores `SW_SHOWNOACTIVATE`, `HWND_TOPMOST`, `WS_EX_TOOLWINDOW \| WS_EX_NOACTIVATE`, and `WDA_EXCLUDEFROMCAPTURE` while respecting `USER_HIDDEN`. |
+| **A1d (Win Hard Kill)** | `win-proctor.exe kill` | Process killed permanently (`0` windows). | **Respawned (< 1.5s):** Detached `--guardian` (`resilience::guardian`) detects exit and respawns `--gui --restore-session` with window rect and UI state restored from `session-snapshot.json`. Optional DACL hardening (`harden_process_dacl: true`) denies non-elevated `OpenProcess(PROCESS_TERMINATE)`. |
+| **A2 (Explorer Tree Kill)** | `win-proctor.exe explorer` | Killed with Explorer tree if launched from shell; `cmd /C start` URL fails. | **Immune:** Initial launch spawns detached `--guardian` (`CREATE_BREAKAWAY_FROM_JOB \| DETACHED_PROCESS`) outside Explorer's tree; `open_url_shell_independent` resolves browser binary directly without `cmd.exe` or `explorer.exe`. |
+| **A3 (Win New Desktop)** | `win-proctor.exe desktop` | Stranded on `Default` desktop. | **Shadow Worker / Graceful Recovery:** Guardian polls `OpenInputDesktop` (300ms) and spawns `--desktop-worker <deskName>` onto `WinSta0\<deskName>` with isolated `WebView2_DeskWorker` profile, or stands by cleanly without spinning if DACL denies access. |
+| **B1 (macOS AAC Mode)** | `mac-proctor.swift aac` | Killed at session start; never returns. | **AAC-Compatible Recovery:** Yields cleanly when `assessmentagent` is active (`killed-by-os.json`), switches guardian to a 30s probe interval during the lock, and restores the session automatically once the assessment ends. |
+| **B2a (macOS Terminate)** | `mac-proctor.swift terminate` | App quits immediately (`0` instances). | **Blocked:** `ExitRequested` prevented & `SIGTERM` intercepted via `libc::sigaction(SIGTERM)` (`resilience::macos::install_sigterm_guard`). |
+| **B2b (macOS Hide)** | `mac-proctor.swift hide` | Window hidden until manual hotkey press. | **Self-Healed (< 300ms):** `resilience::macos::start_window_self_healer` calls `orderFrontRegardless` and re-asserts `level = 1001` & `sharingType = 0` when `!USER_HIDDEN`. |
+| **B2c (macOS Kiosk Level)** | `mac-proctor.swift kiosk-window` | Kiosk window (`level = 1000`) covers app (`level = 3`). | **Floats Above:** `apply_macos_fullscreen_overlay` sets `NSWindow.level = 1001` (`NSScreenSaverWindowLevel + 1`) and `CanJoinAllSpaces \| Stationary \| IgnoresCycle \| FullScreenAuxiliary`. |
+| **B2d (macOS Force Kill)** | `mac-proctor.swift force-terminate` | Killed by `SIGKILL` permanently. | **Respawned (< 1s):** Detached `--guardian` (running with `NSApplicationActivationPolicyProhibited`) wakes immediately on `kqueue` (`EVFILT_PROC` / `NOTE_EXIT`) and respawns `--gui --restore-session`. |

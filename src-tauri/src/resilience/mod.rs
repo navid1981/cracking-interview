@@ -17,7 +17,9 @@ pub mod guardian;
 pub static AUTHORIZED_QUIT: AtomicBool = AtomicBool::new(false);
 pub static USER_HIDDEN: AtomicBool = AtomicBool::new(false);
 pub static KEYBOARD_INPUT_ACTIVE: AtomicBool = AtomicBool::new(false);
+#[allow(dead_code)]
 pub static SAVED_X: AtomicI32 = AtomicI32::new(0);
+#[allow(dead_code)]
 pub static SAVED_Y: AtomicI32 = AtomicI32::new(0);
 pub static LAST_USER_INTERACTION_MS: AtomicU64 = AtomicU64::new(0);
 
@@ -309,10 +311,14 @@ pub fn mark_killed_by_os(app: &tauri::AppHandle) {
 }
 
 pub fn log_event_in_dir(config_dir: &Path, msg: &str) {
+    log_event_in_dir_with_cap(config_dir, msg, MAX_LOG_BYTES);
+}
+
+pub fn log_event_in_dir_with_cap(config_dir: &Path, msg: &str, max_bytes: u64) {
     let _ = fs::create_dir_all(config_dir);
     let log_path = config_dir.join(RESILIENCE_LOG_FILE);
     if let Ok(meta) = fs::metadata(&log_path) {
-        if meta.len() >= MAX_LOG_BYTES {
+        if meta.len() >= max_bytes {
             let backup_path = config_dir.join(RESILIENCE_LOG_BACKUP_FILE);
             let _ = fs::rename(&log_path, &backup_path);
         }
@@ -401,12 +407,12 @@ impl DesktopSwitchState {
                 DesktopSwitchAction::NoOp
             }
             Some(name) if name.eq_ignore_ascii_case("Default") => {
-                let was_Away = self.active_custom_desktop.is_some() || self.access_denied_logged;
+                let was_away = self.active_custom_desktop.is_some() || self.access_denied_logged;
                 self.active_custom_desktop = None;
                 self.worker_spawned_for = None;
                 self.blocked_desktop = None;
                 self.access_denied_logged = false;
-                if was_Away {
+                if was_away {
                     DesktopSwitchAction::ReturnToDefault {
                         terminate_worker: worker_alive,
                     }
@@ -616,5 +622,24 @@ mod tests {
             macos_launch_agent_enabled: false,
         };
         assert!(both_on.should_apply_process_dacl());
+    }
+
+    #[test]
+    fn test_log_rotation_rotates_once_at_cap() {
+        let dir = temp_test_dir("logrot");
+        let log_path = dir.join(RESILIENCE_LOG_FILE);
+        let backup_path = dir.join(RESILIENCE_LOG_BACKUP_FILE);
+
+        // Write enough entries to exceed a 200-byte test cap
+        for i in 0..10 {
+            log_event_in_dir_with_cap(&dir, &format!("event number {} with padding", i), 200);
+        }
+
+        assert!(log_path.exists(), "Active log file should exist");
+        assert!(backup_path.exists(), "Rotated backup log file (.1) should exist");
+        let active_len = fs::metadata(&log_path).unwrap().len();
+        assert!(active_len < 250, "Active log should have been rotated");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
