@@ -126,9 +126,9 @@
     "semantic_hash": "8e734ea5be135a77623dec3091fe2439"
   },
   "src-tauri/src/main.rs": {
-    "mtime": 1793959503.0410626,
-    "seen": 1793959546.113006,
-    "ast_hash": "62de6419a298d06f10364f69af3c5f84",
+    "mtime": 1793962003.8436291,
+    "seen": 1793962057.83851,
+    "ast_hash": "5dc7e30d59ba6b0817e3d7b5a205bf72",
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot.rs": {
@@ -768,9 +768,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/windows.rs": {
-    "mtime": 1793961738.6712315,
-    "seen": 1793961770.271154,
-    "ast_hash": "953b11191f92f9e2c3f85ebfe6e6fb94",
+    "mtime": 1793962007.510491,
+    "seen": 1793962057.838573,
+    "ast_hash": "bb3e3222c7bdf1f0c7deaaa740d9f072",
     "semantic_hash": ""
   },
   "src/services/recoveryState.ts": {

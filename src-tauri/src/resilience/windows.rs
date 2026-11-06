@@ -466,6 +466,15 @@ unsafe extern "system" fn protected_window_proc(
     );
 
     match msg {
+        // [window-diag] Activation changes are rare and click-correlated;
+        // log them (never block) to timestamp focus events against white-out.
+        WM_ACTIVATE => {
+            let state = wparam.0 & 0xFFFF;
+            super::log_event(&format!(
+                "[window-diag] WM_ACTIVATE state={} (0=inactive,1=active,2=click-active)",
+                state
+            ));
+        }
         // External ShowWindow(SW_HIDE): wParam == FALSE.
         WM_SHOWWINDOW if wparam.0 == 0 && block_hide => {
             super::log_event("Blocked external hide (WM_SHOWWINDOW) via window-proc subclass");

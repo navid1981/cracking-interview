@@ -1577,6 +1577,13 @@ async fn set_window_opacity(app: tauri::AppHandle, opacity: f64) -> Result<(), S
 /// and takes keyboard focus; leaving the field restores non-activating. No-op elsewhere.
 #[tauri::command]
 async fn set_keyboard_input_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    // [window-diag] Clicking a text field flips the window from NOACTIVATE to
+    // focusable + set_focus(); log it so a white-on-click can be correlated.
+    resilience::log_event(&format!(
+        "[window-diag] set_keyboard_input_mode enabled={} stealth={}",
+        enabled,
+        STEALTH_ENABLED.load(Ordering::Relaxed)
+    ));
     resilience::KEYBOARD_INPUT_ACTIVE.store(enabled, Ordering::Relaxed);
     resilience::record_user_interaction();
     #[cfg(target_os = "windows")]
