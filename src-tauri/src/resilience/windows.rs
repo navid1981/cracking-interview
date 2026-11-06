@@ -372,7 +372,7 @@ fn resolve_windows_browser_exe() -> Option<PathBuf> {
 pub fn apply_experimental_process_dacl_hardening() {
     #[cfg(target_os = "windows")]
     unsafe {
-        use windows::core::PCWSTR;
+        use windows::Win32::Foundation::ERROR_SUCCESS;
         use windows::Win32::Security::Authorization::*;
         use windows::Win32::Security::*;
         use windows::Win32::System::Threading::GetCurrentProcess;
@@ -384,17 +384,18 @@ pub fn apply_experimental_process_dacl_hardening() {
         let mut orig_dacl: *mut ACL = std::ptr::null_mut();
         let mut sd = PSECURITY_DESCRIPTOR::default();
 
+        // windows 0.58: GetSecurityInfo takes Option<*mut T> raw out-pointers
+        // (not &mut T) and returns WIN32_ERROR (not Result).
         if GetSecurityInfo(
             hproc,
             SE_KERNEL_OBJECT,
             DACL_SECURITY_INFORMATION,
             None,
             None,
-            Some(&mut orig_dacl),
+            Some(std::ptr::addr_of_mut!(orig_dacl)),
             None,
-            &mut sd,
-        )
-        .is_err()
+            Some(std::ptr::addr_of_mut!(sd)),
+        ) != ERROR_SUCCESS
         {
             return;
         }
@@ -409,7 +410,14 @@ pub fn apply_experimental_process_dacl_hardening() {
         ea.Trustee.ptstrName = windows::core::PWSTR(current_user_wide.as_ptr() as *mut u16);
 
         let mut new_dacl: *mut ACL = std::ptr::null_mut();
-        if SetEntriesInAclW(Some(&[ea]), Some(orig_dacl), &mut new_dacl).is_ok() {
+        // windows 0.58: SetEntriesInAclW takes Option<*const ACL> for the old
+        // DACL and a raw *mut *mut ACL out-pointer; returns WIN32_ERROR.
+        if SetEntriesInAclW(
+            Some(&[ea]),
+            Some(orig_dacl as *const ACL),
+            std::ptr::addr_of_mut!(new_dacl),
+        ) == ERROR_SUCCESS
+        {
             let _ = SetSecurityInfo(
                 hproc,
                 SE_KERNEL_OBJECT,
