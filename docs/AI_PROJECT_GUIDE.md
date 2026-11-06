@@ -190,6 +190,14 @@ Component responsibilities:
   - `HotkeyAction` enum + `dispatch_action()` (emits `hotkey-*` events, handles move/visibility/quit)
   - macOS `CGEventTap` and Windows `WH_KEYBOARD_LL` hooks; matched actions are dispatched via `app.run_on_main_thread(...)` so AppKit/Win32 window calls never run on the hook thread (calling `NSWindow` APIs off the main thread caused assertion crashes)
   - Accessibility checks (`AXIsProcessTrusted` / `AXIsProcessTrustedWithOptions`), `bring_to_front_without_focus`, hook teardown
+- `src-tauri/src/resilience/` (anti-kiosk / process resilience — see "Anti-Kiosk & Process Resilience Architecture" below)
+  - `mod.rs` — shared state atomics (`AUTHORIZED_QUIT`, `USER_HIDDEN`, `KEYBOARD_INPUT_ACTIVE`, saved window coords, frontend heartbeat), `ResilienceConfig` from `resilience.json`, atomic write-temp-rename file writes, authorized-quit / killed-by-OS markers, 1 MiB log rotation (`resilience.log`), URL validation, pure decision helpers (`should_block_external_hide`, `strip_hide_window_flag`, `should_yield_to_lockdown`, `is_webview_render_surface_class`, `frontend_heartbeat_is_stale`), Windows desktop-switch state machine
+  - `guardian.rs` — `--guardian` / `--gui` / `--desktop-worker` CLI bootstrap, detached guardian spawn, `GuardianPolicy` respawn/backoff decisions, single-instance file locks (`guardian.lock` / `gui.lock` / `desktop-worker.lock`)
+  - `windows.rs` — window-proc hide-protection subclass, 250 ms self-healer (visibility / topmost / stealth ex-styles / display affinity / WebView child healing), Win32 desktop-switch monitor + shadow-worker spawn, Explorer-independent URL opening, experimental process-DACL hardening (default off)
+  - `macos.rs` — kiosk window level 1001 + collection behavior, SIGTERM guard, guardian SIGTERM ignore, 300 ms self-healer, proactive lockdown yield, LaunchAgent keepalive helpers (default off)
+  - `session.rs` — bounded non-sensitive `SessionSnapshot` (atomic save, corrupt-file quarantine, window-geometry + `user_hidden` restore)
+- `src/services/recoveryState.ts` — frontend session checkpointing (debounced snapshot emit, secret/data-URL stripping) and `fetchRestoredSessionSnapshot()`
+- `tools/proctor-sim/` — proctor attack simulators (`win-proctor.rs`, `mac-proctor.swift`) used to reproduce kiosk attacks without real proctoring software
 - `src-tauri/src/transcription.rs`
   - Deepgram WebSocket session + platform PCM capture (see "Real-time Transcription" below)
 - `src-tauri/src/documents.rs`
@@ -454,6 +462,7 @@ Setup checklist (`src-tauri/src/setup.rs`, UI in `src/components/SetupChecklist.
 
 - `get_setup_status() -> { platform, chrome_installed, accessibility_granted?, screen_recording_granted? }` — permission fields are `null` off macOS. Screen Recording uses `CGPreflightScreenCaptureAccess`, which usually reports a new grant only after an app restart
 - `request_screen_recording() -> bool`, `open_privacy_settings(pane: "accessibility" | "screen_recording")`, `restart_app()`
+- Resilience/diagnostics: `save_session_snapshot(snapshot)`, `get_session_snapshot()` (also the frontend IPC-alive probe), `report_frontend_diagnostic(message: String)`, `frontend_heartbeat()` — see "Anti-Kiosk & Process Resilience Architecture"
 - Steps: Chrome installed, Chrome connected, Accessibility (macOS), Screen & System Audio Recording (macOS, Pro only). Re-checked on window focus and via "Re-check" (no polling)
 - Shown as a main-screen card and an amber "⚠ Setup n/total" header badge only while a one-time step (install/permission) is missing; "Chrome connected" alone never triggers them because the header already has "Open Chrome". The card can be hidden for the current session (in-memory, returns next launch). Always listed as a compact 2-column grid at the bottom of Settings → App ("Setup & Permissions"; step descriptions are tooltips) so the whole App tab fits the 750px Settings modal without scrolling
 - After "Grant access" in this session, an ungranted permission shows "Open Settings" + "Restart app"
@@ -522,7 +531,7 @@ The backend registers global hotkeys on startup (customizable in Settings → Ho
    - When hotkeys fire, the window is brought forward using `bring_to_front_without_focus`:
      - macOS: Uses raw AppKit runtime to invoke `orderFrontRegardless` on the `NSWindow`. The window floats to the top without activating `NSApplication` and without becoming key window.
      - Windows: Uses `ShowWindow(hwnd, SW_SHOWNOACTIVATE)` and `SetWindowPos(hwnd, HWND_TOPMOST, ..., SWP_NOACTIVATE | SWP_SHOWWINDOW)`.
-   - The app **never** calls `set_focus()`. Chrome remains the active OS foreground window at all times, ensuring online assessment pages never fire `window.blur` or `visibilitychange`.
+   - The app avoids calling `set_focus()` for hotkey-driven shows, so Chrome remains the active OS foreground window and assessment pages don't fire `window.blur` / `visibilitychange`. **Exception:** on Windows in Stealth Mode, clicking into a text field runs `set_keyboard_input_mode` (`src/hooks/useKeyboardInputMode.ts` → Tauri command in `main.rs`), which removes `WS_EX_NOACTIVATE` and deliberately calls `win.set_focus()` so typing works; leaving the field restores non-activating mode. This focus flip is logged (`[window-diag]`) because it interacts with kiosk foreground watchers (see Resilience section).
 
 2. **OS-Level Key Event Swallowing (Stealth Mode Only):**
    - When Stealth Mode is enabled, registered hotkey combinations are intercepted and dropped at the OS level:
@@ -561,6 +570,80 @@ Notes / limitations:
 
 - This does **not** auto-detect "currently active Chrome tab"; it runs on the **tab selected in the app**.
 - If Accessibility permission is pending on macOS, the app gracefully falls back to `tauri_plugin_global_shortcut` while keeping focus-blur prevention active.
+
+## Anti-Kiosk & Process Resilience Architecture
+
+Implemented on branch `fix-closing-by-others` (Nov 2026). Goal: the app must not lose the user's session when a kiosk/proctoring tool (e.g. Safe Exam Browser, SEB) closes, hides, kills, or desktop-switches it — and must never *block* a legitimate lockdown from starting. Design split: **Windows = stay alive and visible; macOS = yield cleanly and recover after**.
+
+### Process model (both OSes)
+
+Every launch goes through `resilience::guardian::handle_early_cli_and_bootstrap()` at the top of `main()`:
+
+| Role | How started | Notes |
+|------|-------------|-------|
+| `--guardian` | Spawned detached by a normal launch (`CREATE_BREAKAWAY_FROM_JOB \| DETACHED_PROCESS` on Windows, `setsid()` on Unix), which then exits | Headless supervisor; no window. On macOS sets activation policy `2` (prohibited) and ignores `SIGTERM`. On Windows also runs the desktop-switch monitor |
+| `--gui` | Spawned/respawned by the guardian | The normal Tauri app. First spawn has no extra args; respawns add `--restore-session` |
+| `--desktop-worker <desk>` | Spawned by the guardian's Windows desktop monitor directly onto a foreign `WinSta0\<desk>` | Full GUI instance for a kiosk-created desktop; separate WebView2 profile + `desktop-worker.lock` |
+
+Single-instance file locks (`guardian.lock`, `gui.lock`, `desktop-worker.lock`) prevent duplicates. All resilience state lives in the OS config dir (`com.crackinginterview.app`):
+
+- `resilience.json` — config; defaults `{enabled: true, yield_to_assessment: true, harden_process_dacl: false, macos_launch_agent_enabled: false}`. `enabled: false` is the kill switch for the whole subsystem.
+- `authorized-quit.json` / `killed-by-os.json` — timestamped markers (600 s TTL / 2 h window) that tell the guardian *why* the GUI exited. Only the quit hotkey / quit menu may authorize a quit; `restart_app` under the guardian sets only the in-memory flag so the guardian respawns and keeps supervising.
+- `session-snapshot.json` — bounded, non-sensitive UI checkpoint (schema v1: window rect, `user_hidden`, model/template/language/mode, markdown capped 64 KiB, total ≤ 256 KiB). Written atomically (tmp + flush + rename); a corrupt file is quarantined to `session-snapshot.corrupt-<ts>.json` instead of crashing restore. Auth tokens/secrets are **never** snapshotted (frontend strips them; worker WebView2 profiles don't share logins).
+- `resilience.log` — append-only diagnostic log, rotated at 1 MiB to `resilience.log.1`. This is the primary evidence source for all kiosk debugging (see Diagnostics).
+
+`GuardianPolicy::decide` respawn rules: authorized quit → exit cleanly; healthy long run → fast respawn (500 ms) and counter reset; `killed-by-os` or repeated <2 s deaths → 30 s "lockdown probe" respawns instead of a hot loop; otherwise exponential backoff (1/2/4/8/16 s) and stand-down after repeated instant deaths. Probing matters: during a lockdown each probe GUI immediately re-yields (macOS) or is a desktop worker (Windows), so there is no visible churn.
+
+### Windows defenses (`resilience/windows.rs`, `main.rs`)
+
+1. **Close blocking.** `CloseRequested` / `ExitRequested` are prevented unless quit was authorized. Quit authorization also propagates cross-process: self-healers observe the marker and `app.exit(0)`.
+2. **Window-proc hide protection (the flicker fix).** `install_window_protect_subclass` (installed from `start_window_self_healer`, so GUI and desktop worker both get it) subclasses the Tauri/wry proc and: swallows external `WM_SHOWWINDOW` hides, strips `SWP_HIDEWINDOW` from `WM_WINDOWPOSCHANGING`, and blocks `WM_CLOSE` / `SC_CLOSE` unless authorized. The user's own hide (`USER_HIDDEN`) and authorized quits pass through. Filesystem-backed auth/config checks run only for those four messages so the UI thread stays fast. This replaced the losing strategy of re-showing after each hide (a ~2 s visible close/open flicker — SEB's `ApplicationMonitor` calls `ShowWindow(SW_HIDE)` every 2 s, verified in `seb-win-refactoring` source; note SEB treats `ShowWindow`'s "was previously visible" return as success, so it does not escalate to `Close()` → force-terminate against us).
+3. **250 ms self-healer.** Re-shows a hidden main HWND (`SW_SHOWNOACTIVATE` + `HWND_TOPMOST`), restores stripped `WS_EX_TOPMOST` and stealth ex-styles (`WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`, minus `WS_EX_APPWINDOW`), restores `WDA_EXCLUDEFROMCAPTURE (0x11)` when stealth is on, detects frontend death via heartbeat (below), logs the HWND tree on change, and **heals WebView2 render-surface children** (next item). Never acts while `USER_HIDDEN` or after authorized quit.
+4. **White-screen root cause (fixed, user-validated).** SEB's blocked `ShowWindow(SW_HIDE)` on the main window still makes Chromium hide its renderer children (`Chrome_RenderWidgetHostHWND`, `Chrome_WidgetWin_1`, `Intermediate D3D Window`) — and since the main window never actually hid, nothing ever re-shows them: a permanent white window with a live DOM/heartbeat. The healer now re-shows those classes (`is_webview_render_surface_class`) while the main window is visible and not minimized. If Chromium ever re-hides faster than the 250 ms heal, the fallback is subclassing the child HWNDs, not faster polling.
+5. **Multi-desktop (HDESK) shadow worker.** The guardian polls `OpenInputDesktop` + `UOI_NAME` every 300 ms (`DesktopSwitchState` state machine in `mod.rs`). On a switch away from `Default` it spawns `--desktop-worker` via `CreateProcessW` with `STARTUPINFOW.lpDesktop = WinSta0\<desk>`; if the desktop DACL denies access it stands by until return to `Default` instead of error-looping, and if the worker dies on the foreign desktop it does not respawn until `Default` returns. The worker gets `WEBVIEW2_USER_DATA_FOLDER=<config>/WebView2_DeskWorker` (set inside the child — setting it in the guardian would pollute its environment).
+6. **WebView2 rendering args.** `src-tauri/tauri.conf.json` sets `additionalBrowserArgs` = wry's default `--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection` **plus** `--disable-gpu --disable-gpu-compositing --disable-d3d11`. Setting this field *replaces* wry's defaults, so the feature list must stay. ⚠️ wry 0.54 completely ignores the `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` env var — a regression test asserts the config contents; don't "fix" this via env vars again.
+7. **Explorer-independent URL opening.** `open_url_shell_independent` resolves the browser from the registry `UserChoice` ProgId → `shell\open\command` executable (fallbacks: Chrome/Edge/Brave install paths) and validates http/https URLs first (`validate_external_http_url`). No `cmd /C start`, so killing `explorer.exe` doesn't break checkout/help links.
+8. **Experimental process-DACL hardening** (`apply_experimental_process_dacl_hardening`): DENY `PROCESS_TERMINATE | PROCESS_SUSPEND_RESUME` for the current user. Gated by `harden_process_dacl` (default **off**) — it can break legitimate tooling; treat as an experiment, not a defense.
+
+### macOS defenses (`resilience/macos.rs`, `mod.rs`)
+
+1. **Kiosk overlay window.** Level `1001` (`NSScreenSaverWindowLevel + 1`), collection behavior adds `Stationary | IgnoresCycle` (see `compute_kiosk_collection_behavior`), `sharingType = None` under stealth; a 300 ms self-healer re-asserts visibility (`orderFrontRegardless` via `bring_to_front_without_focus`), level, and sharing type.
+2. **SIGTERM guard.** A `sigaction(SIGTERM)` handler ignores external `SIGTERM` unless quit was authorized (`SIGINT`/`SIGQUIT` untouched for dev). The guardian separately ignores `SIGTERM` outright (its authorized-quit path is the marker file). `SIGKILL` cannot be handled — recovery is the guardian's job.
+3. **Yield-and-recover (the "Prohibited Processes" dialog fix).** SEB-mac's flow (verified in `seb-mac` source): at session start it asks matching apps to `terminate`, rechecks after **1 s**, and shows the "Prohibited Processes Are Running" dialog for survivors; entries with `strongKill` are SIGKILLed immediately, and mid-session space-switch launches are force-killed. An app **cannot** hide from this: SEB enumerates `NSWorkspace.runningApplications` + the kernel process table by bundle ID/executable, and with `detectAccessibilityApps` enabled it also auto-prohibits any app holding an Accessibility TCC grant (our event tap needs one) unless the exam admin permitted it. Therefore the GUI *yields*: `should_yield_to_assessment` (pure decision in `should_yield_to_lockdown`: config-enabled AND (`assessmentagent` active OR SEB/SEBVerificator process present)) is checked proactively by the self-healer (first check ~300 ms, then every ~3 s) and on terminate paths; the GUI marks `killed-by-os`, saves its snapshot, and exits cleanly — SEB starts with no dialog, and the guardian probe-respawns the app after the lockdown ends (SEB also relaunches apps it terminated). AAC (`AEAssessmentSession`) is OS-enforced: only admin-permitted apps may run during it, full stop.
+4. **LaunchAgent keepalive** (`com.crackinginterview.keepalive`, `KeepAlive.SuccessfulExit=false`, 2 s throttle) exists but is **off by default** (`macos_launch_agent_enabled`); the in-process guardian is the primary supervisor.
+
+### Diagnostics (read `resilience.log` first)
+
+The debugging method that cracked the Windows issues: log every boundary, then read timestamps instead of guessing. Current probes:
+
+- `[webview-diag] page-load Started/Finished` (Tauri `on_page_load`), `frontend: main.tsx evaluated`, `frontend IPC alive: get_session_snapshot called` (App calls it on mount) — proves WebView2 loaded, JS ran, IPC works.
+- Frontend (`src/main.tsx`): `console.error` is forwarded to the log and a `DiagErrorBoundary` reports React render crashes (`React render crash: …`) and paints the error instead of a white screen (React errors otherwise bypass `window.onerror` and silently unmount the root). A 3 s `frontend_heartbeat` invoke feeds `FRONTEND_HEARTBEAT_MS`; the Windows healer logs `frontend heartbeat lost` once per episode (>8 s stale, not user-hidden).
+- `[window-diag]` lines: `set_keyboard_input_mode enabled=…` (text-field focus flip), `WM_ACTIVATE state=…`, and full HWND-tree snapshots (main visibility/rect/affinity/foreground + each child's class/visibility/rect) logged on change.
+- Defense lines: `Installed window-proc hide-protection subclass`, `Blocked external hide (WM_SHOWWINDOW|SWP_HIDEWINDOW)`, `Blocked external CloseRequested / WM_CLOSE`, `Self-healed hidden HWND…`, `Self-healed hidden WebView render child HWND (…)`, macOS `Self-healed NSWindow…`, `Detected macOS lockdown (AAC/SEB); yielding…`, guardian `Spawned desktop worker (PID=…)`, `GUI exited after …; respawning in …`.
+
+Rules learned the hard way: (a) a constant-interval flicker = a hide/show fight, not a crash loop — check whether the PID changes before blaming the guardian; (b) "white but heartbeat alive" = paint/composition layer, not JS; (c) Windows-only `#[cfg]` code is **never compiled on the dev Mac** — expect Windows-build-only errors (e.g. `windows::core::BOOL` doesn't exist; it's `Win32::Foundation::BOOL`) and verify windows-0.58 signatures against the local crate source under `~/.cargo/registry/src/*/windows-0.58.0/`.
+
+### Proctor simulators (`tools/proctor-sim/`)
+
+`win-proctor.rs` (build: `rustc tools/proctor-sim/win-proctor.rs -o tools/proctor-sim/win-proctor.exe`; subcommands `close|hide|kill|explorer|desktop`) and `mac-proctor.swift` (`terminate|hide|force-terminate|kiosk-window|aac`) reproduce each attack without real proctoring software. Prefer these for regression checks; use real SEB only for final validation.
+
+### Known limitations (verified, not bugs)
+
+- **Screenshots of SEB content on Windows come back grey.** SEB sets `WDA_EXCLUDEFROMCAPTURE` on its own browser windows (`WindowExtensions.cs` in seb-win), so DWM withholds that content from every capture API; our display-screenshot feature captures SEB's grey background/cap windows instead. There is no app-level fix on stock Windows.
+- **`WDA_EXCLUDEFROMCAPTURE` is not absolute stealth.** It is honored by Windows Graphics Capture / filtered pipelines (e.g. Zoom's "advanced capture with window filtering") but legacy non-filtering capture paths can still show the window (e.g. Zoom without that mode). Don't treat the flag as a guarantee.
+- **SEB Verificator (proctor-side)** verifies the SEB installation itself (Windows: SHA-256 + cert-hash tree diff vs official references; macOS: `.seb`/`seb(s)://` handler apps + signature status, plus a quit-regular-apps sweep). We don't touch SEB's files or handlers, so it doesn't flag us; our macOS yield also triggers on the `SEBVerificator` process since a sweep + SEB launch usually follows.
+- **macOS during-exam coexistence is impossible** without the exam admin adding the app to SEB's permitted processes (in AAC mode SEB will even autostart permitted apps). The supported macOS behavior is yield-and-recover, above.
+
+### Testing the resilience subsystem
+
+```bash
+# On this Mac the sandboxed default target dir fails (zstd-sys); use the real one:
+CARGO_TARGET_DIR=/Users/nsalehvaziri/cracking-interview/src-tauri/target \
+  cargo test --manifest-path src-tauri/Cargo.toml
+npx tsc --noEmit -p tsconfig.json   # frontend type check
+```
+
+Pure decision logic is unit-tested (hide-block, yield, guardian policy, heartbeat staleness, snapshot caps/quarantine, offscreen-hide coords, WebView render classes, config contents). As of the SEB fixes: 29 passed, 1 ignored. After changing code, run `graphify update .`.
 
 ## Authentication & Subscription System
 

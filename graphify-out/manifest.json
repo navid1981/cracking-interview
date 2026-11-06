@@ -126,9 +126,9 @@
     "semantic_hash": "8e734ea5be135a77623dec3091fe2439"
   },
   "src-tauri/src/main.rs": {
-    "mtime": 1793962003.8436291,
-    "seen": 1793962057.83851,
-    "ast_hash": "5dc7e30d59ba6b0817e3d7b5a205bf72",
+    "mtime": 1793981970.399482,
+    "seen": 1793982343.100896,
+    "ast_hash": "114f5aa4a94891e838b0fffd7a6c72c8",
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot.rs": {
@@ -342,9 +342,9 @@
     "semantic_hash": ""
   },
   "docs/AI_PROJECT_GUIDE.md": {
-    "mtime": 1793951416.866,
-    "seen": 1793953209.0779252,
-    "ast_hash": "22af832e79eda075a35cfb9386962d42",
+    "mtime": 1793982329.8668141,
+    "seen": 1793982343.102081,
+    "ast_hash": "42dd73399f3e0e631913a95283c06883",
     "semantic_hash": ""
   },
   "index.html": {
@@ -939,6 +939,24 @@
     "mtime": 1793954978.138,
     "seen": 1793956578.062367,
     "ast_hash": "ac085e4b71fdb11a6d7e2faf279a3e12",
+    "semantic_hash": ""
+  },
+  "src-tauri/src/screenshot_win32.rs": {
+    "mtime": 1793982322.0201766,
+    "seen": 1793982343.100994,
+    "ast_hash": "58e24a27fc7a3bb51b3924dbad33562c",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/plans/2026-11-06-legacy-gdi-display-capture.md": {
+    "mtime": 1793981888.5228753,
+    "seen": 1793982343.102104,
+    "ast_hash": "8f1873f6f29c7bf2a5e145b76dbaa407",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/specs/2026-11-06-legacy-gdi-display-capture-design.md": {
+    "mtime": 1793981804.1258779,
+    "seen": 1793982343.102151,
+    "ast_hash": "285e38d4f90321e652fc87b8ad5db49b",
     "semantic_hash": ""
   }
 }
