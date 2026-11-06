@@ -36,6 +36,39 @@ pub struct CandidateWindowMeta {
     pub is_cloaked: bool,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct RawRgbaFrame {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// Scales a window's virtual-screen rectangle into the target monitor's physical pixel space.
+pub fn scale_rect_to_physical_monitor(
+    win_rect: RectI32,
+    mon_virtual_rect: RectI32,
+    mon_phys_w: u32,
+    mon_phys_h: u32,
+) -> RectI32 {
+    let vw = mon_virtual_rect.width().max(1) as f64;
+    let vh = mon_virtual_rect.height().max(1) as f64;
+    let scale_x = (mon_phys_w as f64) / vw;
+    let scale_y = (mon_phys_h as f64) / vh;
+
+    let rel_left = ((win_rect.left - mon_virtual_rect.left) as f64 * scale_x).round() as i32;
+    let rel_top = ((win_rect.top - mon_virtual_rect.top) as f64 * scale_y).round() as i32;
+    let rel_right = ((win_rect.right - mon_virtual_rect.left) as f64 * scale_x).round() as i32;
+    let rel_bottom = ((win_rect.bottom - mon_virtual_rect.top) as f64 * scale_y).round() as i32;
+
+    RectI32 {
+        left: rel_left,
+        top: rel_top,
+        right: rel_right.max(rel_left),
+        bottom: rel_bottom.max(rel_top),
+    }
+}
+
 /// Returns true if the 32-bit BGRA buffer has at least 1 pixel and contains
 /// any non-zero RGB channel byte (avoiding overwriting the base screen-DC image
 /// with an all-black buffer when a hardware/DRM surface rejects PrintWindow).
@@ -72,8 +105,12 @@ pub fn composite_bgra_region(
     if canvas_w == 0 || canvas_h == 0 || src_w == 0 || src_h == 0 {
         return;
     }
-    let expected_canvas_len = (canvas_w as usize).saturating_mul(canvas_h as usize).saturating_mul(4);
-    let expected_src_len = (src_w as usize).saturating_mul(src_h as usize).saturating_mul(4);
+    let expected_canvas_len = (canvas_w as usize)
+        .saturating_mul(canvas_h as usize)
+        .saturating_mul(4);
+    let expected_src_len = (src_w as usize)
+        .saturating_mul(src_h as usize)
+        .saturating_mul(4);
     if canvas.len() < expected_canvas_len || src.len() < expected_src_len {
         return;
     }
@@ -146,6 +183,616 @@ pub fn select_windows_to_composite(
 
     selected_hwnds
 }
+
+// ============================================================================
+// WIN32 LEGACY GDI IMPLEMENTATION
+// ============================================================================
+
+#[cfg(target_os = "windows")]
+mod win32_impl {
+    use super::*;
+    use std::ffi::c_void;
+    use std::mem;
+    use std::ptr;
+    use std::sync::atomic::Ordering;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, WPARAM};
+    use windows::Win32::Graphics::Gdi::{
+        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateDCW, DeleteDC, DeleteObject,
+        EnumDisplayMonitors, GetDC, GetDIBits, GetDeviceCaps, GetMonitorInfoW, GetWindowDC,
+        ReleaseDC, SelectObject, SetStretchBltMode, StretchBlt, BITMAPINFO, BITMAPINFOHEADER,
+        DIB_RGB_COLORS, GET_DEVICE_CAPS_INDEX, HDC, HMONITOR, MONITORINFOEXW, RGBQUAD, ROP_CODE,
+        SRCCOPY, STRETCH_HALFTONE,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowDisplayAffinity, GetWindowLongPtrW, GetWindowRect,
+        GetWindowThreadProcessId, IsIconic, IsWindowVisible, SendMessageTimeoutW,
+        SetWindowDisplayAffinity, GWL_EXSTYLE, SMTO_ABORTIFHUNG, WINDOW_DISPLAY_AFFINITY,
+        WS_EX_TRANSPARENT,
+    };
+
+    const CAPTUREBLT_BITS: u32 = 0x4000_0000;
+    const DESKTOPHORZRES_IDX: i32 = 118;
+    const DESKTOPVERTRES_IDX: i32 = 117;
+    const MONITORINFOF_PRIMARY_FLAG: u32 = 1;
+    const DWMWA_CLOAKED_ATTR: u32 = 14;
+    const PW_RENDERFULLCONTENT_FLAG: u32 = 0x0000_0002;
+    const WM_PRINT_MSG: u32 = 0x0317;
+    // PRF_NONCLIENT (0x02) | PRF_CLIENT (0x04) | PRF_ERASEBKGND (0x08) | PRF_CHILDREN (0x10)
+    const PRF_COMPOSITE_FLAGS: isize = 0x02 | 0x04 | 0x08 | 0x10;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn PrintWindow(hwnd: HWND, hdc_blt: HDC, n_flags: u32) -> BOOL;
+    }
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmGetWindowAttribute(
+            hwnd: HWND,
+            dw_attribute: u32,
+            pv_attribute: *mut c_void,
+            cb_attribute: u32,
+        ) -> i32;
+    }
+
+    #[derive(Clone)]
+    struct Win32MonitorTarget {
+        sz_device: [u16; 32],
+        virtual_rect: RectI32,
+        phys_width: u32,
+        phys_height: u32,
+        is_primary: bool,
+    }
+
+    extern "system" fn enum_monitors_proc(
+        h_monitor: HMONITOR,
+        _hdc: HDC,
+        _rc: *mut RECT,
+        lparam: LPARAM,
+    ) -> BOOL {
+        let list = unsafe { &mut *(lparam.0 as *mut Vec<MONITORINFOEXW>) };
+        let mut info: MONITORINFOEXW = unsafe { mem::zeroed() };
+        info.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
+        let ok = unsafe { GetMonitorInfoW(h_monitor, (&mut info as *mut MONITORINFOEXW).cast()) };
+        if ok.as_bool() {
+            list.push(info);
+        }
+        BOOL(1)
+    }
+
+    fn enumerate_monitors_win32() -> Result<Vec<Win32MonitorTarget>, String> {
+        let mut raw_monitors: Vec<MONITORINFOEXW> = Vec::new();
+        unsafe {
+            EnumDisplayMonitors(
+                HDC::default(),
+                None,
+                Some(enum_monitors_proc),
+                LPARAM(&mut raw_monitors as *mut Vec<MONITORINFOEXW> as isize),
+            )
+            .ok()
+            .map_err(|e| format!("EnumDisplayMonitors failed: {}", e))?;
+        }
+
+        let mut targets = Vec::with_capacity(raw_monitors.len());
+        for info in raw_monitors {
+            let rc = info.monitorInfo.rcMonitor;
+            let virtual_rect = RectI32 {
+                left: rc.left,
+                top: rc.top,
+                right: rc.right,
+                bottom: rc.bottom,
+            };
+            let fallback_w = virtual_rect.width().max(1) as u32;
+            let fallback_h = virtual_rect.height().max(1) as u32;
+
+            let (phys_width, phys_height) = unsafe {
+                let hdc = CreateDCW(
+                    PCWSTR(info.szDevice.as_ptr()),
+                    PCWSTR(info.szDevice.as_ptr()),
+                    PCWSTR(ptr::null()),
+                    None,
+                );
+                if !hdc.is_invalid() {
+                    let pw = GetDeviceCaps(hdc, GET_DEVICE_CAPS_INDEX(DESKTOPHORZRES_IDX));
+                    let ph = GetDeviceCaps(hdc, GET_DEVICE_CAPS_INDEX(DESKTOPVERTRES_IDX));
+                    let _ = DeleteDC(hdc);
+                    (
+                        if pw > 0 { pw as u32 } else { fallback_w },
+                        if ph > 0 { ph as u32 } else { fallback_h },
+                    )
+                } else {
+                    (fallback_w, fallback_h)
+                }
+            };
+
+            let is_primary = (info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY_FLAG) != 0;
+            targets.push(Win32MonitorTarget {
+                sz_device: info.szDevice,
+                virtual_rect,
+                phys_width,
+                phys_height,
+                is_primary,
+            });
+        }
+
+        Ok(targets)
+    }
+
+    /// RAII guard that ensures `CrackingInterview`'s own windows have `WDA_EXCLUDEFROMCAPTURE`
+    /// (`0x11`) set while the Stage 1 screen-DC `BitBlt` executes, and restores `WDA_NONE` (`0`)
+    /// on drop if Stealth Mode is currently disabled.
+    struct SelfCaptureExclusionGuard {
+        temporarily_protected_hwnds: Vec<isize>,
+    }
+
+    struct SelfWindowCollector {
+        self_pid: u32,
+        hwnds: Vec<isize>,
+    }
+
+    extern "system" fn collect_self_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let collector = unsafe { &mut *(lparam.0 as *mut SelfWindowCollector) };
+        unsafe {
+            if !IsWindowVisible(hwnd).as_bool() {
+                return BOOL(1);
+            }
+            let mut pid: u32 = 0;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid == collector.self_pid {
+                let mut affinity: u32 = 0;
+                if GetWindowDisplayAffinity(hwnd, &mut affinity).is_ok() && affinity == 0 {
+                    if SetWindowDisplayAffinity(hwnd, WINDOW_DISPLAY_AFFINITY(0x11)).is_ok() {
+                        collector.hwnds.push(hwnd.0 as isize);
+                    }
+                }
+            }
+        }
+        BOOL(1)
+    }
+
+    impl SelfCaptureExclusionGuard {
+        fn acquire() -> Self {
+            let mut collector = SelfWindowCollector {
+                self_pid: std::process::id(),
+                hwnds: Vec::new(),
+            };
+            unsafe {
+                let _ = EnumWindows(
+                    Some(collect_self_windows_proc),
+                    LPARAM(&mut collector as *mut SelfWindowCollector as isize),
+                );
+            }
+            Self {
+                temporarily_protected_hwnds: collector.hwnds,
+            }
+        }
+    }
+
+    impl Drop for SelfCaptureExclusionGuard {
+        fn drop(&mut self) {
+            if crate::STEALTH_ENABLED.load(Ordering::Relaxed) {
+                return;
+            }
+            unsafe {
+                for raw in &self.temporarily_protected_hwnds {
+                    let hwnd = HWND(*raw as *mut c_void);
+                    let _ = SetWindowDisplayAffinity(hwnd, WINDOW_DISPLAY_AFFINITY(0));
+                }
+            }
+        }
+    }
+
+    fn read_top_down_bgra(hdc: HDC, hbitmap: windows::Win32::Graphics::Gdi::HBITMAP, width: u32, height: u32) -> Result<Vec<u8>, String> {
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width as i32,
+                biHeight: -(height as i32), // Top-down DIB: no row reversal needed
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: 0, // BI_RGB
+                biSizeImage: 0,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            },
+            bmiColors: [RGBQUAD::default(); 1],
+        };
+
+        let mut buf = vec![0u8; (width as usize) * (height as usize) * 4];
+        let lines = unsafe {
+            GetDIBits(
+                hdc,
+                hbitmap,
+                0,
+                height,
+                Some(buf.as_mut_ptr() as *mut c_void),
+                &mut bmi,
+                DIB_RGB_COLORS,
+            )
+        };
+        if lines == 0 {
+            return Err("GetDIBits returned 0 scanlines".to_string());
+        }
+        Ok(buf)
+    }
+
+    /// Stage 1: Legacy GDI Screen-DC BitBlt (`SRCCOPY | CAPTUREBLT`).
+    fn capture_monitor_dc_bitblt(mon: &Win32MonitorTarget) -> Result<Vec<u8>, String> {
+        let _self_guard = SelfCaptureExclusionGuard::acquire();
+        let w = mon.phys_width as i32;
+        let h = mon.phys_height as i32;
+        let rop = ROP_CODE(SRCCOPY.0 | CAPTUREBLT_BITS);
+
+        unsafe {
+            let monitor_dc = CreateDCW(
+                PCWSTR(mon.sz_device.as_ptr()),
+                PCWSTR(mon.sz_device.as_ptr()),
+                PCWSTR(ptr::null()),
+                None,
+            );
+
+            if !monitor_dc.is_invalid() {
+                let mem_dc = CreateCompatibleDC(monitor_dc);
+                let hbmp = CreateCompatibleBitmap(monitor_dc, w, h);
+                let old_obj = SelectObject(mem_dc, hbmp);
+
+                let blt_res = BitBlt(mem_dc, 0, 0, w, h, monitor_dc, 0, 0, rop);
+                let pixels_res = if blt_res.is_ok() {
+                    read_top_down_bgra(mem_dc, hbmp, mon.phys_width, mon.phys_height)
+                } else {
+                    Err(format!("BitBlt on monitor DC failed: {:?}", blt_res.err()))
+                };
+
+                SelectObject(mem_dc, old_obj);
+                let _ = DeleteObject(hbmp);
+                let _ = DeleteDC(mem_dc);
+                let _ = DeleteDC(monitor_dc);
+
+                if let Ok(pixels) = pixels_res {
+                    return Ok(pixels);
+                }
+            }
+
+            // Fallback: Virtual-screen desktop DC (`GetDC(HWND(0))`)
+            let screen_dc = GetDC(HWND::default());
+            if screen_dc.is_invalid() {
+                return Err("Failed to acquire screen DC".to_string());
+            }
+            let mem_dc = CreateCompatibleDC(screen_dc);
+            let hbmp = CreateCompatibleBitmap(screen_dc, w, h);
+            let old_obj = SelectObject(mem_dc, hbmp);
+            let _ = SetStretchBltMode(mem_dc, STRETCH_HALFTONE);
+
+            let vw = mon.virtual_rect.width().max(1);
+            let vh = mon.virtual_rect.height().max(1);
+            let blt_ok = if vw == w && vh == h {
+                BitBlt(
+                    mem_dc,
+                    0,
+                    0,
+                    w,
+                    h,
+                    screen_dc,
+                    mon.virtual_rect.left,
+                    mon.virtual_rect.top,
+                    rop,
+                )
+                .is_ok()
+            } else {
+                StretchBlt(
+                    mem_dc,
+                    0,
+                    0,
+                    w,
+                    h,
+                    screen_dc,
+                    mon.virtual_rect.left,
+                    mon.virtual_rect.top,
+                    vw,
+                    vh,
+                    rop,
+                )
+                .as_bool()
+            };
+
+            let res = if blt_ok {
+                read_top_down_bgra(mem_dc, hbmp, mon.phys_width, mon.phys_height)
+            } else {
+                Err("Fallback virtual-screen BitBlt/StretchBlt failed".to_string())
+            };
+
+            SelectObject(mem_dc, old_obj);
+            let _ = DeleteObject(hbmp);
+            let _ = DeleteDC(mem_dc);
+            let _ = ReleaseDC(HWND::default(), screen_dc);
+            res
+        }
+    }
+
+    fn is_window_cloaked(hwnd: HWND) -> bool {
+        let mut cloaked: u32 = 0;
+        let hr = unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED_ATTR,
+                (&mut cloaked as *mut u32).cast(),
+                mem::size_of::<u32>() as u32,
+            )
+        };
+        hr == 0 && cloaked != 0
+    }
+
+    extern "system" fn enum_candidates_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let list = unsafe { &mut *(lparam.0 as *mut Vec<CandidateWindowMeta>) };
+        unsafe {
+            let is_visible = IsWindowVisible(hwnd).as_bool();
+            if !is_visible {
+                return BOOL(1);
+            }
+            let is_iconic = IsIconic(hwnd).as_bool();
+            if is_iconic {
+                return BOOL(1);
+            }
+            let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            if (ex_style & WS_EX_TRANSPARENT.0) != 0 {
+                return BOOL(1);
+            }
+
+            let mut rc = RECT::default();
+            if GetWindowRect(hwnd, &mut rc).is_err() {
+                return BOOL(1);
+            }
+
+            let mut pid: u32 = 0;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+
+            let mut affinity: u32 = 0;
+            let _ = GetWindowDisplayAffinity(hwnd, &mut affinity);
+
+            list.push(CandidateWindowMeta {
+                hwnd_id: hwnd.0 as usize,
+                pid,
+                affinity,
+                rect: RectI32 {
+                    left: rc.left,
+                    top: rc.top,
+                    right: rc.right,
+                    bottom: rc.bottom,
+                },
+                is_visible,
+                is_iconic,
+                is_cloaked: is_window_cloaked(hwnd),
+            });
+        }
+        BOOL(1)
+    }
+
+    /// Captures a single window's surface into a top-down BGRA buffer of size `(target_w, target_h)`,
+    /// trying legacy GDI window-paint methods in order until a non-blank buffer is obtained.
+    fn capture_single_window_bgra(
+        hwnd: HWND,
+        win_virtual_w: u32,
+        win_virtual_h: u32,
+        target_w: u32,
+        target_h: u32,
+    ) -> Option<Vec<u8>> {
+        if win_virtual_w == 0 || win_virtual_h == 0 || target_w == 0 || target_h == 0 {
+            return None;
+        }
+
+        unsafe {
+            let screen_dc = GetDC(HWND::default());
+            if screen_dc.is_invalid() {
+                return None;
+            }
+            let mem_dc = CreateCompatibleDC(screen_dc);
+            let hbmp = CreateCompatibleBitmap(
+                screen_dc,
+                win_virtual_w as i32,
+                win_virtual_h as i32,
+            );
+            let old_obj = SelectObject(mem_dc, hbmp);
+
+            let mut captured: Option<Vec<u8>> = None;
+
+            // Attempt 1: PrintWindow with PW_RENDERFULLCONTENT (0x02)
+            if PrintWindow(hwnd, mem_dc, PW_RENDERFULLCONTENT_FLAG).as_bool() {
+                if let Ok(buf) = read_top_down_bgra(mem_dc, hbmp, win_virtual_w, win_virtual_h) {
+                    if is_non_blank_bgra(&buf) {
+                        captured = Some(buf);
+                    }
+                }
+            }
+
+            // Attempt 2: PrintWindow with default flags (0)
+            if captured.is_none() && PrintWindow(hwnd, mem_dc, 0).as_bool() {
+                if let Ok(buf) = read_top_down_bgra(mem_dc, hbmp, win_virtual_w, win_virtual_h) {
+                    if is_non_blank_bgra(&buf) {
+                        captured = Some(buf);
+                    }
+                }
+            }
+
+            // Attempt 3: WM_PRINT (non-filtering GDI paint message)
+            if captured.is_none() {
+                let mut result_ptr: usize = 0;
+                let sent = SendMessageTimeoutW(
+                    hwnd,
+                    WM_PRINT_MSG,
+                    WPARAM(mem_dc.0 as usize),
+                    LPARAM(PRF_COMPOSITE_FLAGS),
+                    SMTO_ABORTIFHUNG,
+                    150,
+                    Some(&mut result_ptr),
+                );
+                if sent.0 != 0 {
+                    if let Ok(buf) = read_top_down_bgra(mem_dc, hbmp, win_virtual_w, win_virtual_h) {
+                        if is_non_blank_bgra(&buf) {
+                            captured = Some(buf);
+                        }
+                    }
+                }
+            }
+
+            // Attempt 4: Direct GetWindowDC + BitBlt(SRCCOPY | CAPTUREBLT)
+            if captured.is_none() {
+                let win_dc = GetWindowDC(hwnd);
+                if !win_dc.is_invalid() {
+                    let ok = BitBlt(
+                        mem_dc,
+                        0,
+                        0,
+                        win_virtual_w as i32,
+                        win_virtual_h as i32,
+                        win_dc,
+                        0,
+                        0,
+                        ROP_CODE(SRCCOPY.0 | CAPTUREBLT_BITS),
+                    )
+                    .is_ok();
+                    let _ = ReleaseDC(hwnd, win_dc);
+                    if ok {
+                        if let Ok(buf) =
+                            read_top_down_bgra(mem_dc, hbmp, win_virtual_w, win_virtual_h)
+                        {
+                            if is_non_blank_bgra(&buf) {
+                                captured = Some(buf);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If physical DPI scaling differs from logical window rect, scale the captured bitmap
+            let final_buf = match captured {
+                Some(raw_buf) if target_w != win_virtual_w || target_h != win_virtual_h => {
+                    let scaled_dc = CreateCompatibleDC(screen_dc);
+                    let scaled_bmp =
+                        CreateCompatibleBitmap(screen_dc, target_w as i32, target_h as i32);
+                    let old_scaled = SelectObject(scaled_dc, scaled_bmp);
+                    let _ = SetStretchBltMode(scaled_dc, STRETCH_HALFTONE);
+                    let ok = StretchBlt(
+                        scaled_dc,
+                        0,
+                        0,
+                        target_w as i32,
+                        target_h as i32,
+                        mem_dc,
+                        0,
+                        0,
+                        win_virtual_w as i32,
+                        win_virtual_h as i32,
+                        SRCCOPY,
+                    )
+                    .as_bool();
+                    let out = if ok {
+                        read_top_down_bgra(scaled_dc, scaled_bmp, target_w, target_h)
+                            .ok()
+                            .unwrap_or(raw_buf)
+                    } else {
+                        raw_buf
+                    };
+                    SelectObject(scaled_dc, old_scaled);
+                    let _ = DeleteObject(scaled_bmp);
+                    let _ = DeleteDC(scaled_dc);
+                    Some(out)
+                }
+                other => other,
+            };
+
+            SelectObject(mem_dc, old_obj);
+            let _ = DeleteObject(hbmp);
+            let _ = DeleteDC(mem_dc);
+            let _ = ReleaseDC(HWND::default(), screen_dc);
+
+            final_buf
+        }
+    }
+
+    pub fn get_all_displays_win32() -> Result<Vec<crate::screenshot::DisplayInfo>, String> {
+        let monitors = enumerate_monitors_win32()?;
+        Ok(monitors
+            .into_iter()
+            .enumerate()
+            .map(|(index, mon)| crate::screenshot::DisplayInfo {
+                id: index.to_string(),
+                name: format!("Display {}", index + 1),
+                width: mon.phys_width,
+                height: mon.phys_height,
+                is_main: mon.is_primary,
+            })
+            .collect())
+    }
+
+    pub fn capture_display_legacy_gdi(display_id: &str) -> Result<RawRgbaFrame, String> {
+        let index: usize = display_id
+            .parse()
+            .map_err(|_| "Invalid display ID".to_string())?;
+        let monitors = enumerate_monitors_win32()?;
+        let mon = monitors.get(index).ok_or_else(|| "Display not found".to_string())?;
+
+        // Stage 1: Legacy GDI Screen-DC BitBlt (SRCCOPY | CAPTUREBLT) with self-exclusion
+        let mut canvas_bgra = capture_monitor_dc_bitblt(mon)?;
+
+        // Stage 2: Non-filtering Z-order window composition pass for third-party affinity windows
+        let mut candidates: Vec<CandidateWindowMeta> = Vec::new();
+        unsafe {
+            let _ = EnumWindows(
+                Some(enum_candidates_proc),
+                LPARAM(&mut candidates as *mut Vec<CandidateWindowMeta> as isize),
+            );
+        }
+
+        let self_pid = std::process::id();
+        let selected_hwnds =
+            select_windows_to_composite(&candidates, self_pid, mon.virtual_rect);
+
+        for hwnd_id in selected_hwnds {
+            if let Some(meta) = candidates.iter().find(|c| c.hwnd_id == hwnd_id) {
+                let win_vw = meta.rect.width() as u32;
+                let win_vh = meta.rect.height() as u32;
+                let phys_rect = scale_rect_to_physical_monitor(
+                    meta.rect,
+                    mon.virtual_rect,
+                    mon.phys_width,
+                    mon.phys_height,
+                );
+                let target_w = phys_rect.width() as u32;
+                let target_h = phys_rect.height() as u32;
+
+                let hwnd = HWND(hwnd_id as *mut c_void);
+                if let Some(win_bgra) =
+                    capture_single_window_bgra(hwnd, win_vw, win_vh, target_w, target_h)
+                {
+                    composite_bgra_region(
+                        &mut canvas_bgra,
+                        mon.phys_width,
+                        mon.phys_height,
+                        (0, 0),
+                        &win_bgra,
+                        target_w,
+                        target_h,
+                        (phys_rect.left, phys_rect.top),
+                    );
+                }
+            }
+        }
+
+        bgra_to_rgba_in_place(&mut canvas_bgra);
+
+        Ok(RawRgbaFrame {
+            width: mon.phys_width,
+            height: mon.phys_height,
+            rgba: canvas_bgra,
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub use win32_impl::{capture_display_legacy_gdi, get_all_displays_win32};
 
 #[cfg(test)]
 mod tests {
@@ -240,5 +887,17 @@ mod tests {
         // Expected bottom-to-top painter order: first 30 (protected), then 20 (occluding normal window above it)
         let selected = select_windows_to_composite(&top_to_bottom, self_pid, monitor);
         assert_eq!(selected, vec![30, 20]);
+    }
+
+    #[test]
+    fn scale_rect_to_physical_monitor_maps_virtual_coords_to_high_dpi_physical_canvas() {
+        // Secondary monitor at (-1280, 0)..(0, 720) in logical coords, 1920x1080 physical (150% DPI)
+        let mon_virtual = RectI32 { left: -1280, top: 0, right: 0, bottom: 720 };
+        let win_virtual = RectI32 { left: -640, top: 180, right: -320, bottom: 540 };
+        let scaled = scale_rect_to_physical_monitor(win_virtual, mon_virtual, 1920, 1080);
+        assert_eq!(
+            scaled,
+            RectI32 { left: 960, top: 270, right: 1440, bottom: 810 }
+        );
     }
 }
