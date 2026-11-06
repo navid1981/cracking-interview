@@ -285,7 +285,7 @@ Frontend setting: `useScreenshot` (stored in `localStorage`)
 
 #### Text extraction details (`extract.js`)
 
-Replaced the old `document.body.innerText` (2026-10). Background, test results and rejected alternatives: `docs/EXTRACT_TEXT_ENHANCEMENT_PLAN.md`. Designed for **any** online exam (coding sites, language tests, LMS quizzes, aptitude tests, whiteboards), with no per-site code.
+Replaced the old `document.body.innerText` (2026-10). Background, test results and rejected alternatives: `superpowers/plans/EXTRACT_TEXT_ENHANCEMENT_PLAN.md`. Designed for **any** online exam (coding sites, language tests, LMS quizzes, aptitude tests, whiteboards), with no per-site code.
 
 **Core rule: extract the question, not the user's answers.** Typed values, selected options and essay drafts are never included, because they can mislead the AI and some exams pre-select a default. The one exception is code editors: their content is always included.
 
