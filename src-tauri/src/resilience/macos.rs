@@ -45,6 +45,20 @@ pub fn install_sigterm_guard() {
     }
 }
 
+/// Makes the `--guardian` process ignore SIGTERM. SEB-mac's session-start
+/// sweep enumerates *all* processes and matches the guardian's PID to our
+/// bundle ID, so an unprotected guardian can be terminated directly,
+/// orphaning the GUI. Authorized quit is unaffected: the guardian already
+/// polls the authorized-quit marker file whenever its child exits.
+pub fn install_guardian_signal_guard() {
+    unsafe {
+        let mut act: libc::sigaction = std::mem::zeroed();
+        act.sa_sigaction = libc::SIG_IGN;
+        libc::sigemptyset(&mut act.sa_mask);
+        let _ = libc::sigaction(libc::SIGTERM, &act, std::ptr::null_mut());
+    }
+}
+
 /// Spawns a 300ms macOS self-healing thread that dispatches onto the main thread to verify:
 /// 1. If `SIGTERM_INTERCEPTED` was set, logs the intercepted signal and checks if we should yield to `assessmentagent`.
 /// 2. If `!USER_HIDDEN`, verifies `ns_window.isVisible`, `ns_window.level == 1001`, and `sharingType == 0` (when stealth is enabled).
@@ -250,6 +264,22 @@ mod tests {
             libc::raise(libc::SIGTERM);
         }
         assert!(SIGTERM_INTERCEPTED.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_guardian_signal_guard_ignores_sigterm() {
+        install_guardian_signal_guard();
+        unsafe {
+            // Query current disposition: SIGTERM must now be SIG_IGN (1).
+            let mut old: libc::sigaction = std::mem::zeroed();
+            libc::sigaction(libc::SIGTERM, std::ptr::null(), &mut old);
+            assert_eq!(old.sa_sigaction, libc::SIG_IGN);
+            // Restore default so the test harness is unaffected.
+            let mut dfl: libc::sigaction = std::mem::zeroed();
+            dfl.sa_sigaction = libc::SIG_DFL;
+            libc::sigemptyset(&mut dfl.sa_mask);
+            libc::sigaction(libc::SIGTERM, &dfl, std::ptr::null_mut());
+        }
     }
 
     #[test]

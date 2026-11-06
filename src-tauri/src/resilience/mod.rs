@@ -332,21 +332,28 @@ pub fn should_yield_to_lockdown(
 #[cfg(target_os = "macos")]
 pub fn is_macos_seb_active() -> bool {
     // SEB-mac (org.safeexambrowser.SafeExamBrowser) runs as "SafeExamBrowser".
-    if let Ok(out) = std::process::Command::new("pgrep")
-        .arg("-x")
-        .arg("SafeExamBrowser")
-        .output()
-    {
-        if out.status.success() {
-            return true;
+    // "SEBVerificator" is included because a proctor running it is about to
+    // sweep regular apps and start SEB; yielding then avoids its force-quit
+    // list just the same.
+    for name in ["SafeExamBrowser", "SEBVerificator"] {
+        if let Ok(out) = std::process::Command::new("pgrep")
+            .arg("-x")
+            .arg(name)
+            .output()
+        {
+            if out.status.success() {
+                return true;
+            }
         }
-    }
-    if let Ok(out) = std::process::Command::new("pgrep")
-        .arg("-f")
-        .arg("SafeExamBrowser.app")
-        .output()
-    {
-        return out.status.success();
+        if let Ok(out) = std::process::Command::new("pgrep")
+            .arg("-f")
+            .arg(format!("{}.app", name))
+            .output()
+        {
+            if out.status.success() {
+                return true;
+            }
+        }
     }
     false
 }

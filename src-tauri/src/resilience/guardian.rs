@@ -286,6 +286,9 @@ fn run_guardian_loop(config_dir: PathBuf) {
     #[cfg(target_os = "macos")]
     {
         crate::set_macos_activation_policy(2);
+        // SEB's sweep can target this PID by bundle ID; ignore SIGTERM so the
+        // supervisor survives (authorized quit works via the marker file).
+        super::macos::install_guardian_signal_guard();
     }
 
     let Some(_guardian_lock) = InstanceLock::try_acquire_in_dir(&config_dir, "guardian.lock") else {
