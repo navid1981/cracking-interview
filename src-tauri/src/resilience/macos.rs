@@ -7,20 +7,25 @@ use tauri::Manager;
 
 pub const CAN_JOIN_ALL_SPACES: u64 = 1 << 0;
 pub const MOVE_TO_ACTIVE_SPACE: u64 = 1 << 1;
+#[allow(dead_code)]
 pub const STATIONARY: u64 = 1 << 4;
+#[allow(dead_code)]
 pub const IGNORES_CYCLE: u64 = 1 << 6;
 pub const FULL_SCREEN_PRIMARY: u64 = 1 << 7;
 pub const FULL_SCREEN_AUXILIARY: u64 = 1 << 8;
 
-/// `NSScreenSaverWindowLevel` (1000) + 1 so our overlay floats above legacy kiosk presentation windows.
-pub const KIOSK_OVERLAY_WINDOW_LEVEL: i64 = 1001;
+/// Minimum `NSWindow.level` (`NSFloatingWindowLevel = 3`; Tauri's `alwaysOnTop: true` uses `5`).
+/// Note: setting `level = 1001` or `NSWindowCollectionBehaviorStationary` breaks macOS
+/// `FullScreenAuxiliary` Space joining over full-screen apps (like maximized Chrome).
+pub const MIN_FLOATING_WINDOW_LEVEL: i64 = 3;
 
 pub static SIGTERM_INTERCEPTED: AtomicBool = AtomicBool::new(false);
 
 pub fn compute_kiosk_collection_behavior(current: u64) -> u64 {
-    (current | CAN_JOIN_ALL_SPACES | STATIONARY | IGNORES_CYCLE | FULL_SCREEN_AUXILIARY)
+    (current | CAN_JOIN_ALL_SPACES | FULL_SCREEN_AUXILIARY)
         & !MOVE_TO_ACTIVE_SPACE
         & !FULL_SCREEN_PRIMARY
+        & !STATIONARY
 }
 
 extern "C" fn sigterm_handler(_sig: libc::c_int) {
@@ -137,6 +142,8 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
                 unsafe {
                     let is_vis_sel = sel_registerName(b"isVisible\0".as_ptr() as *const _);
                     let level_sel = sel_registerName(b"level\0".as_ptr() as *const _);
+                    let behavior_sel =
+                        sel_registerName(b"collectionBehavior\0".as_ptr() as *const _);
                     let sharing_sel = sel_registerName(b"sharingType\0".as_ptr() as *const _);
 
                     let get_bool: GetBool = std::mem::transmute(objc_msgSend as *const ());
@@ -151,12 +158,18 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
                         );
                     }
 
+                    let behavior = get_u64(ns_window, behavior_sel);
+                    let want_behavior = CAN_JOIN_ALL_SPACES | FULL_SCREEN_AUXILIARY;
                     let level = get_i64(ns_window, level_sel);
-                    if level != KIOSK_OVERLAY_WINDOW_LEVEL {
+                    if (behavior & want_behavior) != want_behavior
+                        || (behavior & STATIONARY) != 0
+                        || level < MIN_FLOATING_WINDOW_LEVEL
+                    {
+                        let _ = win.set_always_on_top(true);
                         crate::apply_macos_fullscreen_overlay(&win);
                         super::log_event(&format!(
-                            "Self-healed NSWindow level {} -> {}",
-                            level, KIOSK_OVERLAY_WINDOW_LEVEL
+                            "Self-healed NSWindow fullscreen overlay (behavior={:#x}, level={})",
+                            behavior, level
                         ));
                     }
 
@@ -244,15 +257,14 @@ mod tests {
 
     #[test]
     fn test_compute_kiosk_collection_behavior_bits() {
-        let initial = MOVE_TO_ACTIVE_SPACE | FULL_SCREEN_PRIMARY;
+        let initial = MOVE_TO_ACTIVE_SPACE | FULL_SCREEN_PRIMARY | STATIONARY;
         let updated = compute_kiosk_collection_behavior(initial);
         assert_ne!(updated & CAN_JOIN_ALL_SPACES, 0);
-        assert_ne!(updated & STATIONARY, 0);
-        assert_ne!(updated & IGNORES_CYCLE, 0);
         assert_ne!(updated & FULL_SCREEN_AUXILIARY, 0);
+        assert_eq!(updated & STATIONARY, 0);
         assert_eq!(updated & MOVE_TO_ACTIVE_SPACE, 0);
         assert_eq!(updated & FULL_SCREEN_PRIMARY, 0);
-        assert_eq!(KIOSK_OVERLAY_WINDOW_LEVEL, 1001);
+        assert_eq!(MIN_FLOATING_WINDOW_LEVEL, 3);
     }
 
     #[test]
