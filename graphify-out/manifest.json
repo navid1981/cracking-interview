@@ -132,10 +132,10 @@
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot.rs": {
-    "mtime": 1768777031.728852,
-    "seen": 1791314020.859788,
-    "ast_hash": "29dceaddcbf4ed9931ceb920c306e6b1",
-    "semantic_hash": "29dceaddcbf4ed9931ceb920c306e6b1"
+    "mtime": 1793982445.6331954,
+    "seen": 1793982473.534833,
+    "ast_hash": "625ffbf46ee59ab0ef7e168ade04486f",
+    "semantic_hash": ""
   },
   "src-tauri/src/stealth_hotkey.rs": {
     "mtime": 1793953760.9211438,
@@ -942,9 +942,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot_win32.rs": {
-    "mtime": 1793982322.0201766,
-    "seen": 1793982343.100994,
-    "ast_hash": "58e24a27fc7a3bb51b3924dbad33562c",
+    "mtime": 1793982348.0185387,
+    "seen": 1793982473.534838,
+    "ast_hash": "dc29ebe7bd396353ad013193768e190c",
     "semantic_hash": ""
   },
   "docs/superpowers/plans/2026-11-06-legacy-gdi-display-capture.md": {
