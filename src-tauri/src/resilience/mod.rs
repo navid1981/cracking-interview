@@ -345,6 +345,91 @@ pub fn extract_exe_from_command_template(cmd: &str) -> Option<String> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopSwitchAction {
+    NoOp,
+    SpawnWorker { desktop_name: String },
+    StandByForDefault { reason: String },
+    ReturnToDefault { terminate_worker: bool },
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DesktopSwitchState {
+    pub active_custom_desktop: Option<String>,
+    pub worker_spawned_for: Option<String>,
+    pub blocked_desktop: Option<String>,
+    pub access_denied_logged: bool,
+}
+
+impl DesktopSwitchState {
+    pub fn on_poll(
+        &mut self,
+        observed_desktop: Option<&str>,
+        worker_alive: bool,
+    ) -> DesktopSwitchAction {
+        match observed_desktop {
+            None => {
+                // OpenInputDesktop failed (e.g., restrictive kiosk DACL or UAC secure desktop)
+                if !self.access_denied_logged {
+                    self.access_denied_logged = true;
+                    return DesktopSwitchAction::StandByForDefault {
+                        reason: "OpenInputDesktop denied access to active desktop; standing by for return to Default".to_string(),
+                    };
+                }
+                DesktopSwitchAction::NoOp
+            }
+            Some(name) if name.eq_ignore_ascii_case("Default") => {
+                let was_Away = self.active_custom_desktop.is_some() || self.access_denied_logged;
+                self.active_custom_desktop = None;
+                self.worker_spawned_for = None;
+                self.blocked_desktop = None;
+                self.access_denied_logged = false;
+                if was_Away {
+                    DesktopSwitchAction::ReturnToDefault {
+                        terminate_worker: worker_alive,
+                    }
+                } else {
+                    DesktopSwitchAction::NoOp
+                }
+            }
+            Some(name)
+                if name.eq_ignore_ascii_case("Winlogon")
+                    || name.eq_ignore_ascii_case("Disconnect") =>
+            {
+                // System lock screen or UAC prompt — never spawn onto Winlogon
+                DesktopSwitchAction::NoOp
+            }
+            Some(custom_desk) => {
+                self.access_denied_logged = false;
+                self.active_custom_desktop = Some(custom_desk.to_string());
+
+                if self.blocked_desktop.as_deref() == Some(custom_desk) {
+                    return DesktopSwitchAction::NoOp;
+                }
+
+                if self.worker_spawned_for.as_deref() == Some(custom_desk) {
+                    if worker_alive {
+                        return DesktopSwitchAction::NoOp;
+                    }
+                    // Worker exited prematurely on custom desktop -> mark blocked for this session
+                    self.blocked_desktop = Some(custom_desk.to_string());
+                    return DesktopSwitchAction::StandByForDefault {
+                        reason: format!(
+                            "Desktop worker on '{}' exited or was denied window creation; standing by for return to Default",
+                            custom_desk
+                        ),
+                    };
+                }
+
+                self.worker_spawned_for = Some(custom_desk.to_string());
+                DesktopSwitchAction::SpawnWorker {
+                    desktop_name: custom_desk.to_string(),
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,6 +518,59 @@ mod tests {
         assert_eq!(
             extract_exe_from_command_template(reg_cmd).as_deref(),
             Some(r#"C:\Program Files\Google\Chrome\Application\chrome.exe"#)
+        );
+    }
+
+    #[test]
+    fn test_desktop_switch_state_machine_spawn_block_and_return() {
+        let mut st = DesktopSwitchState::default();
+
+        // Staying on Default -> NoOp
+        assert_eq!(st.on_poll(Some("Default"), false), DesktopSwitchAction::NoOp);
+
+        // Switch to ProctorSimDesk -> SpawnWorker once
+        assert_eq!(
+            st.on_poll(Some("ProctorSimDesk"), false),
+            DesktopSwitchAction::SpawnWorker {
+                desktop_name: "ProctorSimDesk".to_string()
+            }
+        );
+
+        // Next poll while worker is alive -> NoOp
+        assert_eq!(
+            st.on_poll(Some("ProctorSimDesk"), true),
+            DesktopSwitchAction::NoOp
+        );
+
+        // If worker dies while still on ProctorSimDesk -> StandByForDefault (no infinite respawn loop)
+        match st.on_poll(Some("ProctorSimDesk"), false) {
+            DesktopSwitchAction::StandByForDefault { .. } => {}
+            other => panic!("Expected StandByForDefault when worker dies on custom desktop, got {:?}", other),
+        }
+        assert_eq!(
+            st.on_poll(Some("ProctorSimDesk"), false),
+            DesktopSwitchAction::NoOp
+        );
+
+        // Return to Default -> ReturnToDefault
+        assert_eq!(
+            st.on_poll(Some("Default"), false),
+            DesktopSwitchAction::ReturnToDefault {
+                terminate_worker: false
+            }
+        );
+
+        // OpenInputDesktop access denied (None) -> StandByForDefault once, then NoOp until Default returns
+        match st.on_poll(None, false) {
+            DesktopSwitchAction::StandByForDefault { .. } => {}
+            other => panic!("Expected StandByForDefault on access denied, got {:?}", other),
+        }
+        assert_eq!(st.on_poll(None, false), DesktopSwitchAction::NoOp);
+        assert_eq!(
+            st.on_poll(Some("Default"), false),
+            DesktopSwitchAction::ReturnToDefault {
+                terminate_worker: false
+            }
         );
     }
 }

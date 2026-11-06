@@ -195,6 +195,11 @@ pub fn handle_early_cli_and_bootstrap() {
     }
 
     // Acquire GUI or Desktop-Worker single-instance lock to prevent duplicate windows/hooks.
+    if is_desktop_worker {
+        let wv2_dir = config_dir.join("WebView2_DeskWorker");
+        let _ = fs::create_dir_all(&wv2_dir);
+        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &wv2_dir);
+    }
     let lock_name = if is_desktop_worker {
         "desktop-worker.lock"
     } else {
