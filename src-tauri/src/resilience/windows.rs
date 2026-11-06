@@ -365,12 +365,78 @@ fn resolve_windows_browser_exe() -> Option<PathBuf> {
     None
 }
 
+/// Optional experimental process-DACL hardening (Task 9, off by default unless
+/// `resilience.json` sets `"harden_process_dacl": true`).
+/// Prepends an `ACCESS_DENIED_ACE` for `PROCESS_TERMINATE | PROCESS_SUSPEND_RESUME`
+/// for `CURRENT_USER` on `GetCurrentProcess()` so non-elevated same-user monitors
+/// receive `ERROR_ACCESS_DENIED` on `OpenProcess(PROCESS_TERMINATE)`.
+pub fn apply_experimental_process_dacl_hardening() {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::core::PCWSTR;
+        use windows::Win32::Security::Authorization::*;
+        use windows::Win32::Security::*;
+        use windows::Win32::System::Threading::GetCurrentProcess;
+
+        const PROCESS_TERMINATE_MASK: u32 = 0x0001;
+        const PROCESS_SUSPEND_RESUME_MASK: u32 = 0x0800;
+
+        let hproc = GetCurrentProcess();
+        let mut orig_dacl: *mut ACL = std::ptr::null_mut();
+        let mut sd = PSECURITY_DESCRIPTOR::default();
+
+        if GetSecurityInfo(
+            hproc,
+            SE_KERNEL_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(&mut orig_dacl),
+            None,
+            &mut sd,
+        )
+        .is_err()
+        {
+            return;
+        }
+
+        let current_user_wide: Vec<u16> = "CURRENT_USER\0".encode_utf16().collect();
+        let mut ea = EXPLICIT_ACCESS_W::default();
+        ea.grfAccessPermissions = PROCESS_TERMINATE_MASK | PROCESS_SUSPEND_RESUME_MASK;
+        ea.grfAccessMode = DENY_ACCESS;
+        ea.grfInheritance = NO_INHERITANCE;
+        ea.Trustee.TrusteeForm = TRUSTEE_IS_NAME;
+        ea.Trustee.TrusteeType = TRUSTEE_IS_USER;
+        ea.Trustee.ptstrName = windows::core::PWSTR(current_user_wide.as_ptr() as *mut u16);
+
+        let mut new_dacl: *mut ACL = std::ptr::null_mut();
+        if SetEntriesInAclW(Some(&[ea]), Some(orig_dacl), &mut new_dacl).is_ok() {
+            let _ = SetSecurityInfo(
+                hproc,
+                SE_KERNEL_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                PSID::default(),
+                PSID::default(),
+                Some(new_dacl),
+                None,
+            );
+            super::log_event("Applied experimental process-DACL hardening (DENY PROCESS_TERMINATE | PROCESS_SUSPEND_RESUME)");
+        }
+    }
+}
+
 /// Spawns a 250ms background thread on Windows that inspects the main window's
 /// visibility, topmost z-order, extended styles (`WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`),
 /// and screen-capture exclusion (`WDA_EXCLUDEFROMCAPTURE = 0x11`).
 ///
 /// Never heals if `resilience::USER_HIDDEN` is true or `resilience::quit_was_authorized()`.
 pub fn start_window_self_healer(app: tauri::AppHandle) {
+    if let Some(dir) = super::get_config_dir() {
+        let cfg = super::ResilienceConfig::load_from_dir(&dir);
+        if cfg.should_apply_process_dacl() {
+            apply_experimental_process_dacl_hardening();
+        }
+    }
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(Duration::from_millis(250));

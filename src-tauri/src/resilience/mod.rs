@@ -112,6 +112,10 @@ impl ResilienceConfig {
             Err(_) => ResilienceConfig::default(),
         }
     }
+
+    pub fn should_apply_process_dacl(&self) -> bool {
+        self.enabled && self.harden_process_dacl
+    }
 }
 
 pub fn init_config_dir(dir: PathBuf) {
@@ -584,11 +588,33 @@ mod tests {
             other => panic!("Expected StandByForDefault on access denied, got {:?}", other),
         }
         assert_eq!(st.on_poll(None, false), DesktopSwitchAction::NoOp);
-        assert_eq!(
-            st.on_poll(Some("Default"), false),
-            DesktopSwitchAction::ReturnToDefault {
-                terminate_worker: false
-            }
+        assert!(
+            st.on_poll(Some("Default"), false)
+                == DesktopSwitchAction::ReturnToDefault {
+                    terminate_worker: false
+                }
         );
+    }
+
+    #[test]
+    fn test_should_apply_process_dacl_requires_enabled_and_flag() {
+        let default_cfg = ResilienceConfig::default();
+        assert!(!default_cfg.should_apply_process_dacl());
+
+        let flag_only_but_disabled = ResilienceConfig {
+            enabled: false,
+            yield_to_assessment: true,
+            harden_process_dacl: true,
+            macos_launch_agent_enabled: false,
+        };
+        assert!(!flag_only_but_disabled.should_apply_process_dacl());
+
+        let both_on = ResilienceConfig {
+            enabled: true,
+            yield_to_assessment: true,
+            harden_process_dacl: true,
+            macos_launch_agent_enabled: false,
+        };
+        assert!(both_on.should_apply_process_dacl());
     }
 }
