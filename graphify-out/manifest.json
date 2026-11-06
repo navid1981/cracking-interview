@@ -840,9 +840,9 @@
     "semantic_hash": ""
   },
   "tools/proctor-sim/mac-proctor.swift": {
-    "mtime": 1793989092.1906354,
-    "seen": 1793989483.78034,
-    "ast_hash": "d2d0385f97decdddc68453a8bfe17cf9",
+    "mtime": 1793993321.0641737,
+    "seen": 1793993355.2634501,
+    "ast_hash": "bf84d9828fecffff58c4d927f302cd0f",
     "semantic_hash": ""
   },
   "tools/proctor-sim/win-proctor.rs": {
@@ -930,9 +930,9 @@
     "semantic_hash": ""
   },
   "tools/proctor-sim/README.md": {
-    "mtime": 1793989092.190354,
-    "seen": 1793989483.7809532,
-    "ast_hash": "c6e2fe5b3ba51506cd6aa3c6b17db54f",
+    "mtime": 1793993336.631701,
+    "seen": 1793993355.264019,
+    "ast_hash": "54ae76ca23741fee161af9d7dd4e7893",
     "semantic_hash": ""
   },
   "docs/superpowers/plans/test.md": {

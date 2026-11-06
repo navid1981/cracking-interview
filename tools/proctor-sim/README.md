@@ -23,6 +23,18 @@ Run directly via `swift`:
 swift tools/proctor-sim/mac-proctor.swift <terminate|hide|force-terminate|kiosk-window|aac>
 ```
 
+> **`force-terminate` sends a real `SIGKILL` via `kill(2)`** and verifies death in the
+> process table (`sysctl KERN_PROC_PID`, zombies count as dead). It does *not* use
+> `NSRunningApplication.forceTerminate()`, which only *requests* termination through
+> LaunchServices — for processes not launched by LaunchServices (e.g. a `cargo run` dev
+> binary) it returns `true` yet delivers no SIGKILL at all (the target merely receives a
+> polite, handleable SIGTERM), and `NSWorkspace` keeps reporting the dead PID as alive.
+> Note the sim SIGKILLs **every** matching instance (GUI + guardian, plus the parked dev
+> bootstrap under `tauri dev`): a whole-tree SIGKILL leaves nothing alive to respawn
+> (the documented limit — only the opt-in LaunchAgent, `macos_launch_agent_enabled`,
+> backstops that). To verify guardian respawn after a hard kill, SIGKILL only the GUI:
+> `kill -9 <gui-pid>`.
+
 ---
 
 ## Verification Matrix (Before vs. After Implementation)
@@ -38,4 +50,4 @@ swift tools/proctor-sim/mac-proctor.swift <terminate|hide|force-terminate|kiosk-
 | **B2a (macOS Terminate)** | `mac-proctor.swift terminate` | App quits immediately (`0` instances). | **Blocked:** `ExitRequested` prevented & `SIGTERM` intercepted via `libc::sigaction(SIGTERM)` (`resilience::macos::install_sigterm_guard`). |
 | **B2b (macOS Hide)** | `mac-proctor.swift hide` | Window hidden until manual hotkey press. | **Self-Healed (< 300ms):** `resilience::macos::start_window_self_healer` calls `orderFrontRegardless` and re-asserts `level = 1001` & `sharingType = 0` when `!USER_HIDDEN`. |
 | **B2c (macOS Kiosk Level)** | `mac-proctor.swift kiosk-window` | Kiosk window (`level = 1000`) covers app (`level = 3`). | **Floats Above:** `apply_macos_fullscreen_overlay` sets `NSWindow.level = 1001` (`NSScreenSaverWindowLevel + 1`) and `CanJoinAllSpaces \| Stationary \| IgnoresCycle \| FullScreenAuxiliary`. |
-| **B2d (macOS Force Kill)** | `mac-proctor.swift force-terminate` | Killed by `SIGKILL` permanently. | **Respawned (< 1s):** Detached `--guardian` (running with `NSApplicationActivationPolicyProhibited`) wakes immediately on `kqueue` (`EVFILT_PROC` / `NOTE_EXIT`) and respawns `--gui --restore-session`. |
+| **B2d (macOS Force Kill)** | `mac-proctor.swift force-terminate` (real `kill(2)` SIGKILL to **all** instances) | Killed by `SIGKILL` permanently. | **GUI-only SIGKILL → Respawned (< 1s):** Detached `--guardian` (running with `NSApplicationActivationPolicyProhibited`) wakes immediately on `kqueue` (`EVFILT_PROC` / `NOTE_EXIT`) and respawns `--gui --restore-session` (verify with `kill -9 <gui-pid>`). **Whole-tree SIGKILL (the sim default) → gone until relaunch:** nothing survives to respawn; only the opt-in LaunchAgent backstops it. |
