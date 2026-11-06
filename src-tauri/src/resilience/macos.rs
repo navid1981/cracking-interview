@@ -138,6 +138,68 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
     });
 }
 
+pub const LAUNCH_AGENT_LABEL: &str = "com.crackinginterview.keepalive";
+pub const LAUNCH_AGENT_FILE_NAME: &str = "com.crackinginterview.keepalive.plist";
+
+pub fn render_launch_agent_plist(exe_path: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{label}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{exe}</string>
+        <string>--guardian</string>
+    </array>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>2</integer>
+</dict>
+</plist>
+"#,
+        label = LAUNCH_AGENT_LABEL,
+        exe = exe_path
+    )
+}
+
+pub fn set_launch_agent_enabled_in_dir(
+    launch_agents_dir: &std::path::Path,
+    exe_path: &str,
+    enabled: bool,
+) -> Result<std::path::PathBuf, String> {
+    std::fs::create_dir_all(launch_agents_dir).map_err(|e| e.to_string())?;
+    let plist_path = launch_agents_dir.join(LAUNCH_AGENT_FILE_NAME);
+    if enabled {
+        let xml = render_launch_agent_plist(exe_path);
+        super::write_atomic(&plist_path, xml.as_bytes())?;
+    } else if plist_path.exists() {
+        let _ = std::fs::remove_file(&plist_path);
+    }
+    Ok(plist_path)
+}
+
+pub fn set_launch_agent_enabled(enabled: bool) -> Result<(), String> {
+    let home = std::env::var_os("HOME").ok_or("HOME environment variable not set")?;
+    let launch_agents_dir = std::path::PathBuf::from(home)
+        .join("Library")
+        .join("LaunchAgents");
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe_str = exe.to_string_lossy();
+    let _ = set_launch_agent_enabled_in_dir(&launch_agents_dir, &exe_str, enabled)?;
+    super::log_event(&format!(
+        "macOS LaunchAgent keepalive set to enabled={}",
+        enabled
+    ));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +226,25 @@ mod tests {
             libc::raise(libc::SIGTERM);
         }
         assert!(SIGTERM_INTERCEPTED.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_launch_agent_plist_generation_and_toggle() {
+        let dir = std::env::temp_dir().join(format!("ci_la_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let exe = "/Applications/CrackingInterview.app/Contents/MacOS/cracking-interview";
+        let plist_path = set_launch_agent_enabled_in_dir(&dir, exe, true).unwrap();
+        assert!(plist_path.exists());
+        let contents = std::fs::read_to_string(&plist_path).unwrap();
+        assert!(contents.contains("com.crackinginterview.keepalive"));
+        assert!(contents.contains("--guardian"));
+        assert!(contents.contains("<key>SuccessfulExit</key>"));
+        assert!(contents.contains("<false/>"));
+
+        let _ = set_launch_agent_enabled_in_dir(&dir, exe, false).unwrap();
+        assert!(!plist_path.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

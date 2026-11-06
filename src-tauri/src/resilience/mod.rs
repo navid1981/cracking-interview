@@ -281,6 +281,24 @@ pub fn clear_killed_by_os_in_dir(config_dir: &Path) {
 
 pub fn mark_killed_by_os(app: &tauri::AppHandle) {
     if let Some(dir) = app.path().app_config_dir().ok().or_else(get_config_dir) {
+        // Persist latest window geometry into any existing session snapshot before yielding
+        if let Some(existing) = session::SessionSnapshot::load_from_dir(&dir) {
+            let _ = session::save_snapshot_with_window(app, existing);
+        } else {
+            let minimal = session::SessionSnapshot {
+                schema_version: session::SNAPSHOT_SCHEMA_VERSION,
+                saved_at_unix_ms: now_unix_ms(),
+                window_rect: None,
+                stealth_enabled: crate::STEALTH_ENABLED.load(Ordering::Relaxed),
+                user_hidden: USER_HIDDEN.load(Ordering::Relaxed),
+                selected_model: None,
+                active_template_id: None,
+                programming_language: None,
+                active_mode: None,
+                last_response_markdown: None,
+            };
+            let _ = session::save_snapshot_with_window(app, minimal);
+        }
         let _ = mark_killed_by_os_in_dir(&dir);
         log_event_in_dir(&dir, "Yielding cleanly to OS assessment session");
     }
