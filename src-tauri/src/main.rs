@@ -1987,6 +1987,7 @@ fn main() {
             save_session_snapshot,
             get_session_snapshot,
             report_frontend_diagnostic,
+            frontend_heartbeat,
         ])
         .on_page_load(|webview_window, payload| {
             // [webview-diag] Boundary probe 1: did WebView2 finish loading the
@@ -2347,6 +2348,11 @@ fn get_session_snapshot() -> Option<resilience::session::SessionSnapshot> {
     // line proves the JS bundle executed, React mounted, and Tauri IPC works.
     resilience::log_event("[webview-diag] frontend IPC alive: get_session_snapshot called");
     resilience::session::load_snapshot_if_restore_mode()
+}
+
+#[tauri::command]
+fn frontend_heartbeat() {
+    resilience::record_frontend_heartbeat();
 }
 
 #[tauri::command]

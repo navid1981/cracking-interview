@@ -564,6 +564,7 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
         }
     }
     std::thread::spawn(move || {
+        let mut heartbeat_lost_logged = false;
         loop {
             std::thread::sleep(Duration::from_millis(250));
 
@@ -571,6 +572,25 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
                 crate::stealth_hotkey::teardown_stealth_hotkeys();
                 app.exit(0);
                 break;
+            }
+
+            // [webview-diag] Detect frontend death (WebView renderer killed /
+            // JS crashed) within ~8s and log it once per episode, so a white
+            // window is timestamped against external events in the same log.
+            {
+                let last = super::FRONTEND_HEARTBEAT_MS.load(Ordering::Relaxed);
+                let stale = super::frontend_heartbeat_is_stale(last, super::now_unix_ms(), 8_000);
+                if stale && !super::USER_HIDDEN.load(Ordering::Relaxed) {
+                    if !heartbeat_lost_logged {
+                        heartbeat_lost_logged = true;
+                        super::log_event(&format!(
+                            "[webview-diag] frontend heartbeat lost: renderer/JS presumed dead (last beat {}ms ago)",
+                            super::now_unix_ms().saturating_sub(last)
+                        ));
+                    }
+                } else if !stale {
+                    heartbeat_lost_logged = false;
+                }
             }
             if !super::enabled() || super::USER_HIDDEN.load(Ordering::Relaxed) {
                 continue;

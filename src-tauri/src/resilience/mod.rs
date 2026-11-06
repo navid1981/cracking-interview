@@ -136,6 +136,18 @@ pub fn record_user_interaction() {
     LAST_USER_INTERACTION_MS.store(now_unix_ms(), Ordering::Relaxed);
 }
 
+pub static FRONTEND_HEARTBEAT_MS: AtomicU64 = AtomicU64::new(0);
+
+pub fn record_frontend_heartbeat() {
+    FRONTEND_HEARTBEAT_MS.store(now_unix_ms(), Ordering::Relaxed);
+}
+
+/// True when a frontend that has booted at least once has stopped beating
+/// for longer than `threshold_ms` (WebView renderer / JS presumed dead).
+pub fn frontend_heartbeat_is_stale(last_ms: u64, now_ms: u64, threshold_ms: u64) -> bool {
+    last_ms != 0 && now_ms > last_ms && now_ms - last_ms > threshold_ms
+}
+
 /// Atomically writes `bytes` to `target_path` via a sibling `.tmp` file + flush + rename.
 pub fn write_atomic(target_path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(parent) = target_path.parent() {
@@ -698,6 +710,18 @@ mod tests {
         assert!(active_len < 250, "Active log should have been rotated");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_frontend_heartbeat_staleness() {
+        // Never started -> not stale (still booting)
+        assert!(!frontend_heartbeat_is_stale(0, 100_000, 8_000));
+        // Recent heartbeat -> alive
+        assert!(!frontend_heartbeat_is_stale(95_000, 100_000, 8_000));
+        // Older than threshold -> stale (renderer/JS presumed dead)
+        assert!(frontend_heartbeat_is_stale(90_000, 100_000, 8_000));
+        // Clock skew (now < last) -> not stale
+        assert!(!frontend_heartbeat_is_stale(100_000, 90_000, 8_000));
     }
 
     #[test]
