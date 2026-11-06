@@ -585,6 +585,8 @@ Every launch goes through `resilience::guardian::handle_early_cli_and_bootstrap(
 | `--gui` | Spawned/respawned by the guardian | The normal Tauri app. First spawn has no extra args; respawns add `--restore-session` |
 | `--desktop-worker <desk>` | Spawned by the guardian's Windows desktop monitor directly onto a foreign `WinSta0\<desk>` | Full GUI instance for a kiosk-created desktop; separate WebView2 profile + `desktop-worker.lock` |
 
+⚠️ **Dev exception (`tauri dev`):** exiting the bootstrap process makes the Tauri CLI kill the Vite dev server, and the guardian's GUI then loads a dead dev URL — which the WebView paints as a solid white window. So in debug builds with `CI_FORCE_GUARDIAN=1` the bootstrap process *parks* instead of exiting (`should_park_after_guardian_spawn`; logs `Dev guardian mode … staying alive`). Release launches always exit immediately. Relatedly, restored window geometry is clamped onto a connected monitor (`clamp_rect_to_monitors` in `session.rs`) — a snapshot saved on a since-disconnected display must not restore the window off-screen.
+
 Single-instance file locks (`guardian.lock`, `gui.lock`, `desktop-worker.lock`) prevent duplicates. All resilience state lives in the OS config dir (`com.crackinginterview.app`):
 
 - `resilience.json` — config; defaults `{enabled: true, yield_to_assessment: true, harden_process_dacl: false, macos_launch_agent_enabled: false}`. `enabled: false` is the kill switch for the whole subsystem.

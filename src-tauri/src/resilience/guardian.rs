@@ -193,6 +193,22 @@ pub fn handle_early_cli_and_bootstrap() {
 
     // If spawning the guardian failed for any reason, fall through and run the GUI directly.
     if should_bootstrap_guardian && spawn_detached_guardian().is_ok() {
+        if should_park_after_guardian_spawn(cfg!(debug_assertions), force_guardian) {
+            // `tauri dev` terminates the Vite dev server (BeforeDevCommand) as
+            // soon as this app process exits. Exiting here would leave the
+            // guardian-spawned GUI navigating to a dead dev URL, which
+            // WKWebView/WebView2 paints as a solid white window. In dev the
+            // bootstrap process therefore parks (no window, no locks) purely
+            // to keep the CLI session — and Vite — alive; the detached
+            // guardian supervises the GUI exactly as in production.
+            super::log_event_in_dir(
+                &config_dir,
+                "Dev guardian mode (CI_FORCE_GUARDIAN=1): bootstrap process staying alive so `tauri dev` keeps the Vite dev server running",
+            );
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+            }
+        }
         std::process::exit(0);
     }
 
@@ -229,6 +245,15 @@ pub fn handle_early_cli_and_bootstrap() {
 
 fn res_enabled(cfg: &super::ResilienceConfig) -> bool {
     cfg.enabled
+}
+
+/// Whether the plain-launch bootstrap process must stay alive after spawning
+/// the detached guardian instead of exiting. Only true for dev builds with
+/// `CI_FORCE_GUARDIAN=1` (i.e. `tauri dev`), where the process exit would
+/// make the Tauri CLI kill the Vite dev server the GUI is about to load.
+/// Release builds always exit immediately after the guardian is spawned.
+pub fn should_park_after_guardian_spawn(debug_build: bool, force_guardian: bool) -> bool {
+    debug_build && force_guardian
 }
 
 fn spawn_detached_guardian() -> Result<(), String> {
@@ -541,6 +566,19 @@ mod tests {
                 mode: RespawnMode::AacProbe
             }
         );
+    }
+
+    #[test]
+    fn test_park_after_guardian_spawn_only_in_dev_forced_mode() {
+        // `tauri dev` kills the Vite dev server as soon as the app process
+        // exits, so a dev+forced bootstrap must park instead of exiting or
+        // the guardian-spawned GUI loads a dead URL and paints white.
+        assert!(should_park_after_guardian_spawn(true, true));
+        // Release launches always exit immediately (production model).
+        assert!(!should_park_after_guardian_spawn(false, true));
+        assert!(!should_park_after_guardian_spawn(false, false));
+        // Debug without the force flag never bootstraps a guardian at all.
+        assert!(!should_park_after_guardian_spawn(true, false));
     }
 
     #[test]

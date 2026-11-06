@@ -342,9 +342,9 @@
     "semantic_hash": ""
   },
   "docs/AI_PROJECT_GUIDE.md": {
-    "mtime": 1793991534.480101,
-    "seen": 1793991548.0008981,
-    "ast_hash": "0fa4414fa163118041b69665ea82d6a5",
+    "mtime": 1793992526.3462927,
+    "seen": 1793992777.49908,
+    "ast_hash": "b8c9a66787e657684a06b976008d30bb",
     "semantic_hash": ""
   },
   "index.html": {
@@ -744,9 +744,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/guardian.rs": {
-    "mtime": 1793990851.7474754,
-    "seen": 1793990898.924271,
-    "ast_hash": "4bacd785b407756311777ead0bc710c9",
+    "mtime": 1793992498.0626223,
+    "seen": 1793992777.498079,
+    "ast_hash": "23bd2bd393a49adf8a5e3e9b7bea0312",
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/macos.rs": {
@@ -762,9 +762,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/session.rs": {
-    "mtime": 1793989092.1875954,
-    "seen": 1793989483.779416,
-    "ast_hash": "600d1882676a89500ec7f4c2b18004c6",
+    "mtime": 1793992494.816027,
+    "seen": 1793992777.49811,
+    "ast_hash": "c0071ad0d55fd1deb888f4eb4ffc02ca",
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/windows.rs": {
@@ -936,9 +936,9 @@
     "semantic_hash": ""
   },
   "docs/superpowers/plans/test.md": {
-    "mtime": 1793991876.7858784,
-    "seen": 1793992105.5579772,
-    "ast_hash": "7d306eca2b7be08180939fe29f53e724",
+    "mtime": 1793992520.4790027,
+    "seen": 1793992777.499125,
+    "ast_hash": "b4f54ab54ab787c7ecf16b6960f59094",
     "semantic_hash": ""
   }
 }

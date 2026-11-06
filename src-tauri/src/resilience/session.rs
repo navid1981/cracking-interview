@@ -184,6 +184,36 @@ pub fn load_snapshot_if_restore_mode() -> Option<SessionSnapshot> {
     SessionSnapshot::load_from_dir(&dir)
 }
 
+/// Clamps a saved window rect onto the currently connected monitors.
+///
+/// A snapshot saved while an external/above-arranged display was connected
+/// would otherwise restore the window entirely off-screen after that display
+/// is disconnected (invisible window that never composites). If the rect's
+/// center is inside any connected monitor the geometry is left untouched;
+/// otherwise the rect is clamped inside the first (primary) monitor.
+pub fn clamp_rect_to_monitors(rect: &WindowRect, monitors: &[WindowRect]) -> WindowRect {
+    if monitors.is_empty() {
+        return rect.clone();
+    }
+    let cx = rect.x + rect.width as i32 / 2;
+    let cy = rect.y + rect.height as i32 / 2;
+    let on_connected = monitors.iter().any(|m| {
+        cx >= m.x && cx < m.x + m.width as i32 && cy >= m.y && cy < m.y + m.height as i32
+    });
+    if on_connected {
+        return rect.clone();
+    }
+    let m = &monitors[0];
+    let max_x = m.x + (m.width as i32 - rect.width as i32).max(0);
+    let max_y = m.y + (m.height as i32 - rect.height as i32).max(0);
+    WindowRect {
+        x: rect.x.clamp(m.x, max_x),
+        y: rect.y.clamp(m.y, max_y),
+        width: rect.width,
+        height: rect.height,
+    }
+}
+
 /// Restores window geometry and `user_hidden` state on startup when launched with `--restore-session`.
 pub fn apply_restored_window_rect(app: &tauri::AppHandle) {
     let Some(snap) = load_snapshot_if_restore_mode() else {
@@ -194,10 +224,28 @@ pub fn apply_restored_window_rect(app: &tauri::AppHandle) {
     };
     if let Some(rect) = snap.window_rect {
         if rect.x > -10000 && rect.y > -10000 {
-            super::record_onscreen_position_if_valid(rect.x, rect.y);
+            let monitors: Vec<WindowRect> = win
+                .available_monitors()
+                .unwrap_or_default()
+                .iter()
+                .map(|m| WindowRect {
+                    x: m.position().x,
+                    y: m.position().y,
+                    width: m.size().width,
+                    height: m.size().height,
+                })
+                .collect();
+            let clamped = clamp_rect_to_monitors(&rect, &monitors);
+            if clamped != rect {
+                super::log_event(&format!(
+                    "Saved window rect ({},{}) is off-screen; clamped to ({},{})",
+                    rect.x, rect.y, clamped.x, clamped.y
+                ));
+            }
+            super::record_onscreen_position_if_valid(clamped.x, clamped.y);
             let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                x: rect.x,
-                y: rect.y,
+                x: clamped.x,
+                y: clamped.y,
             }));
         }
         if rect.width >= 200 && rect.height >= 200 {
@@ -244,6 +292,29 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn test_clamp_rect_keeps_window_on_connected_monitor() {
+        let primary = WindowRect { x: 0, y: 0, width: 1920, height: 1080 };
+        let above = WindowRect { x: -443, y: -1080, width: 1920, height: 1080 };
+        let rect = WindowRect { x: -443, y: -1012, width: 550, height: 900 };
+        // Second display still connected -> geometry untouched.
+        assert_eq!(clamp_rect_to_monitors(&rect, &[primary.clone(), above]), rect);
+        // No monitors known -> untouched.
+        assert_eq!(clamp_rect_to_monitors(&rect, &[]), rect);
+        let _ = primary;
+    }
+
+    #[test]
+    fn test_clamp_rect_pulls_offscreen_window_onto_primary() {
+        let primary = WindowRect { x: 0, y: 0, width: 1920, height: 1080 };
+        // Saved when a display sat above the primary; that display is gone.
+        let rect = WindowRect { x: -443, y: -1012, width: 550, height: 900 };
+        let clamped = clamp_rect_to_monitors(&rect, &[primary]);
+        assert!(clamped.x >= 0 && clamped.x + clamped.width as i32 <= 1920, "x clamped: {:?}", clamped);
+        assert!(clamped.y >= 0 && clamped.y + clamped.height as i32 <= 1080, "y clamped: {:?}", clamped);
+        assert_eq!((clamped.width, clamped.height), (550, 900));
     }
 
     #[test]
