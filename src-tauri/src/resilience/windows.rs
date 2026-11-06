@@ -1,8 +1,11 @@
 //! Windows-specific window self-healing and resilience helpers (Scenarios A1a, A1b).
 
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tauri::Manager;
+
+pub fn start_desktop_switch_monitor(_config_dir: PathBuf) {}
 
 /// Spawns a 250ms background thread on Windows that inspects the main window's
 /// visibility, topmost z-order, extended styles (`WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`),

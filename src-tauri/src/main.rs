@@ -1683,7 +1683,7 @@ fn apply_macos_dock_hiding() {
 }
 
 #[cfg(target_os = "macos")]
-fn set_macos_activation_policy(policy: i64) {
+pub(crate) fn set_macos_activation_policy(policy: i64) {
     use std::ffi::c_void;
 
     extern "C" {
@@ -1951,6 +1951,8 @@ fn remove_windows_stealth(win: &tauri::WebviewWindow) {
 // ============================================================================
 
 fn main() {
+    resilience::guardian::handle_early_cli_and_bootstrap();
+
     #[allow(unused_mut)]
     let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
