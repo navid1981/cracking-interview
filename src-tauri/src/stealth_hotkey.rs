@@ -208,6 +208,7 @@ pub fn request_accessibility_permission() -> bool {
 /// Bring the main window to the front without stealing focus from Chrome or the active app.
 /// Blur prevention is ALWAYS active so test tabs never register a window.blur event.
 pub fn bring_to_front_without_focus(win: &tauri::WebviewWindow) {
+    crate::resilience::USER_HIDDEN.store(false, Ordering::Relaxed);
     #[cfg(target_os = "macos")]
     {
         use std::ffi::c_void;
@@ -259,6 +260,7 @@ pub fn bring_to_front_without_focus(win: &tauri::WebviewWindow) {
 
 /// Toggle window visibility without stealing focus from the active foreground app.
 pub fn toggle_visibility_without_focus(app: &tauri::AppHandle) {
+    crate::resilience::record_user_interaction();
     if let Some(win) = app.get_webview_window("main") {
         #[cfg(target_os = "windows")]
         {
@@ -270,13 +272,16 @@ pub fn toggle_visibility_without_focus(app: &tauri::AppHandle) {
 
         match win.is_visible() {
             Ok(true) => {
+                crate::resilience::USER_HIDDEN.store(true, Ordering::Relaxed);
                 let _ = win.hide();
             }
             Ok(false) => {
+                crate::resilience::USER_HIDDEN.store(false, Ordering::Relaxed);
                 bring_to_front_without_focus(&win);
                 crate::reapply_stealth_after_show(&win);
             }
             Err(_) => {
+                crate::resilience::USER_HIDDEN.store(false, Ordering::Relaxed);
                 bring_to_front_without_focus(&win);
                 crate::reapply_stealth_after_show(&win);
             }
@@ -286,6 +291,7 @@ pub fn toggle_visibility_without_focus(app: &tauri::AppHandle) {
 
 /// Dispatch a matched hotkey action safely in the background.
 pub fn dispatch_action(app: &tauri::AppHandle, action: HotkeyAction) {
+    crate::resilience::record_user_interaction();
     match action {
         HotkeyAction::SolveText => {
             if let Some(win) = app.get_webview_window("main") {
@@ -330,6 +336,7 @@ pub fn dispatch_action(app: &tauri::AppHandle, action: HotkeyAction) {
             toggle_visibility_without_focus(app);
         }
         HotkeyAction::QuitApp => {
+            crate::resilience::authorize_quit(app);
             teardown_stealth_hotkeys();
             app.exit(0);
         }

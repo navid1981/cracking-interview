@@ -9,6 +9,7 @@ mod transcription;
 mod documents;
 mod stealth_hotkey;
 mod setup;
+pub(crate) mod resilience;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -393,16 +394,10 @@ pub(crate) fn reapply_stealth_after_show(win: &tauri::WebviewWindow) {
 /// The window stays "visible" to Windows at all times so the display affinity is preserved.
 #[cfg(target_os = "windows")]
 pub(crate) fn toggle_window_offscreen_win32(win: &tauri::WebviewWindow) {
-    use std::sync::atomic::AtomicBool;
-
-    static WINDOW_HIDDEN: AtomicBool = AtomicBool::new(false);
-    static SAVED_X: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-    static SAVED_Y: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-
-    if WINDOW_HIDDEN.load(Ordering::Relaxed) {
+    if resilience::USER_HIDDEN.load(Ordering::Relaxed) {
         // Restore: move window back to saved position without stealing focus
-        let x = SAVED_X.load(Ordering::Relaxed);
-        let y = SAVED_Y.load(Ordering::Relaxed);
+        let x = resilience::SAVED_X.load(Ordering::Relaxed);
+        let y = resilience::SAVED_Y.load(Ordering::Relaxed);
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::*;
         if let Ok(h) = win.hwnd() {
@@ -416,16 +411,16 @@ pub(crate) fn toggle_window_offscreen_win32(win: &tauri::WebviewWindow) {
                 );
             }
         }
-        WINDOW_HIDDEN.store(false, Ordering::Relaxed);
+        resilience::USER_HIDDEN.store(false, Ordering::Relaxed);
         println!("🕵️ [toggle-win32] Window restored to ({}, {}) without focus", x, y);
     } else {
         // Hide: save current position, move far off-screen
         if let Ok(pos) = win.outer_position() {
-            SAVED_X.store(pos.x, Ordering::Relaxed);
-            SAVED_Y.store(pos.y, Ordering::Relaxed);
+            resilience::SAVED_X.store(pos.x, Ordering::Relaxed);
+            resilience::SAVED_Y.store(pos.y, Ordering::Relaxed);
         }
         let _ = win.set_position(tauri::PhysicalPosition::new(-30000, -30000));
-        WINDOW_HIDDEN.store(true, Ordering::Relaxed);
+        resilience::USER_HIDDEN.store(true, Ordering::Relaxed);
         println!("🕵️ [toggle-win32] Window moved off-screen (hidden)");
     }
 }
@@ -503,6 +498,8 @@ fn register_quit_app_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Result<(), 
         .on_shortcut(hotkey, move |_app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 println!("⌨️ Hotkey pressed (quit): {}", hk);
+                resilience::authorize_quit(&handle);
+                stealth_hotkey::teardown_stealth_hotkeys();
                 handle.exit(0);
             }
         })
@@ -1604,6 +1601,8 @@ async fn set_window_opacity(app: tauri::AppHandle, opacity: f64) -> Result<(), S
 /// and takes keyboard focus; leaving the field restores non-activating. No-op elsewhere.
 #[tauri::command]
 async fn set_keyboard_input_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    resilience::KEYBOARD_INPUT_ACTIVE.store(enabled, Ordering::Relaxed);
+    resilience::record_user_interaction();
     #[cfg(target_os = "windows")]
     {
         if !STEALTH_ENABLED.load(Ordering::Relaxed) {
@@ -1994,8 +1993,26 @@ fn main() {
             restart_app,
             move_window_by,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if resilience::enabled() && !resilience::quit_was_authorized() {
+                    resilience::log_event("Blocked external CloseRequested / WM_CLOSE");
+                    api.prevent_close();
+                    #[cfg(target_os = "windows")]
+                    if !resilience::USER_HIDDEN.load(Ordering::Relaxed) {
+                        if let Some(win) = window.app_handle().get_webview_window("main") {
+                            stealth_hotkey::bring_to_front_without_focus(&win);
+                            reapply_stealth_after_show(&win);
+                        }
+                    }
+                }
+            }
+        })
         .setup(|app| {
             println!("🚀 CrackingInterview starting...");
+            if let Ok(cfg_dir) = app_config_dir(app.handle()) {
+                resilience::init_config_dir(cfg_dir);
+            }
             screenshot::request_screen_recording_permission();
             
             // Pre-compile audio recorder helper in background (eliminates first-recording delay)
@@ -2064,6 +2081,9 @@ fn main() {
                 }
             }
 
+            #[cfg(target_os = "windows")]
+            resilience::windows::start_window_self_healer(app.handle().clone());
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -2077,9 +2097,25 @@ fn main() {
         app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     }
 
-    app.run(|_app_handle, event| {
-        if let tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } = event {
-            stealth_hotkey::teardown_stealth_hotkeys();
+    app.run(|app_handle, event| {
+        match event {
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                if resilience::enabled() && !resilience::quit_was_authorized() {
+                    if resilience::should_yield_to_assessment(app_handle) {
+                        resilience::mark_killed_by_os(app_handle);
+                        stealth_hotkey::teardown_stealth_hotkeys();
+                        return;
+                    }
+                    resilience::log_event("Blocked unauthorized ExitRequested");
+                    api.prevent_exit();
+                    return;
+                }
+                stealth_hotkey::teardown_stealth_hotkeys();
+            }
+            tauri::RunEvent::Exit => {
+                stealth_hotkey::teardown_stealth_hotkeys();
+            }
+            _ => {}
         }
     });
 }
@@ -2265,6 +2301,7 @@ fn open_privacy_settings(pane: String) -> Result<(), String> {
 
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) {
+    resilience::authorize_quit(&app);
     app.restart();
 }
 
