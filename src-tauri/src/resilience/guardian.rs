@@ -162,6 +162,19 @@ impl Drop for InstanceLock {
     }
 }
 
+/// Extra Chromium flags for WebView2, per process role. The desktop worker
+/// runs on a kiosk-created Win32 desktop (e.g. SEB) where the GPU process
+/// frequently cannot composite: the DOM/JS stays alive and keeps beating,
+/// yet the window paints solid white, typically from the first click/focus.
+/// Software rendering avoids that path; the normal GUI keeps GPU defaults.
+pub fn webview2_additional_args(is_desktop_worker: bool) -> Option<&'static str> {
+    if is_desktop_worker {
+        Some("--disable-gpu --disable-gpu-compositing --disable-d3d11")
+    } else {
+        None
+    }
+}
+
 /// Entry-point dispatcher called at the very start of `main()`.
 ///
 /// - If `--guardian` is in argv: runs the headless guardian loop and exits.
@@ -199,6 +212,18 @@ pub fn handle_early_cli_and_bootstrap() {
         let wv2_dir = config_dir.join("WebView2_DeskWorker");
         let _ = fs::create_dir_all(&wv2_dir);
         std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &wv2_dir);
+        // Must be set before Tauri creates WebView2 (this runs at main() start).
+        if let Some(extra_args) = webview2_additional_args(true) {
+            let combined = match std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+                Ok(existing) if !existing.trim().is_empty() => format!("{} {}", existing, extra_args),
+                _ => extra_args.to_string(),
+            };
+            std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", combined);
+            super::log_event_in_dir(
+                &config_dir,
+                "[webview-diag] desktop worker: WebView2 software rendering forced (--disable-gpu)",
+            );
+        }
     }
     let lock_name = if is_desktop_worker {
         "desktop-worker.lock"
@@ -430,6 +455,18 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn test_desktop_worker_forces_webview2_software_rendering() {
+        // On a non-default Win32 desktop (SEB), WebView2's GPU process can
+        // fail to composite: DOM stays alive but the window paints white,
+        // especially on first click/focus. Desktop workers must therefore
+        // request software rendering; the normal GUI keeps GPU acceleration.
+        let args = webview2_additional_args(true).expect("worker must set WebView2 args");
+        assert!(args.contains("--disable-gpu"), "args: {args}");
+        assert!(args.contains("--disable-gpu-compositing"), "args: {args}");
+        assert_eq!(webview2_additional_args(false), None);
     }
 
     #[test]

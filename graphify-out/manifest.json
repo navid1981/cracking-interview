@@ -744,9 +744,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/guardian.rs": {
-    "mtime": 1793952645.932299,
-    "seen": 1793953209.077395,
-    "ast_hash": "ed9bad11df11ec43a264db8bd944823b",
+    "mtime": 1793960190.9388483,
+    "seen": 1793960224.728311,
+    "ast_hash": "aa21880dfa3d78ef94c02c9dac72eca4",
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/macos.rs": {
