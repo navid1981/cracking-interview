@@ -53,6 +53,20 @@ pub fn should_block_external_hide(user_hidden: bool, authorized_quit: bool, enab
     enabled && !user_hidden && !authorized_quit
 }
 
+/// Whether a WebView2 child-window class carries the painted web surface.
+/// When SEB's `ShowWindow(SW_HIDE)` hits the main window, Chromium hides
+/// these children (renderer + DComp surface) and — because the main window
+/// itself stays visible thanks to our window-proc subclass — never shows
+/// them again, leaving a permanent white window with a live DOM. The
+/// self-healer re-shows exactly these classes. Host containers
+/// (`Chrome_WidgetWin_0`, `WRY_WEBVIEW`) are managed by wry/Chromium.
+pub fn is_webview_render_surface_class(class: &str) -> bool {
+    matches!(
+        class,
+        "Chrome_RenderWidgetHostHWND" | "Chrome_WidgetWin_1" | "Intermediate D3D Window"
+    )
+}
+
 /// Removes the Win32 `SWP_HIDEWINDOW` (0x80) bit from `WINDOWPOS.flags` when
 /// `block` is set, leaving every other flag unchanged.
 pub fn strip_hide_window_flag(flags: u32, block: bool) -> u32 {
@@ -750,6 +764,19 @@ mod tests {
         assert!(active_len < 250, "Active log should have been rotated");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_webview_render_surface_classes() {
+        // Classes that carry WebView2's painted surface and must be healed
+        // if hidden while the main window is visible.
+        assert!(is_webview_render_surface_class("Chrome_RenderWidgetHostHWND"));
+        assert!(is_webview_render_surface_class("Chrome_WidgetWin_1"));
+        assert!(is_webview_render_surface_class("Intermediate D3D Window"));
+        // Host containers stay managed by wry/Chromium themselves.
+        assert!(!is_webview_render_surface_class("Chrome_WidgetWin_0"));
+        assert!(!is_webview_render_surface_class("WRY_WEBVIEW"));
+        assert!(!is_webview_render_surface_class("Tauri Window"));
     }
 
     #[test]

@@ -745,6 +745,49 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
                         super::log_event(&format!("[window-diag] {}", snapshot));
                     }
                 }
+
+                // 5. Heal WebView2 render-surface children. SEB's blocked
+                // ShowWindow(SW_HIDE) on the main window still makes Chromium
+                // hide Chrome_RenderWidgetHostHWND / Chrome_WidgetWin_1 /
+                // Intermediate D3D Window, and nothing ever shows them again
+                // (main window stayed visible) -> permanent white window with
+                // a live DOM. Re-show them while the main window is visible
+                // and not minimized.
+                #[cfg(target_os = "windows")]
+                if !IsIconic(hwnd).as_bool() {
+                    unsafe extern "system" fn enum_hidden_render_child(
+                        child: HWND,
+                        lparam: windows::Win32::Foundation::LPARAM,
+                    ) -> windows::Win32::Foundation::BOOL {
+                        let list = &mut *(lparam.0 as *mut Vec<(HWND, String)>);
+                        if !IsWindowVisible(child).as_bool() {
+                            let mut buf = [0u16; 128];
+                            let len = GetClassNameW(child, &mut buf);
+                            let class =
+                                String::from_utf16_lossy(&buf[..len.max(0) as usize]).to_string();
+                            if super::is_webview_render_surface_class(&class) {
+                                list.push((child, class));
+                            }
+                        }
+                        windows::Win32::Foundation::BOOL(1)
+                    }
+
+                    let mut hidden: Vec<(HWND, String)> = Vec::new();
+                    let _ = EnumChildWindows(
+                        hwnd,
+                        Some(enum_hidden_render_child),
+                        windows::Win32::Foundation::LPARAM(
+                            &mut hidden as *mut Vec<(HWND, String)> as isize,
+                        ),
+                    );
+                    for (child, class) in hidden {
+                        let _ = ShowWindow(child, SW_SHOWNOACTIVATE);
+                        super::log_event(&format!(
+                            "Self-healed hidden WebView render child HWND ({}) via SW_SHOWNOACTIVATE",
+                            class
+                        ));
+                    }
+                }
             }
         }
     });
