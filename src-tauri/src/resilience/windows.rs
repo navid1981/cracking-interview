@@ -549,6 +549,62 @@ pub fn install_window_protect_subclass(app: &tauri::AppHandle) {
     }
 }
 
+/// [window-diag] One-line snapshot of the main window + its child HWND tree
+/// (WebView2 renders into children such as `Chrome_WidgetWin_0`). Logged by
+/// the self-healer whenever it changes, so a white window can be attributed
+/// to a hidden/zero-sized child, a changed affinity, or lost foreground.
+#[cfg(target_os = "windows")]
+unsafe fn build_window_diag_snapshot(
+    hwnd: windows::Win32::Foundation::HWND,
+) -> String {
+    use windows::Win32::Foundation::{LPARAM, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    unsafe extern "system" fn enum_child(
+        child: windows::Win32::Foundation::HWND,
+        lparam: LPARAM,
+    ) -> windows::core::BOOL {
+        let list = &mut *(lparam.0 as *mut Vec<String>);
+        let mut buf = [0u16; 128];
+        let len = GetClassNameW(child, &mut buf);
+        let class = String::from_utf16_lossy(&buf[..len.max(0) as usize]);
+        let mut rect: RECT = std::mem::zeroed();
+        let _ = GetWindowRect(child, &mut rect);
+        list.push(format!(
+            "{}:vis={}:{}x{}@{},{}",
+            class,
+            IsWindowVisible(child).as_bool(),
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            rect.left,
+            rect.top
+        ));
+        windows::core::BOOL(1)
+    }
+
+    let mut children: Vec<String> = Vec::new();
+    let _ = EnumChildWindows(
+        hwnd,
+        Some(enum_child),
+        LPARAM(&mut children as *mut Vec<String> as isize),
+    );
+    let mut rect: RECT = std::mem::zeroed();
+    let _ = GetWindowRect(hwnd, &mut rect);
+    let mut affinity: u32 = 0;
+    let _ = GetWindowDisplayAffinity(hwnd, &mut affinity);
+    format!(
+        "main vis={} rect={}x{}@{},{} affinity=0x{:x} foreground={} children=[{}]",
+        IsWindowVisible(hwnd).as_bool(),
+        rect.right - rect.left,
+        rect.bottom - rect.top,
+        rect.left,
+        rect.top,
+        affinity,
+        GetForegroundWindow() == hwnd,
+        children.join("; ")
+    )
+}
+
 /// Spawns a 250ms background thread on Windows that inspects the main window's
 /// visibility, topmost z-order, extended styles (`WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`),
 /// and screen-capture exclusion (`WDA_EXCLUDEFROMCAPTURE = 0x11`).
@@ -565,6 +621,7 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
     }
     std::thread::spawn(move || {
         let mut heartbeat_lost_logged = false;
+        let mut last_window_diag = String::new();
         loop {
             std::thread::sleep(Duration::from_millis(250));
 
@@ -665,6 +722,18 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
                     if GetWindowDisplayAffinity(hwnd, &mut affinity).is_ok() && affinity != 0x11 {
                         let _ = SetWindowDisplayAffinity(hwnd, WINDOW_DISPLAY_AFFINITY(0x11));
                         super::log_event("Self-healed WDA_EXCLUDEFROMCAPTURE (0x11) display affinity");
+                    }
+                }
+
+                // 4. [window-diag] Log the HWND tree whenever it changes, so
+                // a white window shows whether WebView2's child windows were
+                // hidden, zero-sized, or lost with the main window intact.
+                #[cfg(target_os = "windows")]
+                {
+                    let snapshot = build_window_diag_snapshot(hwnd);
+                    if snapshot != last_window_diag {
+                        last_window_diag = snapshot.clone();
+                        super::log_event(&format!("[window-diag] {}", snapshot));
                     }
                 }
             }
