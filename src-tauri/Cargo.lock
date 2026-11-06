@@ -631,6 +631,7 @@ dependencies = [
  "futures-util",
  "image",
  "lazy_static",
+ "libc",
  "pdf-extract",
  "quick-xml 0.36.2",
  "reqwest 0.12.28",

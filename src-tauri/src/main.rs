@@ -1725,18 +1725,15 @@ fn set_macos_activation_policy(policy: i64) {
     }
 }
 
-/// macOS: let the always-on-top window also appear over other apps' full-screen windows.
+/// macOS: let the always-on-top window also appear over other apps' full-screen and kiosk windows.
 /// A full-screen app lives in its own Space, so the window must be allowed to join every Space
-/// (CanJoinAllSpaces) including full-screen ones (FullScreenAuxiliary). Since macOS 10.14 this
-/// only works when the app has no Dock icon (accessory policy), which stealth mode sets.
+/// (CanJoinAllSpaces) including full-screen ones (FullScreenAuxiliary), remain stationary across
+/// Space transitions (Stationary), and ignore Cmd+` cycling (IgnoresCycle).
+/// Also raises NSWindow.level to 1001 (NSScreenSaverWindowLevel + 1) so legacy kiosk windows at
+/// level 24/25/1000 cannot cover the overlay.
 #[cfg(target_os = "macos")]
-fn apply_macos_fullscreen_overlay(win: &tauri::WebviewWindow) {
+pub(crate) fn apply_macos_fullscreen_overlay(win: &tauri::WebviewWindow) {
     use std::ffi::c_void;
-
-    const CAN_JOIN_ALL_SPACES: u64 = 1 << 0;
-    const MOVE_TO_ACTIVE_SPACE: u64 = 1 << 1;
-    const FULL_SCREEN_PRIMARY: u64 = 1 << 7;
-    const FULL_SCREEN_AUXILIARY: u64 = 1 << 8;
 
     extern "C" {
         fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
@@ -1744,6 +1741,8 @@ fn apply_macos_fullscreen_overlay(win: &tauri::WebviewWindow) {
     }
     type GetU64 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> u64;
     type SetU64 = unsafe extern "C" fn(*mut c_void, *mut c_void, u64);
+    type GetI64 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> i64;
+    type SetI64 = unsafe extern "C" fn(*mut c_void, *mut c_void, i64);
 
     unsafe {
         let ns_window = match win.ns_window() {
@@ -1758,14 +1757,29 @@ fn apply_macos_fullscreen_overlay(win: &tauri::WebviewWindow) {
         let get: GetU64 = std::mem::transmute(objc_msgSend as *const ());
         let set: SetU64 = std::mem::transmute(objc_msgSend as *const ());
 
-        // MoveToActiveSpace conflicts with CanJoinAllSpaces, and FullScreenPrimary with
-        // FullScreenAuxiliary, so those bits are cleared.
         let current = get(ns_window, get_sel);
-        let updated = (current | CAN_JOIN_ALL_SPACES | FULL_SCREEN_AUXILIARY)
-            & !MOVE_TO_ACTIVE_SPACE
-            & !FULL_SCREEN_PRIMARY;
+        let updated = resilience::macos::compute_kiosk_collection_behavior(current);
         set(ns_window, set_sel, updated);
-        println!("🪟 [macOS] collectionBehavior {:#x} → {:#x} (visible over full-screen apps)", current, updated);
+
+        let get_level_sel = sel_registerName(b"level\0".as_ptr() as *const _);
+        let set_level_sel = sel_registerName(b"setLevel:\0".as_ptr() as *const _);
+        let get_level: GetI64 = std::mem::transmute(objc_msgSend as *const ());
+        let set_level: SetI64 = std::mem::transmute(objc_msgSend as *const ());
+
+        let old_level = get_level(ns_window, get_level_sel);
+        set_level(
+            ns_window,
+            set_level_sel,
+            resilience::macos::KIOSK_OVERLAY_WINDOW_LEVEL,
+        );
+
+        println!(
+            "🪟 [macOS] collectionBehavior {:#x} → {:#x}, level {} → {} (visible over full-screen & kiosk apps)",
+            current,
+            updated,
+            old_level,
+            resilience::macos::KIOSK_OVERLAY_WINDOW_LEVEL
+        );
     }
 }
 
@@ -1773,7 +1787,7 @@ fn apply_macos_fullscreen_overlay(win: &tauri::WebviewWindow) {
 /// by setting NSWindow.sharingType = NSWindowSharingNone (0).
 /// This is the ONLY reliable way to hide window content on macOS.
 #[cfg(target_os = "macos")]
-fn apply_macos_screen_capture_protection(win: &tauri::WebviewWindow) {
+pub(crate) fn apply_macos_screen_capture_protection(win: &tauri::WebviewWindow) {
     use std::ffi::c_void;
 
     extern "C" {
@@ -2083,6 +2097,12 @@ fn main() {
 
             #[cfg(target_os = "windows")]
             resilience::windows::start_window_self_healer(app.handle().clone());
+
+            #[cfg(target_os = "macos")]
+            {
+                resilience::macos::install_sigterm_guard();
+                resilience::macos::start_window_self_healer(app.handle().clone());
+            }
 
             Ok(())
         })
