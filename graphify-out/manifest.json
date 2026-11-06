@@ -768,9 +768,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/windows.rs": {
-    "mtime": 1793953749.4553056,
-    "seen": 1793953802.292167,
-    "ast_hash": "64299e656819597d9b12ab2464c4dfd6",
+    "mtime": 1793956462.4703593,
+    "seen": 1793956578.060728,
+    "ast_hash": "ead463df25dc4c280bad50510de971db",
     "semantic_hash": ""
   },
   "src/services/recoveryState.ts": {
@@ -933,6 +933,12 @@
     "mtime": 1793953166.5136087,
     "seen": 1793953209.0781498,
     "ast_hash": "c6e2fe5b3ba51506cd6aa3c6b17db54f",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/plans/test.md": {
+    "mtime": 1793954978.138,
+    "seen": 1793956578.062367,
+    "ast_hash": "ac085e4b71fdb11a6d7e2faf279a3e12",
     "semantic_hash": ""
   }
 }
