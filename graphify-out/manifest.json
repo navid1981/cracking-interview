@@ -768,9 +768,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/windows.rs": {
-    "mtime": 1793962007.510491,
-    "seen": 1793962057.838573,
-    "ast_hash": "bb3e3222c7bdf1f0c7deaaa740d9f072",
+    "mtime": 1793962080.3144653,
+    "seen": 1793962115.027324,
+    "ast_hash": "4afc5477fcd50cc92e52bda1e7a1583f",
     "semantic_hash": ""
   },
   "src/services/recoveryState.ts": {

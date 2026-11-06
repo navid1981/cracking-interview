@@ -572,7 +572,7 @@ unsafe fn build_window_diag_snapshot(
     unsafe extern "system" fn enum_child(
         child: windows::Win32::Foundation::HWND,
         lparam: LPARAM,
-    ) -> windows::core::BOOL {
+    ) -> windows::Win32::Foundation::BOOL {
         let list = &mut *(lparam.0 as *mut Vec<String>);
         let mut buf = [0u16; 128];
         let len = GetClassNameW(child, &mut buf);
@@ -588,7 +588,7 @@ unsafe fn build_window_diag_snapshot(
             rect.left,
             rect.top
         ));
-        windows::core::BOOL(1)
+        windows::Win32::Foundation::BOOL(1)
     }
 
     let mut children: Vec<String> = Vec::new();
