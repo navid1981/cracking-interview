@@ -305,17 +305,50 @@ pub fn should_yield_to_assessment(app: &tauri::AppHandle) -> bool {
         if !yield_cfg {
             return false;
         }
-        // Check if macOS `assessmentagent` is active on the system
-        if is_macos_assessment_agent_active() {
-            return true;
-        }
-        false
+        should_yield_to_lockdown(
+            yield_cfg,
+            is_macos_assessment_agent_active(),
+            is_macos_seb_active(),
+        )
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
         false
     }
+}
+
+/// Pure yield decision: yield when yielding is enabled and either an AAC
+/// assessment session (`assessmentagent`) or SEB itself (legacy kiosk mode,
+/// where SEB terminates apps directly) is present on macOS.
+pub fn should_yield_to_lockdown(
+    yield_enabled: bool,
+    assessment_active: bool,
+    seb_active: bool,
+) -> bool {
+    yield_enabled && (assessment_active || seb_active)
+}
+
+#[cfg(target_os = "macos")]
+pub fn is_macos_seb_active() -> bool {
+    // SEB-mac (org.safeexambrowser.SafeExamBrowser) runs as "SafeExamBrowser".
+    if let Ok(out) = std::process::Command::new("pgrep")
+        .arg("-x")
+        .arg("SafeExamBrowser")
+        .output()
+    {
+        if out.status.success() {
+            return true;
+        }
+    }
+    if let Ok(out) = std::process::Command::new("pgrep")
+        .arg("-f")
+        .arg("SafeExamBrowser.app")
+        .output()
+    {
+        return out.status.success();
+    }
+    false
 }
 
 #[cfg(target_os = "macos")]
@@ -710,6 +743,20 @@ mod tests {
         assert!(active_len < 250, "Active log should have been rotated");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_should_yield_to_lockdown_covers_aac_and_seb_legacy() {
+        // AAC assessment session active -> yield
+        assert!(should_yield_to_lockdown(true, true, false));
+        // SEB legacy kiosk (no AAC) running -> yield (previously missed:
+        // detection only watched assessmentagent, so SEB's own terminate
+        // request was fought by the SIGTERM guard and ended in its dialog)
+        assert!(should_yield_to_lockdown(true, false, true));
+        // Neither active -> stay
+        assert!(!should_yield_to_lockdown(true, false, false));
+        // Yield disabled in config -> never yield
+        assert!(!should_yield_to_lockdown(false, true, true));
     }
 
     #[test]

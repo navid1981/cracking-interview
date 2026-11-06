@@ -50,6 +50,8 @@ pub fn install_sigterm_guard() {
 /// 2. If `!USER_HIDDEN`, verifies `ns_window.isVisible`, `ns_window.level == 1001`, and `sharingType == 0` (when stealth is enabled).
 pub fn start_window_self_healer(app: tauri::AppHandle) {
     std::thread::spawn(move || {
+        // Check for a lockdown (AAC / SEB) on the first iteration, then ~every 3s.
+        let mut lockdown_check_counter: u32 = 9;
         loop {
             std::thread::sleep(Duration::from_millis(300));
 
@@ -60,6 +62,25 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
             }
             if !super::enabled() {
                 continue;
+            }
+
+            // Proactively yield to a macOS lockdown instead of waiting for
+            // SEB's terminate request: SEB-mac rechecks 1s after asking apps
+            // to quit and shows its "Prohibited Processes" dialog for any
+            // survivor. Exiting cleanly (marked killed-by-OS) lets SEB start
+            // without the dialog, and the guardian probe-respawns us after
+            // the lockdown ends.
+            lockdown_check_counter += 1;
+            if lockdown_check_counter >= 10 {
+                lockdown_check_counter = 0;
+                if super::should_yield_to_assessment(&app) {
+                    super::log_event(
+                        "Detected macOS lockdown (AAC/SEB); yielding for post-lockdown recovery",
+                    );
+                    super::mark_killed_by_os(&app);
+                    crate::stealth_hotkey::teardown_stealth_hotkeys();
+                    std::process::exit(0);
+                }
             }
 
             if SIGTERM_INTERCEPTED.swap(false, Ordering::SeqCst) {
