@@ -432,12 +432,131 @@ pub fn apply_experimental_process_dacl_hardening() {
     }
 }
 
+static ORIGINAL_WNDPROC: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+static PROTECT_SUBCLASS_INSTALLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Window procedure installed over the Tauri/wry proc to stop external hides
+/// at the source instead of re-showing after the fact. Kiosk monitors such as
+/// SEB call `ShowWindow(SW_HIDE)` every few seconds; re-showing in response
+/// produced a visible close/open flicker (~2-3s) and left WebView2 painting
+/// white. Swallowing the hide keeps the window (and its painted surface)
+/// untouched. The user's own hide (`USER_HIDDEN`) and authorized quits are
+/// always allowed through to the original proc.
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn protected_window_proc(
+    hwnd: windows::Win32::Foundation::HWND,
+    msg: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    // Only the hide/close messages need the (filesystem-backed) authorization
+    // and config checks; every other message goes straight to the original
+    // proc so the UI thread is not slowed down.
+    let block_hide = matches!(
+        msg,
+        WM_SHOWWINDOW | WM_WINDOWPOSCHANGING | WM_CLOSE | WM_SYSCOMMAND
+    ) && super::should_block_external_hide(
+        super::USER_HIDDEN.load(Ordering::Relaxed),
+        super::quit_was_authorized(),
+        super::enabled(),
+    );
+
+    match msg {
+        // External ShowWindow(SW_HIDE): wParam == FALSE.
+        WM_SHOWWINDOW if wparam.0 == 0 && block_hide => {
+            super::log_event("Blocked external hide (WM_SHOWWINDOW) via window-proc subclass");
+            return LRESULT(0);
+        }
+        // External SetWindowPos(SWP_HIDEWINDOW): strip just the hide bit.
+        WM_WINDOWPOSCHANGING if block_hide => {
+            let pos = lparam.0 as *mut WINDOWPOS;
+            if !pos.is_null() {
+                let stripped = super::strip_hide_window_flag((*pos).flags.0, true);
+                if stripped != (*pos).flags.0 {
+                    super::log_event(
+                        "Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass",
+                    );
+                    (*pos).flags = SET_WINDOW_POS_FLAGS(stripped);
+                }
+            }
+        }
+        // Defense in depth: Tauri's CloseRequested handler also blocks this.
+        WM_CLOSE if super::enabled() && !super::quit_was_authorized() => {
+            super::log_event("Blocked external WM_CLOSE via window-proc subclass");
+            return LRESULT(0);
+        }
+        WM_SYSCOMMAND
+            if (wparam.0 & 0xFFF0) == SC_CLOSE as usize
+                && super::enabled()
+                && !super::quit_was_authorized() =>
+        {
+            super::log_event("Blocked external SC_CLOSE via window-proc subclass");
+            return LRESULT(0);
+        }
+        _ => {}
+    }
+
+    let orig = ORIGINAL_WNDPROC.load(Ordering::SeqCst);
+    if orig == 0 {
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    } else {
+        let prev: WNDPROC = std::mem::transmute(orig);
+        CallWindowProcW(prev, hwnd, msg, wparam, lparam)
+    }
+}
+
+/// Installs [`protected_window_proc`] on the main window (once per process).
+/// Runs on both the normal GUI and `--desktop-worker` instances because both
+/// go through the same Tauri setup that starts the self-healer.
+#[cfg(target_os = "windows")]
+pub fn install_window_protect_subclass(app: &tauri::AppHandle) {
+    if PROTECT_SUBCLASS_INSTALLED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let Some(win) = app.get_webview_window("main") else {
+        PROTECT_SUBCLASS_INSTALLED.store(false, Ordering::SeqCst);
+        return;
+    };
+    let Ok(hwnd_raw) = win.hwnd() else {
+        PROTECT_SUBCLASS_INSTALLED.store(false, Ordering::SeqCst);
+        return;
+    };
+    unsafe {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::*;
+
+        let hwnd = HWND(hwnd_raw.0 as *mut _);
+        if !IsWindow(hwnd).as_bool() {
+            PROTECT_SUBCLASS_INSTALLED.store(false, Ordering::SeqCst);
+            return;
+        }
+        let prev = SetWindowLongPtrW(
+            hwnd,
+            GWLP_WNDPROC,
+            protected_window_proc as *const () as isize,
+        );
+        if prev == 0 {
+            PROTECT_SUBCLASS_INSTALLED.store(false, Ordering::SeqCst);
+            super::log_event("Failed to install window-proc hide-protection subclass");
+        } else {
+            ORIGINAL_WNDPROC.store(prev, Ordering::SeqCst);
+            super::log_event("Installed window-proc hide-protection subclass");
+        }
+    }
+}
+
 /// Spawns a 250ms background thread on Windows that inspects the main window's
 /// visibility, topmost z-order, extended styles (`WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`),
 /// and screen-capture exclusion (`WDA_EXCLUDEFROMCAPTURE = 0x11`).
 ///
 /// Never heals if `resilience::USER_HIDDEN` is true or `resilience::quit_was_authorized()`.
 pub fn start_window_self_healer(app: tauri::AppHandle) {
+    #[cfg(target_os = "windows")]
+    install_window_protect_subclass(&app);
     if let Some(dir) = super::get_config_dir() {
         let cfg = super::ResilienceConfig::load_from_dir(&dir);
         if cfg.should_apply_process_dacl() {

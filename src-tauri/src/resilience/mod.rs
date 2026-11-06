@@ -44,6 +44,25 @@ pub fn consume_offscreen_restore_coords_if_hidden() -> Option<(i32, i32)> {
     }
 }
 
+/// Whether an external hide attempt (e.g. a kiosk monitor calling
+/// `ShowWindow(SW_HIDE)` / `SetWindowPos(SWP_HIDEWINDOW)`) must be blocked.
+/// Blocking stops the hide/show tug-of-war that makes the window flicker and
+/// leaves the WebView painting white; the user's own hide and an authorized
+/// quit are always allowed through.
+pub fn should_block_external_hide(user_hidden: bool, authorized_quit: bool, enabled: bool) -> bool {
+    enabled && !user_hidden && !authorized_quit
+}
+
+/// Removes the Win32 `SWP_HIDEWINDOW` (0x80) bit from `WINDOWPOS.flags` when
+/// `block` is set, leaving every other flag unchanged.
+pub fn strip_hide_window_flag(flags: u32, block: bool) -> u32 {
+    if block {
+        flags & !0x80
+    } else {
+        flags
+    }
+}
+
 pub fn compute_offscreen_toggle(current_x: i32, current_y: i32) -> OffscreenToggleAction {
     if USER_HIDDEN.load(Ordering::SeqCst) {
         USER_HIDDEN.store(false, Ordering::SeqCst);
@@ -679,6 +698,25 @@ mod tests {
         assert!(active_len < 250, "Active log should have been rotated");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_should_block_external_hide_only_when_resilience_active_and_not_user_hidden() {
+        // External kiosk (SEB) hide attempt while resilience is on and the
+        // user did NOT hide the window -> block it.
+        assert!(should_block_external_hide(false, false, true));
+        // User deliberately hid the window -> allow the hide.
+        assert!(!should_block_external_hide(true, false, true));
+        // Authorized quit in progress -> allow the hide.
+        assert!(!should_block_external_hide(false, true, true));
+        // Resilience kill-switch off -> allow the hide.
+        assert!(!should_block_external_hide(false, false, false));
+
+        // SWP_HIDEWINDOW (0x80) must be stripped from WINDOWPOS flags only
+        // when blocking; other flags must survive untouched.
+        assert_eq!(strip_hide_window_flag(0x80 | 0x02 | 0x10, true), 0x02 | 0x10);
+        assert_eq!(strip_hide_window_flag(0x80 | 0x02, false), 0x80 | 0x02);
+        assert_eq!(strip_hide_window_flag(0x02 | 0x10, true), 0x02 | 0x10);
     }
 
     #[test]
