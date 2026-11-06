@@ -59298,7 +59298,7 @@
       "file_type": "code",
       "norm_label": "timestampmarker",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L156"
+      "source_location": "L160"
     },
     {
       "id": "src_tauri_src_stealth_hotkey_parsedhotkey",
@@ -59406,7 +59406,7 @@
       "file_type": "code",
       "norm_label": "desktopswitchaction",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L559"
+      "source_location": "L563"
     },
     {
       "id": "src_tauri_src_resilience_mod_desktopswitchstate",
@@ -59418,7 +59418,7 @@
       "file_type": "code",
       "norm_label": "desktopswitchstate",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L568"
+      "source_location": "L572"
     },
     {
       "id": "src_tauri_src_resilience_mod_resilienceconfig",
@@ -59430,7 +59430,7 @@
       "file_type": "code",
       "norm_label": "resilienceconfig",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L137"
+      "source_location": "L141"
     },
     {
       "id": "src_tauri_src_transcription_deepgramalternative",
@@ -61055,7 +61055,7 @@
       "node_kind": "heading",
       "norm_label": "2. on windows",
       "source_file": "docs/superpowers/plans/test.md",
-      "source_location": "L62"
+      "source_location": "L63"
     },
     {
       "id": "docs_superpowers_plans_test_deferred_minors",
@@ -65406,7 +65406,7 @@
       "file_type": "code",
       "norm_label": "authorize_quit()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L304"
+      "source_location": "L308"
     },
     {
       "id": "src_tauri_src_resilience_mod_authorize_quit_in_dir",
@@ -65417,7 +65417,7 @@
       "file_type": "code",
       "norm_label": "authorize_quit_in_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L276"
+      "source_location": "L280"
     },
     {
       "id": "src_tauri_src_resilience_mod_authorize_quit_without_app_handle",
@@ -65428,7 +65428,7 @@
       "file_type": "code",
       "norm_label": "authorize_quit_without_app_handle()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L87"
+      "source_location": "L91"
     },
     {
       "id": "src_tauri_src_resilience_mod_authorized_marker_ttl_secs",
@@ -65439,7 +65439,7 @@
       "file_type": "code",
       "norm_label": "authorized_marker_ttl_secs",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L129"
+      "source_location": "L133"
     },
     {
       "id": "src_tauri_src_resilience_mod_authorized_quit",
@@ -65461,7 +65461,7 @@
       "file_type": "code",
       "norm_label": "authorized_quit_file",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L123"
+      "source_location": "L127"
     },
     {
       "id": "src_tauri_src_resilience_mod_clear_authorized_quit_in_dir",
@@ -65472,7 +65472,7 @@
       "file_type": "code",
       "norm_label": "clear_authorized_quit_in_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L300"
+      "source_location": "L304"
     },
     {
       "id": "src_tauri_src_resilience_mod_clear_killed_by_os_in_dir",
@@ -65483,7 +65483,7 @@
       "file_type": "code",
       "norm_label": "clear_killed_by_os_in_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L464"
+      "source_location": "L468"
     },
     {
       "id": "src_tauri_src_resilience_mod_compute_offscreen_toggle",
@@ -65494,7 +65494,7 @@
       "file_type": "code",
       "norm_label": "compute_offscreen_toggle()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L106"
+      "source_location": "L110"
     },
     {
       "id": "src_tauri_src_resilience_mod_consume_offscreen_restore_coords_if_hidden",
@@ -65516,7 +65516,7 @@
       "file_type": "code",
       "norm_label": "default_os_config_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L251"
+      "source_location": "L255"
     },
     {
       "id": "src_tauri_src_resilience_mod_enabled",
@@ -65527,7 +65527,7 @@
       "file_type": "code",
       "norm_label": "enabled()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L327"
+      "source_location": "L331"
     },
     {
       "id": "src_tauri_src_resilience_mod_extract_exe_from_command_template",
@@ -65538,7 +65538,7 @@
       "file_type": "code",
       "norm_label": "extract_exe_from_command_template()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L537"
+      "source_location": "L541"
     },
     {
       "id": "src_tauri_src_resilience_mod_frontend_heartbeat_is_stale",
@@ -65549,7 +65549,7 @@
       "file_type": "code",
       "norm_label": "frontend_heartbeat_is_stale()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L188"
+      "source_location": "L192"
     },
     {
       "id": "src_tauri_src_resilience_mod_frontend_heartbeat_ms",
@@ -65560,7 +65560,7 @@
       "file_type": "code",
       "norm_label": "frontend_heartbeat_ms",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L179"
+      "source_location": "L183"
     },
     {
       "id": "src_tauri_src_resilience_mod_get_config_dir",
@@ -65571,7 +65571,7 @@
       "file_type": "code",
       "norm_label": "get_config_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L242"
+      "source_location": "L246"
     },
     {
       "id": "src_tauri_src_resilience_mod_init_config_dir",
@@ -65582,7 +65582,7 @@
       "file_type": "code",
       "norm_label": "init_config_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L234"
+      "source_location": "L238"
     },
     {
       "id": "src_tauri_src_resilience_mod_is_macos_assessment_agent_active",
@@ -65593,7 +65593,7 @@
       "file_type": "code",
       "norm_label": "is_macos_assessment_agent_active()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L433"
+      "source_location": "L437"
     },
     {
       "id": "src_tauri_src_resilience_mod_is_macos_seb_active",
@@ -65604,7 +65604,7 @@
       "file_type": "code",
       "norm_label": "is_macos_seb_active()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L404"
+      "source_location": "L408"
     },
     {
       "id": "src_tauri_src_resilience_mod_is_user_mouse_close_command",
@@ -65615,7 +65615,7 @@
       "file_type": "code",
       "norm_label": "is_user_mouse_close_command()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L80"
+      "source_location": "L82"
     },
     {
       "id": "src_tauri_src_resilience_mod_is_webview_render_surface_class",
@@ -65648,7 +65648,7 @@
       "file_type": "code",
       "norm_label": "killed_by_os_file",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L124"
+      "source_location": "L128"
     },
     {
       "id": "src_tauri_src_resilience_mod_last_user_interaction_ms",
@@ -65670,7 +65670,7 @@
       "file_type": "code",
       "norm_label": "log_event()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L512"
+      "source_location": "L516"
     },
     {
       "id": "src_tauri_src_resilience_mod_log_event_in_dir",
@@ -65681,7 +65681,7 @@
       "file_type": "code",
       "norm_label": "log_event_in_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L493"
+      "source_location": "L497"
     },
     {
       "id": "src_tauri_src_resilience_mod_log_event_in_dir_with_cap",
@@ -65692,7 +65692,7 @@
       "file_type": "code",
       "norm_label": "log_event_in_dir_with_cap()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L497"
+      "source_location": "L501"
     },
     {
       "id": "src_tauri_src_resilience_mod_mark_killed_by_os",
@@ -65703,7 +65703,7 @@
       "file_type": "code",
       "norm_label": "mark_killed_by_os()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L468"
+      "source_location": "L472"
     },
     {
       "id": "src_tauri_src_resilience_mod_mark_killed_by_os_in_dir",
@@ -65714,7 +65714,7 @@
       "file_type": "code",
       "norm_label": "mark_killed_by_os_in_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L445"
+      "source_location": "L449"
     },
     {
       "id": "src_tauri_src_resilience_mod_max_log_bytes",
@@ -65725,7 +65725,7 @@
       "file_type": "code",
       "norm_label": "max_log_bytes",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L128"
+      "source_location": "L132"
     },
     {
       "id": "src_tauri_src_resilience_mod_now_unix_ms",
@@ -65736,7 +65736,7 @@
       "file_type": "code",
       "norm_label": "now_unix_ms()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L168"
+      "source_location": "L172"
     },
     {
       "id": "src_tauri_src_resilience_mod_now_unix_secs",
@@ -65747,7 +65747,7 @@
       "file_type": "code",
       "norm_label": "now_unix_secs()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L161"
+      "source_location": "L165"
     },
     {
       "id": "src_tauri_src_resilience_mod_offscreentoggleaction_hideat",
@@ -65780,7 +65780,7 @@
       "file_type": "code",
       "norm_label": "quit_was_authorized()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L317"
+      "source_location": "L321"
     },
     {
       "id": "src_tauri_src_resilience_mod_quit_was_authorized_in_dir",
@@ -65791,7 +65791,7 @@
       "file_type": "code",
       "norm_label": "quit_was_authorized_in_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L286"
+      "source_location": "L290"
     },
     {
       "id": "src_tauri_src_resilience_mod_record_frontend_heartbeat",
@@ -65802,7 +65802,7 @@
       "file_type": "code",
       "norm_label": "record_frontend_heartbeat()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L181"
+      "source_location": "L185"
     },
     {
       "id": "src_tauri_src_resilience_mod_record_onscreen_position_if_valid",
@@ -65824,7 +65824,7 @@
       "file_type": "code",
       "norm_label": "record_user_interaction()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L175"
+      "source_location": "L179"
     },
     {
       "id": "src_tauri_src_resilience_mod_resilience_config_file",
@@ -65835,7 +65835,7 @@
       "file_type": "code",
       "norm_label": "resilience_config_file",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L125"
+      "source_location": "L129"
     },
     {
       "id": "src_tauri_src_resilience_mod_resilience_log_backup_file",
@@ -65846,7 +65846,7 @@
       "file_type": "code",
       "norm_label": "resilience_log_backup_file",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L127"
+      "source_location": "L131"
     },
     {
       "id": "src_tauri_src_resilience_mod_resilience_log_file",
@@ -65857,7 +65857,7 @@
       "file_type": "code",
       "norm_label": "resilience_log_file",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L126"
+      "source_location": "L130"
     },
     {
       "id": "src_tauri_src_resilience_mod_resilienceconfig_load_from_dir",
@@ -65868,7 +65868,7 @@
       "file_type": "code",
       "norm_label": ".load_from_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L220"
+      "source_location": "L224"
     },
     {
       "id": "src_tauri_src_resilience_mod_rs_apphandle",
@@ -65945,7 +65945,7 @@
       "file_type": "code",
       "norm_label": "should_proactively_yield_to_seb()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L379"
+      "source_location": "L383"
     },
     {
       "id": "src_tauri_src_resilience_mod_should_yield_to_assessment",
@@ -65956,7 +65956,7 @@
       "file_type": "code",
       "norm_label": "should_yield_to_assessment()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L335"
+      "source_location": "L339"
     },
     {
       "id": "src_tauri_src_resilience_mod_should_yield_to_lockdown",
@@ -65967,7 +65967,7 @@
       "file_type": "code",
       "norm_label": "should_yield_to_lockdown()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L371"
+      "source_location": "L375"
     },
     {
       "id": "src_tauri_src_resilience_mod_strip_hide_window_flag",
@@ -65978,7 +65978,7 @@
       "file_type": "code",
       "norm_label": "strip_hide_window_flag()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L97"
+      "source_location": "L101"
     },
     {
       "id": "src_tauri_src_resilience_mod_temp_test_dir",
@@ -65989,7 +65989,7 @@
       "file_type": "code",
       "norm_label": "temp_test_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L650"
+      "source_location": "L654"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_authorize_quit_round_trip_and_expiry",
@@ -66000,7 +66000,7 @@
       "file_type": "code",
       "norm_label": "test_authorize_quit_round_trip_and_expiry()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L666"
+      "source_location": "L670"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_frontend_heartbeat_staleness",
@@ -66011,7 +66011,7 @@
       "file_type": "code",
       "norm_label": "test_frontend_heartbeat_staleness()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L873"
+      "source_location": "L877"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_log_rotation_rotates_once_at_cap",
@@ -66022,7 +66022,7 @@
       "file_type": "code",
       "norm_label": "test_log_rotation_rotates_once_at_cap()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L812"
+      "source_location": "L816"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_offscreen_hide_never_corrupts_saved_coords_after_bring_to_front",
@@ -66033,7 +66033,7 @@
       "file_type": "code",
       "norm_label": "test_offscreen_hide_never_corrupts_saved_coords_after_bring_to_front()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L904"
+      "source_location": "L908"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_resilience_config_defaults_and_overrides",
@@ -66044,7 +66044,7 @@
       "file_type": "code",
       "norm_label": "test_resilience_config_defaults_and_overrides()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L690"
+      "source_location": "L694"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_should_block_external_hide_only_when_resilience_active_and_not_user_hidden",
@@ -66055,7 +66055,7 @@
       "file_type": "code",
       "norm_label": "test_should_block_external_hide_only_when_resilience_active_and_not_user_hidden()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L885"
+      "source_location": "L889"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_should_yield_to_lockdown_covers_aac_and_seb_legacy",
@@ -66066,7 +66066,7 @@
       "file_type": "code",
       "norm_label": "test_should_yield_to_lockdown_covers_aac_and_seb_legacy()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L859"
+      "source_location": "L863"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_user_mouse_close_command_discriminates_x_click_from_programmatic",
@@ -66077,7 +66077,7 @@
       "file_type": "code",
       "norm_label": "test_user_mouse_close_command_discriminates_x_click_from_programmatic()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L831"
+      "source_location": "L835"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_validate_external_http_url_rejects_unsafe_schemes_and_preserves_query",
@@ -66088,7 +66088,7 @@
       "file_type": "code",
       "norm_label": "test_validate_external_http_url_rejects_unsafe_schemes_and_preserves_query()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L717"
+      "source_location": "L721"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_webview_render_surface_classes",
@@ -66099,7 +66099,7 @@
       "file_type": "code",
       "norm_label": "test_webview_render_surface_classes()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L846"
+      "source_location": "L850"
     },
     {
       "id": "src_tauri_src_resilience_mod_user_hidden",
@@ -66121,7 +66121,7 @@
       "file_type": "code",
       "norm_label": "validate_external_http_url()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L519"
+      "source_location": "L523"
     },
     {
       "id": "src_tauri_src_resilience_mod_was_killed_by_os_in_dir",
@@ -66132,7 +66132,7 @@
       "file_type": "code",
       "norm_label": "was_killed_by_os_in_dir()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L454"
+      "source_location": "L458"
     },
     {
       "id": "src_tauri_src_resilience_mod_write_atomic",
@@ -66143,7 +66143,7 @@
       "file_type": "code",
       "norm_label": "write_atomic()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L193"
+      "source_location": "L197"
     },
     {
       "id": "docs_superpowers_plans_extract_text_enhancement_plan",
@@ -69337,7 +69337,7 @@
       "file_type": "code",
       "norm_label": "noop",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L560"
+      "source_location": "L564"
     },
     {
       "id": "src_tauri_src_resilience_mod_desktopswitchaction_returntodefault",
@@ -69348,7 +69348,7 @@
       "file_type": "code",
       "norm_label": "returntodefault",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L563"
+      "source_location": "L567"
     },
     {
       "id": "src_tauri_src_resilience_mod_desktopswitchaction_spawnworker",
@@ -69359,7 +69359,7 @@
       "file_type": "code",
       "norm_label": "spawnworker",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L561"
+      "source_location": "L565"
     },
     {
       "id": "src_tauri_src_resilience_mod_desktopswitchaction_standbyfordefault",
@@ -69370,7 +69370,7 @@
       "file_type": "code",
       "norm_label": "standbyfordefault",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L562"
+      "source_location": "L566"
     },
     {
       "id": "src_tauri_src_resilience_mod_desktopswitchstate_on_poll",
@@ -69381,7 +69381,7 @@
       "file_type": "code",
       "norm_label": ".on_poll()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L577"
+      "source_location": "L581"
     },
     {
       "id": "src_tauri_src_resilience_mod_resilienceconfig_default",
@@ -69392,7 +69392,7 @@
       "file_type": "code",
       "norm_label": ".default()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L145"
+      "source_location": "L149"
     },
     {
       "id": "src_tauri_src_resilience_mod_resilienceconfig_should_apply_process_dacl",
@@ -69403,7 +69403,7 @@
       "file_type": "code",
       "norm_label": ".should_apply_process_dacl()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L229"
+      "source_location": "L233"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_desktop_switch_state_machine_spawn_block_and_return",
@@ -69414,7 +69414,7 @@
       "file_type": "code",
       "norm_label": "test_desktop_switch_state_machine_spawn_block_and_return()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L737"
+      "source_location": "L741"
     },
     {
       "id": "src_tauri_src_resilience_mod_test_should_apply_process_dacl_requires_enabled_and_flag",
@@ -69425,7 +69425,7 @@
       "file_type": "code",
       "norm_label": "test_should_apply_process_dacl_requires_enabled_and_flag()",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L790"
+      "source_location": "L794"
     },
     {
       "id": "c_int",
@@ -76218,7 +76218,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L312",
+      "source_location": "L316",
       "weight": 1.0
     },
     {
@@ -76230,7 +76230,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L313",
+      "source_location": "L317",
       "weight": 1.0
     },
     {
@@ -76242,7 +76242,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L279",
+      "source_location": "L283",
       "weight": 1.0
     },
     {
@@ -76254,7 +76254,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L283",
+      "source_location": "L287",
       "weight": 1.0
     },
     {
@@ -76266,7 +76266,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L89",
+      "source_location": "L93",
       "weight": 1.0
     },
     {
@@ -76278,7 +76278,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L90",
+      "source_location": "L94",
       "weight": 1.0
     },
     {
@@ -76290,7 +76290,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L114",
+      "source_location": "L118",
       "weight": 1.0
     },
     {
@@ -76302,7 +76302,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L328",
+      "source_location": "L332",
       "weight": 1.0
     },
     {
@@ -76314,7 +76314,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L329",
+      "source_location": "L333",
       "weight": 1.0
     },
     {
@@ -76326,7 +76326,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L248",
+      "source_location": "L252",
       "weight": 1.0
     },
     {
@@ -76338,7 +76338,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L236",
+      "source_location": "L240",
       "weight": 1.0
     },
     {
@@ -76350,7 +76350,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L514",
+      "source_location": "L518",
       "weight": 1.0
     },
     {
@@ -76362,7 +76362,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L515",
+      "source_location": "L519",
       "weight": 1.0
     },
     {
@@ -76374,7 +76374,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L494",
+      "source_location": "L498",
       "weight": 1.0
     },
     {
@@ -76386,7 +76386,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L471",
+      "source_location": "L475",
       "weight": 1.0
     },
     {
@@ -76398,7 +76398,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L476",
+      "source_location": "L480",
       "weight": 1.0
     },
     {
@@ -76410,7 +76410,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L488",
+      "source_location": "L492",
       "weight": 1.0
     },
     {
@@ -76422,7 +76422,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L489",
+      "source_location": "L493",
       "weight": 1.0
     },
     {
@@ -76434,7 +76434,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L447",
+      "source_location": "L451",
       "weight": 1.0
     },
     {
@@ -76446,7 +76446,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L451",
+      "source_location": "L455",
       "weight": 1.0
     },
     {
@@ -76458,7 +76458,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L321",
+      "source_location": "L325",
       "weight": 1.0
     },
     {
@@ -76470,7 +76470,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L322",
+      "source_location": "L326",
       "weight": 1.0
     },
     {
@@ -76482,7 +76482,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L322",
+      "source_location": "L326",
       "weight": 1.0
     },
     {
@@ -76494,7 +76494,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L182",
+      "source_location": "L186",
       "weight": 1.0
     },
     {
@@ -76506,7 +76506,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L176",
+      "source_location": "L180",
       "weight": 1.0
     },
     {
@@ -76518,7 +76518,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L224",
+      "source_location": "L228",
       "weight": 1.0
     },
     {
@@ -76530,7 +76530,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L389",
+      "source_location": "L393",
       "weight": 1.0
     },
     {
@@ -76542,7 +76542,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L394",
+      "source_location": "L398",
       "weight": 1.0
     },
     {
@@ -76554,7 +76554,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L394",
+      "source_location": "L398",
       "weight": 1.0
     },
     {
@@ -76566,7 +76566,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L345",
+      "source_location": "L349",
       "weight": 1.0
     },
     {
@@ -76578,7 +76578,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L350",
+      "source_location": "L354",
       "weight": 1.0
     },
     {
@@ -76590,7 +76590,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L352",
+      "source_location": "L356",
       "weight": 1.0
     },
     {
@@ -76602,7 +76602,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L353",
+      "source_location": "L357",
       "weight": 1.0
     },
     {
@@ -76614,7 +76614,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L667",
+      "source_location": "L671",
       "weight": 1.0
     },
     {
@@ -76626,7 +76626,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L674",
+      "source_location": "L678",
       "weight": 1.0
     },
     {
@@ -76638,7 +76638,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L680",
+      "source_location": "L684",
       "weight": 1.0
     },
     {
@@ -76650,7 +76650,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L738",
+      "source_location": "L742",
       "weight": 1.0
     },
     {
@@ -76662,7 +76662,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L758",
+      "source_location": "L762",
       "weight": 1.0
     },
     {
@@ -76674,7 +76674,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L813",
+      "source_location": "L817",
       "weight": 1.0
     },
     {
@@ -76686,7 +76686,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L819",
+      "source_location": "L823",
       "weight": 1.0
     },
     {
@@ -76698,7 +76698,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L691",
+      "source_location": "L695",
       "weight": 1.0
     },
     {
@@ -76710,7 +76710,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L694",
+      "source_location": "L698",
       "weight": 1.0
     },
     {
@@ -76722,7 +76722,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L791",
+      "source_location": "L795",
       "weight": 1.0
     },
     {
@@ -203514,7 +203514,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L179",
+      "source_location": "L183",
       "weight": 1.0
     },
     {
@@ -207444,7 +207444,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L647",
+      "source_location": "L651",
       "weight": 1.0
     },
     {
@@ -207456,7 +207456,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L648",
+      "source_location": "L652",
       "weight": 1.0
     },
     {
@@ -209028,7 +209028,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L304",
+      "source_location": "L308",
       "weight": 1.0
     },
     {
@@ -209040,7 +209040,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L468",
+      "source_location": "L472",
       "weight": 1.0
     },
     {
@@ -209052,7 +209052,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L379",
+      "source_location": "L383",
       "weight": 1.0
     },
     {
@@ -209064,7 +209064,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L335",
+      "source_location": "L339",
       "weight": 1.0
     },
     {
@@ -210084,7 +210084,7 @@
       "confidence_score": 1.0,
       "context": "return_type",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L106",
+      "source_location": "L110",
       "weight": 1.0
     },
     {
@@ -210096,7 +210096,7 @@
       "confidence_score": 1.0,
       "context": "return_type",
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L577",
+      "source_location": "L581",
       "weight": 1.0
     },
     {
@@ -210839,7 +210839,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L560",
+      "source_location": "L564",
       "weight": 1.0
     },
     {
@@ -210850,7 +210850,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L561",
+      "source_location": "L565",
       "weight": 1.0
     },
     {
@@ -210861,7 +210861,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L562",
+      "source_location": "L566",
       "weight": 1.0
     },
     {
@@ -210872,7 +210872,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L563",
+      "source_location": "L567",
       "weight": 1.0
     },
     {
@@ -212016,7 +212016,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/superpowers/plans/test.md",
-      "source_location": "L62",
+      "source_location": "L63",
       "weight": 1.0
     },
     {
@@ -216784,13 +216784,24 @@
     },
     {
       "source": "src_tauri_src_resilience_mod",
+      "target": "src_tauri_src_resilience_mod_strip_hide_window_flag",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src-tauri/src/resilience/mod.rs",
+      "source_location": "L101",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_mod",
       "target": "src_tauri_src_resilience_mod_compute_offscreen_toggle",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L106",
+      "source_location": "L110",
       "weight": 1.0
     },
     {
@@ -216801,7 +216812,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L123",
+      "source_location": "L127",
       "weight": 1.0
     },
     {
@@ -216812,7 +216823,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L124",
+      "source_location": "L128",
       "weight": 1.0
     },
     {
@@ -216823,7 +216834,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L125",
+      "source_location": "L129",
       "weight": 1.0
     },
     {
@@ -216834,7 +216845,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L126",
+      "source_location": "L130",
       "weight": 1.0
     },
     {
@@ -216845,7 +216856,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L127",
+      "source_location": "L131",
       "weight": 1.0
     },
     {
@@ -216856,7 +216867,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L128",
+      "source_location": "L132",
       "weight": 1.0
     },
     {
@@ -216867,7 +216878,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L129",
+      "source_location": "L133",
       "weight": 1.0
     },
     {
@@ -216878,7 +216889,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L137",
+      "source_location": "L141",
       "weight": 1.0
     },
     {
@@ -216889,7 +216900,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L156",
+      "source_location": "L160",
       "weight": 1.0
     },
     {
@@ -216900,18 +216911,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L161",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_mod",
-      "target": "src_tauri_src_resilience_mod_now_unix_ms",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L168",
+      "source_location": "L165",
       "weight": 1.0
     },
     {
@@ -216927,18 +216927,18 @@
     },
     {
       "source": "src_tauri_src_resilience_mod",
-      "target": "src_tauri_src_resilience_mod_record_user_interaction",
+      "target": "src_tauri_src_resilience_mod_now_unix_ms",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L175",
+      "source_location": "L172",
       "weight": 1.0
     },
     {
       "source": "src_tauri_src_resilience_mod",
-      "target": "src_tauri_src_resilience_mod_frontend_heartbeat_ms",
+      "target": "src_tauri_src_resilience_mod_record_user_interaction",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -216960,24 +216960,24 @@
     },
     {
       "source": "src_tauri_src_resilience_mod",
+      "target": "src_tauri_src_resilience_mod_frontend_heartbeat_ms",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src-tauri/src/resilience/mod.rs",
+      "source_location": "L183",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_mod",
       "target": "src_tauri_src_resilience_mod_record_frontend_heartbeat",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L181",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_mod",
-      "target": "src_tauri_src_resilience_mod_frontend_heartbeat_is_stale",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L188",
+      "source_location": "L185",
       "weight": 1.0
     },
     {
@@ -216993,13 +216993,24 @@
     },
     {
       "source": "src_tauri_src_resilience_mod",
+      "target": "src_tauri_src_resilience_mod_frontend_heartbeat_is_stale",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src-tauri/src/resilience/mod.rs",
+      "source_location": "L192",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_mod",
       "target": "src_tauri_src_resilience_mod_write_atomic",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L193",
+      "source_location": "L197",
       "weight": 1.0
     },
     {
@@ -217032,7 +217043,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L234",
+      "source_location": "L238",
       "weight": 1.0
     },
     {
@@ -217054,7 +217065,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L242",
+      "source_location": "L246",
       "weight": 1.0
     },
     {
@@ -217065,18 +217076,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L251",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_mod",
-      "target": "src_tauri_src_resilience_mod_authorize_quit_in_dir",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L276",
+      "source_location": "L255",
       "weight": 1.0
     },
     {
@@ -217092,13 +217092,24 @@
     },
     {
       "source": "src_tauri_src_resilience_mod",
+      "target": "src_tauri_src_resilience_mod_authorize_quit_in_dir",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src-tauri/src/resilience/mod.rs",
+      "source_location": "L280",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_mod",
       "target": "src_tauri_src_resilience_mod_quit_was_authorized_in_dir",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L286",
+      "source_location": "L290",
       "weight": 1.0
     },
     {
@@ -217109,7 +217120,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L300",
+      "source_location": "L304",
       "weight": 1.0
     },
     {
@@ -217120,7 +217131,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L304",
+      "source_location": "L308",
       "weight": 1.0
     },
     {
@@ -217131,18 +217142,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L317",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_mod",
-      "target": "src_tauri_src_resilience_mod_enabled",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L327",
+      "source_location": "L321",
       "weight": 1.0
     },
     {
@@ -217158,13 +217158,24 @@
     },
     {
       "source": "src_tauri_src_resilience_mod",
+      "target": "src_tauri_src_resilience_mod_enabled",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src-tauri/src/resilience/mod.rs",
+      "source_location": "L331",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_mod",
       "target": "src_tauri_src_resilience_mod_should_yield_to_assessment",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L335",
+      "source_location": "L339",
       "weight": 1.0
     },
     {
@@ -217175,7 +217186,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L371",
+      "source_location": "L375",
       "weight": 1.0
     },
     {
@@ -217186,7 +217197,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L379",
+      "source_location": "L383",
       "weight": 1.0
     },
     {
@@ -217208,7 +217219,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L404",
+      "source_location": "L408",
       "weight": 1.0
     },
     {
@@ -217219,7 +217230,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L433",
+      "source_location": "L437",
       "weight": 1.0
     },
     {
@@ -217230,7 +217241,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L445",
+      "source_location": "L449",
       "weight": 1.0
     },
     {
@@ -217241,7 +217252,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L454",
+      "source_location": "L458",
       "weight": 1.0
     },
     {
@@ -217252,7 +217263,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L464",
+      "source_location": "L468",
       "weight": 1.0
     },
     {
@@ -217263,7 +217274,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L468",
+      "source_location": "L472",
       "weight": 1.0
     },
     {
@@ -217274,7 +217285,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L493",
+      "source_location": "L497",
       "weight": 1.0
     },
     {
@@ -217285,7 +217296,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L497",
+      "source_location": "L501",
       "weight": 1.0
     },
     {
@@ -217296,7 +217307,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L512",
+      "source_location": "L516",
       "weight": 1.0
     },
     {
@@ -217307,18 +217318,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L519",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_mod",
-      "target": "src_tauri_src_resilience_mod_extract_exe_from_command_template",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L537",
+      "source_location": "L523",
       "weight": 1.0
     },
     {
@@ -217334,13 +217334,24 @@
     },
     {
       "source": "src_tauri_src_resilience_mod",
+      "target": "src_tauri_src_resilience_mod_extract_exe_from_command_template",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src-tauri/src/resilience/mod.rs",
+      "source_location": "L541",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_mod",
       "target": "src_tauri_src_resilience_mod_desktopswitchaction",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L559",
+      "source_location": "L563",
       "weight": 1.0
     },
     {
@@ -217351,7 +217362,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L568",
+      "source_location": "L572",
       "weight": 1.0
     },
     {
@@ -217362,7 +217373,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L650",
+      "source_location": "L654",
       "weight": 1.0
     },
     {
@@ -217384,7 +217395,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L666",
+      "source_location": "L670",
       "weight": 1.0
     },
     {
@@ -217395,7 +217406,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L690",
+      "source_location": "L694",
       "weight": 1.0
     },
     {
@@ -217406,7 +217417,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L717",
+      "source_location": "L721",
       "weight": 1.0
     },
     {
@@ -217417,7 +217428,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L737",
+      "source_location": "L741",
       "weight": 1.0
     },
     {
@@ -217428,18 +217439,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L790",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_mod",
-      "target": "src_tauri_src_resilience_mod_is_user_mouse_close_command",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L80",
+      "source_location": "L794",
       "weight": 1.0
     },
     {
@@ -217450,7 +217450,18 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L812",
+      "source_location": "L816",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_mod",
+      "target": "src_tauri_src_resilience_mod_is_user_mouse_close_command",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src-tauri/src/resilience/mod.rs",
+      "source_location": "L82",
       "weight": 1.0
     },
     {
@@ -217461,7 +217472,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L831",
+      "source_location": "L835",
       "weight": 1.0
     },
     {
@@ -217472,7 +217483,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L846",
+      "source_location": "L850",
       "weight": 1.0
     },
     {
@@ -217483,18 +217494,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L859",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_mod",
-      "target": "src_tauri_src_resilience_mod_authorize_quit_without_app_handle",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L87",
+      "source_location": "L863",
       "weight": 1.0
     },
     {
@@ -217505,7 +217505,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L873",
+      "source_location": "L877",
       "weight": 1.0
     },
     {
@@ -217516,7 +217516,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L885",
+      "source_location": "L889",
       "weight": 1.0
     },
     {
@@ -217527,18 +217527,18 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L904",
+      "source_location": "L908",
       "weight": 1.0
     },
     {
       "source": "src_tauri_src_resilience_mod",
-      "target": "src_tauri_src_resilience_mod_strip_hide_window_flag",
+      "target": "src_tauri_src_resilience_mod_authorize_quit_without_app_handle",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L97",
+      "source_location": "L91",
       "weight": 1.0
     },
     {
@@ -250360,7 +250360,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L577",
+      "source_location": "L581",
       "weight": 1.0
     },
     {
@@ -250371,7 +250371,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L145",
+      "source_location": "L149",
       "weight": 1.0
     },
     {
@@ -250382,7 +250382,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L220",
+      "source_location": "L224",
       "weight": 1.0
     },
     {
@@ -250393,7 +250393,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/mod.rs",
-      "source_location": "L229",
+      "source_location": "L233",
       "weight": 1.0
     },
     {
@@ -278430,5 +278430,5 @@
       "source_file": "docs/AI_PROJECT_GUIDE.md"
     }
   ],
-  "built_at_commit": "fee8a5fb85b3dc15ee7ca7411a6ded7b45857e28"
+  "built_at_commit": "9764eb536be8898abcc4bfc5ef0ecbce93697441"
 }

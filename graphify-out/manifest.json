@@ -756,9 +756,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/mod.rs": {
-    "mtime": 1793991487.822934,
-    "seen": 1793991547.999964,
-    "ast_hash": "5f18a18b1d4bf220a561b55b46eaa2a2",
+    "mtime": 1793992077.1991732,
+    "seen": 1793992105.556967,
+    "ast_hash": "f7e3c61b7f7aef2c743f42f8dd067459",
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/session.rs": {
@@ -936,9 +936,9 @@
     "semantic_hash": ""
   },
   "docs/superpowers/plans/test.md": {
-    "mtime": 1793954978.138,
-    "seen": 1793956578.062367,
-    "ast_hash": "ac085e4b71fdb11a6d7e2faf279a3e12",
+    "mtime": 1793991876.7858784,
+    "seen": 1793992105.5579772,
+    "ast_hash": "7d306eca2b7be08180939fe29f53e724",
     "semantic_hash": ""
   }
 }

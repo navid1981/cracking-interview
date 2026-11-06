@@ -1,7 +1,7 @@
 # Graph Report - cracking-interview  (2026-11-06)
 
 ## Corpus Check
-- 118 files · ~692,901 words
+- 118 files · ~692,950 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 15 file(s) not represented in the graph (top: .css 7, (none) 5, .icns 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `fee8a5fb`
+- Built from commit: `9764eb53`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 

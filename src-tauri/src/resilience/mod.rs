@@ -76,7 +76,9 @@ pub fn is_webview_render_surface_class(class: &str) -> bool {
 /// `lParam`, while programmatic senders (proctor close escalations,
 /// scripts) pass `lParam = 0`. Alt+F4 also arrives with `lParam = 0` and
 /// therefore stays blocked by design — the quit hotkey is the keyboard
-/// path for an authorized quit.
+/// path for an authorized quit. (Windows window-proc only; kept under
+/// `test` so the discriminator stays unit-tested on every platform.)
+#[cfg(any(target_os = "windows", test))]
 pub fn is_user_mouse_close_command(wparam: usize, lparam: isize) -> bool {
     (wparam & 0xFFF0) == 0xF060 && lparam != 0
 }
@@ -84,6 +86,8 @@ pub fn is_user_mouse_close_command(wparam: usize, lparam: isize) -> bool {
 /// Authorizes a quit without an `AppHandle` (e.g. from inside the Windows
 /// window procedure): sets the in-memory flag and persists the marker so
 /// the guardian exits cleanly instead of respawning.
+#[cfg(any(target_os = "windows", test))]
+#[allow(dead_code)] // exercised only by the Windows window proc at runtime
 pub fn authorize_quit_without_app_handle() {
     AUTHORIZED_QUIT.store(true, Ordering::SeqCst);
     if let Some(dir) = get_config_dir() {
