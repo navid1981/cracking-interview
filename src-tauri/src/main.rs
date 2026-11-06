@@ -1993,6 +1993,16 @@ fn main() {
         })
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // macOS: the red X / Cmd+W is a user quit. External tools
+                // terminate via quit AppleEvent / SIGTERM (handled on their
+                // own paths), not by synthesizing a window close, so it is
+                // safe to authorize here. (Windows discriminates the X click
+                // inside the window-proc subclass instead.)
+                #[cfg(target_os = "macos")]
+                if resilience::enabled() && !resilience::quit_was_authorized() {
+                    resilience::authorize_quit(_window.app_handle());
+                    resilience::log_event("User closed window (macOS red X); authorizing quit");
+                }
                 if resilience::enabled() && !resilience::quit_was_authorized() {
                     resilience::log_event("Blocked external CloseRequested / WM_CLOSE");
                     api.prevent_close();

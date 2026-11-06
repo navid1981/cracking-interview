@@ -498,6 +498,19 @@ unsafe extern "system" fn protected_window_proc(
             super::log_event("Blocked external WM_CLOSE via window-proc subclass");
             return LRESULT(0);
         }
+        // The user clicking the title-bar X (mouse coords in lParam) is an
+        // authorized quit: persist it so the guardian exits cleanly, then
+        // fall through to the original proc to close normally. Programmatic
+        // SC_CLOSE (lParam = 0, e.g. SEB's close escalation) stays blocked
+        // by the next arm.
+        WM_SYSCOMMAND
+            if super::is_user_mouse_close_command(wparam.0, lparam.0)
+                && super::enabled()
+                && !super::quit_was_authorized() =>
+        {
+            super::authorize_quit_without_app_handle();
+            super::log_event("User clicked title-bar X (mouse SC_CLOSE); authorizing quit");
+        }
         WM_SYSCOMMAND
             if (wparam.0 & 0xFFF0) == SC_CLOSE as usize
                 && super::enabled()

@@ -108,8 +108,8 @@
     "semantic_hash": ""
   },
   "src-tauri/src/chrome/launcher.rs": {
-    "mtime": 1793943764.4357715,
-    "seen": 1793953209.077364,
+    "mtime": 1793991128.6724973,
+    "seen": 1793991547.9999082,
     "ast_hash": "8413db9cd10da84e1b053188a83eac48",
     "semantic_hash": ""
   },
@@ -126,9 +126,9 @@
     "semantic_hash": "8e734ea5be135a77623dec3091fe2439"
   },
   "src-tauri/src/main.rs": {
-    "mtime": 1793989433.9044545,
-    "seen": 1793989483.779413,
-    "ast_hash": "42ba34506958af32d76a6c912f428746",
+    "mtime": 1793991504.028364,
+    "seen": 1793991547.999935,
+    "ast_hash": "dc56a976524e85e533b6796ceae75b3a",
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot.rs": {
@@ -210,8 +210,8 @@
     "semantic_hash": ""
   },
   "src/components/TabDropdown.tsx": {
-    "mtime": 1793943764.442988,
-    "seen": 1793953209.0775628,
+    "mtime": 1793991128.6724865,
+    "seen": 1793991548.0001569,
     "ast_hash": "f2ea4b2e810fa496090e9a8ca8367f2e",
     "semantic_hash": ""
   },
@@ -342,9 +342,9 @@
     "semantic_hash": ""
   },
   "docs/AI_PROJECT_GUIDE.md": {
-    "mtime": 1793989092.1704137,
-    "seen": 1793989483.780409,
-    "ast_hash": "42dd73399f3e0e631913a95283c06883",
+    "mtime": 1793991534.480101,
+    "seen": 1793991548.0008981,
+    "ast_hash": "0fa4414fa163118041b69665ea82d6a5",
     "semantic_hash": ""
   },
   "index.html": {
@@ -756,9 +756,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/mod.rs": {
-    "mtime": 1793989092.1868963,
-    "seen": 1793989483.7794151,
-    "ast_hash": "6c3525f5c742053575e0692985ad2afa",
+    "mtime": 1793991487.822934,
+    "seen": 1793991547.999964,
+    "ast_hash": "5f18a18b1d4bf220a561b55b46eaa2a2",
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/session.rs": {
@@ -768,9 +768,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/windows.rs": {
-    "mtime": 1793990827.4472728,
-    "seen": 1793990898.92431,
-    "ast_hash": "f25b56ae4a4d110d58ab481712a65448",
+    "mtime": 1793991491.3274865,
+    "seen": 1793991547.999978,
+    "ast_hash": "9d57b92e3286e188934a3f57a9050708",
     "semantic_hash": ""
   },
   "src/services/recoveryState.ts": {

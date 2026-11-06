@@ -70,6 +70,27 @@ pub fn is_webview_render_surface_class(class: &str) -> bool {
     )
 }
 
+/// Whether a `WM_SYSCOMMAND` is the user clicking the title-bar X with the
+/// mouse. `SC_CLOSE` is `0xF060` (low 4 bits are internal flags); a real
+/// non-client mouse click packs the cursor's screen coordinates into
+/// `lParam`, while programmatic senders (proctor close escalations,
+/// scripts) pass `lParam = 0`. Alt+F4 also arrives with `lParam = 0` and
+/// therefore stays blocked by design — the quit hotkey is the keyboard
+/// path for an authorized quit.
+pub fn is_user_mouse_close_command(wparam: usize, lparam: isize) -> bool {
+    (wparam & 0xFFF0) == 0xF060 && lparam != 0
+}
+
+/// Authorizes a quit without an `AppHandle` (e.g. from inside the Windows
+/// window procedure): sets the in-memory flag and persists the marker so
+/// the guardian exits cleanly instead of respawning.
+pub fn authorize_quit_without_app_handle() {
+    AUTHORIZED_QUIT.store(true, Ordering::SeqCst);
+    if let Some(dir) = get_config_dir() {
+        let _ = authorize_quit_in_dir(&dir);
+    }
+}
+
 /// Removes the Win32 `SWP_HIDEWINDOW` (0x80) bit from `WINDOWPOS.flags` when
 /// `block` is set, leaving every other flag unchanged.
 #[allow(dead_code)]
@@ -804,6 +825,21 @@ mod tests {
         assert!(active_len < 250, "Active log should have been rotated");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_user_mouse_close_command_discriminates_x_click_from_programmatic() {
+        // Real title-bar X click: SC_CLOSE (0xF060, already masked) with the
+        // cursor's screen coordinates packed in lParam (!= 0).
+        assert!(is_user_mouse_close_command(0xF060, 0x01E0_0280));
+        // Programmatic close (e.g. SEB's SendMessage WM_SYSCOMMAND/SC_CLOSE
+        // escalation) passes lParam = 0 -> must stay blocked.
+        assert!(!is_user_mouse_close_command(0xF060, 0));
+        // Other system commands with coords are not closes.
+        assert!(!is_user_mouse_close_command(0xF020, 0x01E0_0280)); // SC_MINIMIZE
+        assert!(!is_user_mouse_close_command(0xF120, 0x01E0_0280)); // SC_RESTORE
+        // Low bits of wParam are internal flags and must be masked off.
+        assert!(is_user_mouse_close_command(0xF063, 0x01E0_0280));
     }
 
     #[test]
