@@ -125,6 +125,9 @@ impl InstanceLock {
             use std::os::unix::io::AsRawFd;
             let file = OpenOptions::new()
                 .create(true)
+                // Lock file only: never truncate (explicit per clippy; the
+                // file's contents are irrelevant, its flock is the lock).
+                .truncate(false)
                 .read(true)
                 .write(true)
                 .open(&path)
@@ -142,6 +145,7 @@ impl InstanceLock {
             use std::os::windows::fs::OpenOptionsExt;
             let file = OpenOptions::new()
                 .create(true)
+                .truncate(false) // Lock file only; contents are irrelevant
                 .read(true)
                 .write(true)
                 .share_mode(0) // Exclusive lock; released by kernel on process exit
@@ -187,11 +191,9 @@ pub fn handle_early_cli_and_bootstrap() {
     let should_bootstrap_guardian =
         resilience_cfg.enabled && !is_gui && !is_desktop_worker && (!cfg!(debug_assertions) || force_guardian);
 
-    if should_bootstrap_guardian {
-        if spawn_detached_guardian().is_ok() {
-            std::process::exit(0);
-        }
-        // If spawning guardian failed for any reason, fall through and run GUI directly.
+    // If spawning the guardian failed for any reason, fall through and run the GUI directly.
+    if should_bootstrap_guardian && spawn_detached_guardian().is_ok() {
+        std::process::exit(0);
     }
 
     // Acquire GUI or Desktop-Worker single-instance lock to prevent duplicate windows/hooks.

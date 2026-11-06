@@ -1,17 +1,17 @@
 # Graph Report - cracking-interview  (2026-11-06)
 
 ## Corpus Check
-- 118 files · ~692,594 words
+- 118 files · ~692,473 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 15 file(s) not represented in the graph (top: .css 7, (none) 5, .icns 1)
 
 ## Summary
-- 6087 nodes · 17592 edges · 270 communities (199 shown, 71 thin omitted)
-- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 499 edges (avg confidence: 0.86)
+- 6087 nodes · 17593 edges · 270 communities (199 shown, 71 thin omitted)
+- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 500 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `388d448f`
+- Built from commit: `005e33f9`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -603,7 +603,7 @@ Nodes (8): DesktopSwitchAction, NoOp, ReturnToDefault, SpawnWorker, StandByForDe
 
 ### Community 77 - "macos.rs"
 Cohesion: 0.09
-Nodes (22): CAN_JOIN_ALL_SPACES, compute_kiosk_collection_behavior(), FULL_SCREEN_AUXILIARY, FULL_SCREEN_PRIMARY, IGNORES_CYCLE, install_guardian_signal_guard(), install_sigterm_guard(), KIOSK_OVERLAY_WINDOW_LEVEL (+14 more)
+Nodes (22): CAN_JOIN_ALL_SPACES, compute_kiosk_collection_behavior(), FULL_SCREEN_AUXILIARY, FULL_SCREEN_PRIMARY, IGNORES_CYCLE, install_guardian_signal_guard(), install_sigterm_guard(), LAUNCH_AGENT_FILE_NAME (+14 more)
 
 ### Community 78 - "ZipBufferIterator"
 Cohesion: 0.10
@@ -786,8 +786,8 @@ Cohesion: 0.15
 Nodes (20): addKeyword(), _addRule(), checkDataType(), checkDataTypes(), compile(), addLocalRef(), localCompile(), removeLocalRef() (+12 more)
 
 ### Community 129 - "start_window_self_healer"
-Cohesion: 0.19
-Nodes (11): remove_windows_stealth(), set_keyboard_input_mode(), set_window_opacity(), apply_experimental_process_dacl_hardening(), build_window_diag_snapshot(), install_window_protect_subclass(), protected_window_proc(), start_window_self_healer() (+3 more)
+Cohesion: 0.18
+Nodes (12): remove_windows_stealth(), set_keyboard_input_mode(), set_window_opacity(), apply_experimental_process_dacl_hardening(), build_window_diag_snapshot(), install_window_protect_subclass(), protected_window_proc(), start_window_self_healer() (+4 more)
 
 ### Community 130 - "build-macos.sh"
 Cohesion: 0.25
@@ -987,7 +987,7 @@ Nodes (13): OS Kernel Reality & Gated Strategy, Step-by-Step Implementation Task
 
 ### Community 200 - "win-proctor.rs"
 Cohesion: 0.09
-Nodes (34): bring_to_front_without_focus(), init_windows_hook(), CloseDesktop(), CloseHandle(), CreateDesktopW(), DF_ALLOWOTHERACCOUNTHOOK, enum_windows_cb(), EnumWindows() (+26 more)
+Nodes (33): bring_to_front_without_focus(), init_windows_hook(), CloseDesktop(), CloseHandle(), CreateDesktopW(), DF_ALLOWOTHERACCOUNTHOOK, enum_windows_cb(), EnumWindows() (+25 more)
 
 ### Community 201 - "session.rs"
 Cohesion: 0.15

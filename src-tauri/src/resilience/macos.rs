@@ -129,7 +129,7 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
                 if ns_win_raw.is_null() {
                     return;
                 }
-                let ns_window = ns_win_raw as *mut c_void;
+                let ns_window = ns_win_raw;
 
                 extern "C" {
                     fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
