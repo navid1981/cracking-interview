@@ -7,6 +7,95 @@ use tauri::Manager;
 
 pub fn start_desktop_switch_monitor(_config_dir: PathBuf) {}
 
+/// Opens an `http(s)` URL on Windows without relying on `explorer.exe` or `cmd.exe /C start`.
+/// Resolves the browser binary from Registry or known Chrome/Edge/Brave install paths and spawns directly.
+pub fn open_url_shell_independent(url: &str) -> Result<(), String> {
+    let validated = super::validate_external_http_url(url)?;
+
+    if let Some(browser_exe) = resolve_windows_browser_exe() {
+        if std::process::Command::new(&browser_exe)
+            .arg(&validated)
+            .spawn()
+            .is_ok()
+        {
+            return Ok(());
+        }
+    }
+
+    Err("Could not locate a browser executable (Chrome/Edge) to open URL while Explorer shell is unavailable".to_string())
+}
+
+fn resolve_windows_browser_exe() -> Option<PathBuf> {
+    // 1. Try resolving UserChoice ProgId -> shell\open\command via reg.exe (works without explorer.exe)
+    if let Ok(out) = std::process::Command::new("reg")
+        .args([
+            "query",
+            r"HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
+            "/v",
+            "ProgId",
+        ])
+        .output()
+    {
+        if out.status.success() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            if let Some(prog_id) = text
+                .lines()
+                .find(|l| l.contains("ProgId"))
+                .and_then(|l| l.split_whitespace().last())
+            {
+                let key = format!(r"HKCR\{}\shell\open\command", prog_id);
+                if let Ok(cmd_out) = std::process::Command::new("reg")
+                    .args(["query", &key, "/ve"])
+                    .output()
+                {
+                    if cmd_out.status.success() {
+                        let cmd_text = String::from_utf8_lossy(&cmd_out.stdout);
+                        for line in cmd_text.lines() {
+                            if let Some(idx) = line.find("REG_SZ") {
+                                let template = &line[idx + "REG_SZ".len()..];
+                                if let Some(exe) =
+                                    super::extract_exe_from_command_template(template)
+                                {
+                                    let pb = PathBuf::from(exe);
+                                    if pb.is_file() {
+                                        return Some(pb);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Fallback: Check standard Chrome / Edge / Brave paths directly (zero shell dependency)
+    let mut candidates: Vec<PathBuf> = vec![
+        PathBuf::from(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        PathBuf::from(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+        PathBuf::from(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+        PathBuf::from(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+        PathBuf::from(r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"),
+    ];
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        candidates.insert(
+            0,
+            PathBuf::from(&local).join(r"Google\Chrome\Application\chrome.exe"),
+        );
+        candidates.push(PathBuf::from(&local).join(r"Microsoft\Edge\Application\msedge.exe"));
+        candidates.push(
+            PathBuf::from(&local).join(r"BraveSoftware\Brave-Browser\Application\brave.exe"),
+        );
+    }
+
+    for candidate in candidates {
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 /// Spawns a 250ms background thread on Windows that inspects the main window's
 /// visibility, topmost z-order, extended styles (`WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`),
 /// and screen-capture exclusion (`WDA_EXCLUDEFROMCAPTURE = 0x11`).

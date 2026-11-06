@@ -851,28 +851,26 @@ fn url_host_for_log(url: &str) -> &str {
 /// Open a URL in the default system browser
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
-    println!("[OpenURL] Opening: {}", url_host_for_log(&url));
+    let validated = resilience::validate_external_http_url(&url)?;
+    println!("[OpenURL] Opening: {}", url_host_for_log(&validated));
     
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .arg(&url)
+            .arg(&validated)
             .spawn()
             .map_err(|e| format!("Failed to open URL: {}", e))?;
     }
     
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &url])
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
+        resilience::windows::open_url_shell_independent(&validated)?;
     }
     
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
-            .arg(&url)
+            .arg(&validated)
             .spawn()
             .map_err(|e| format!("Failed to open URL: {}", e))?;
     }
@@ -995,33 +993,7 @@ async fn create_billing_portal_session(
 /// Open a URL in the system's default browser
 #[tauri::command]
 async fn open_url(url: String) -> Result<(), String> {
-    println!("[Open URL] Opening: {}", url_host_for_log(&url));
-    
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
-    }
-    
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &url])
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
-    }
-    
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
-    }
-    
-    Ok(())
+    open_external_url(url)
 }
 
 /// Sign up a new user via Supabase Auth (bypasses SSL inspection on corporate VPN)

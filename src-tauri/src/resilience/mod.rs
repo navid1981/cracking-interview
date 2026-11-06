@@ -308,6 +308,43 @@ pub fn log_event(msg: &str) {
     }
 }
 
+pub fn validate_external_http_url(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("URL cannot be empty".to_string());
+    }
+    if !(trimmed.starts_with("https://") || trimmed.starts_with("http://")) {
+        return Err("Only http:// and https:// URLs are allowed".to_string());
+    }
+    if trimmed
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '"' | '\'' | '`' | '|' | ';' | '<' | '>' | '\r' | '\n' | ' '))
+    {
+        return Err("URL contains unsafe characters".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+pub fn extract_exe_from_command_template(cmd: &str) -> Option<String> {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rest) = trimmed.strip_prefix('"') {
+        let end = rest.find('"')?;
+        let exe = &rest[..end];
+        if exe.to_lowercase().ends_with(".exe") {
+            return Some(exe.to_string());
+        }
+    }
+    let token = trimmed.split_whitespace().next()?;
+    if token.to_lowercase().ends_with(".exe") {
+        Some(token.to_string())
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,5 +414,25 @@ mod tests {
         assert!(cfg_custom.harden_process_dacl);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_validate_external_http_url_rejects_unsafe_schemes_and_preserves_query() {
+        let valid = "https://checkout.stripe.com/c/pay/cs_live_123?foo=1&bar=2";
+        assert_eq!(validate_external_http_url(valid).unwrap(), valid);
+        assert!(validate_external_http_url("http://127.0.0.1:1420/test").is_ok());
+
+        // Reject non-http(s) and command-injection attempts
+        assert!(validate_external_http_url("file:///C:/Windows/System32/cmd.exe").is_err());
+        assert!(validate_external_http_url("javascript:alert(1)").is_err());
+        assert!(validate_external_http_url("https://example.com\" & calc.exe").is_err());
+        assert!(validate_external_http_url("").is_err());
+
+        // Extract executable from Windows registry shell\open\command template
+        let reg_cmd = r#""C:\Program Files\Google\Chrome\Application\chrome.exe" --single-argument %1"#;
+        assert_eq!(
+            extract_exe_from_command_template(reg_cmd).as_deref(),
+            Some(r#"C:\Program Files\Google\Chrome\Application\chrome.exe"#)
+        );
     }
 }
