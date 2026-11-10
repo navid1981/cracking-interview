@@ -1,32 +1,43 @@
-[2026-11-10T07:29:52.905739200+00:00] [pid=12976] Dev guardian mode (CI_FORCE_GUARDIAN=1): bootstrap process staying alive so `tauri dev` keeps the Vite dev server running
-[2026-11-10T07:29:52.917323700+00:00] [pid=10892] Guardian supervisor started
-[2026-11-10T07:29:57.586600700+00:00] [pid=6284] Installed window-proc hide-protection subclass
-[2026-11-10T07:29:57.838093600+00:00] [pid=6284] [window-diag] main vis=true rect=706x1102@224,0 affinity=0x11 foreground=true children=[WRY_WEBVIEW:vis=true:688x1055@233,38; Chrome_WidgetWin_0:vis=true:688x1055@233,38; Chrome_WidgetWin_1:vis=true:688x1055@233,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@233,38; Intermediate D3D Window:vis=true:688x1055@233,38]
-[2026-11-10T07:30:02.221866800+00:00] [pid=6284] [webview-diag] page-load Started url=http://127.0.0.1:1420/
-[2026-11-10T07:30:06.081777300+00:00] [pid=6284] [webview-diag] page-load Finished url=http://127.0.0.1:1420/
-[2026-11-10T07:30:06.085763+00:00] [pid=6284] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
-[2026-11-10T07:30:06.111475700+00:00] [pid=6284] [webview-diag] frontend IPC alive: get_session_snapshot called
-[2026-11-10T07:30:06.121732600+00:00] [pid=6284] [webview-diag] frontend IPC alive: get_session_snapshot called
-[2026-11-10T07:30:06.381434200+00:00] [pid=6284] [window-diag] main vis=true rect=706x1102@224,0 affinity=0x0 foreground=true children=[WRY_WEBVIEW:vis=true:688x1055@233,38; Chrome_WidgetWin_0:vis=true:688x1055@233,38; Chrome_WidgetWin_1:vis=true:688x1055@233,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@233,38; Intermediate D3D Window:vis=true:688x1055@233,38]
-[2026-11-10T07:30:24.069759100+00:00] [pid=6284] [window-diag] WM_ACTIVATE state=0 (0=inactive,1=active,2=click-active)
-[2026-11-10T07:30:24.260690600+00:00] [pid=6284] [window-diag] main vis=true rect=706x1102@224,0 affinity=0x0 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@233,38; Chrome_WidgetWin_0:vis=true:688x1055@233,38; Chrome_WidgetWin_1:vis=true:688x1055@233,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@233,38; Intermediate D3D Window:vis=true:688x1055@233,38]
-[2026-11-10T07:30:25.018805300+00:00] [pid=6284] [window-diag] main vis=true rect=706x1102@224,0 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@233,38; Chrome_WidgetWin_0:vis=true:688x1055@233,38; Chrome_WidgetWin_1:vis=true:688x1055@233,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@233,38; Intermediate D3D Window:vis=true:688x1055@233,38]
-[2026-11-10T07:30:25.799083700+00:00] [pid=6284] [window-diag] WM_ACTIVATE state=2 (0=inactive,1=active,2=click-active)
-[[2026-11-10T07:31:07.079180700+00:00] [pid=10892] GUI exited after 74.1608445s (mode=Normal); respawning in 500ms
-[2026-11-10T07:31:11.529702200+00:00] [pid=14228] Restored window geometry from session-snapshot.json
-[2026-11-10T07:31:11.531801400+00:00] [pid=14228] Installed window-proc hide-protection subclass
-[2026-11-10T07:31:11.539439700+00:00] [pid=14228] [webview-diag] page-load Started url=http://127.0.0.1:1420/
-[2026-11-10T07:31:11.783397300+00:00] [pid=14228] [window-diag] main vis=true rect=706x1102@224,0 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@233,38; Chrome_WidgetWin_0:vis=true:688x1055@233,38; Chrome_WidgetWin_1:vis=true:688x1055@233,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@233,38; Intermediate D3D Window:vis=true:688x1055@233,38]
-[2026-11-10T07:31:12.305872+00:00] [pid=14228] [webview-diag] page-load Finished url=http://127.0.0.1:1420/
-[2026-11-10T07:31:12.309938+00:00] [pid=14228] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
-[2026-11-10T07:31:12.336710100+00:00] [pid=14228] [webview-diag] frontend IPC alive: get_session_snapshot called
-[2026-11-10T07:31:12.341811300+00:00] [pid=14228] [webview-diag] frontend IPC alive: get_session_snapshot called
-[2026-11-10T07:31:12.537325500+00:00] [pid=14228] [window-diag] main vis=true rect=706x1102@224,0 affinity=0x0 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@233,38; Chrome_WidgetWin_0:vis=true:688x1055@233,38; Chrome_WidgetWin_1:vis=true:688x1055@233,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@233,38; Intermediate D3D Window:vis=true:688x1055@233,38]
-[2026-11-10T07:31:17.595789500+00:00] [pid=14228] [window-diag] main vis=true rect=706x1102@224,0 affinity=0x0 foreground=true children=[WRY_WEBVIEW:vis=true:688x1055@233,38; Chrome_WidgetWin_0:vis=true:688x1055@233,38; Chrome_WidgetWin_1:vis=true:688x1055@233,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@233,38; Intermediate D3D Window:vis=true:688x1055@233,38]
-[2026-11-10T07:31:18.480067+00:00] [pid=14228] [window-diag] WM_ACTIVATE state=0 (0=inactive,1=active,2=click-active)
-[2026-11-10T07:31:18.601776900+00:00] [pid=14228] [window-diag] main vis=true rect=706x1102@224,0 affinity=0x0 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@233,38; Chrome_WidgetWin_0:vis=true:688x1055@233,38; Chrome_WidgetWin_1:vis=true:688x1055@233,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@233,38; Intermediate D3D Window:vis=true:688x1055@233,38]
-[2026-11-10T07:31:19.356133900+00:00] [pid=14228] [window-diag] main vis=true rect=706x1102@224,0 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@233,38; Chrome_WidgetWin_0:vis=true:688x1055@233,38; Chrome_WidgetWin_1:vis=true:688x1055@233,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@233,38; Intermediate D3D Window:vis=true:688x1055@233,38]
-[2026-11-10T07:31:20.539075900+00:00] [pid=14228] [window-diag] WM_ACTIVATE state=2 (0=inactive,1=active,2=click-active)
-[2026-11-10T07:33:31.390850800+00:00] [pid=14228] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-10T07:33:31.391497100+00:00] [pid=14228] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-10T07:33:31.605334500+00:00] [pid=14228] Self-healed stripped WS_EX_TOPMOST on HWND
+[2026-11-10T07:40:33.747711+00:00] [pid=14228] User clicked title-bar X (mouse SC_CLOSE); authorizing quit
+[2026-11-10T07:42:15.168316400+00:00] [pid=8488] Dev guardian mode (CI_FORCE_GUARDIAN=1): bootstrap process staying alive so `tauri dev` keeps the Vite dev server running
+[2026-11-10T07:42:15.177749200+00:00] [pid=13700] Guardian supervisor started
+[2026-11-10T07:42:19.856554200+00:00] [pid=6420] Installed window-proc hide-protection subclass
+[2026-11-10T07:42:19.867548500+00:00] [pid=6420] [webview-diag] page-load Started url=http://127.0.0.1:1420/
+[2026-11-10T07:42:20.109259800+00:00] [pid=6420] [window-diag] main vis=true rect=706x1102@160,0 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@169,38; Chrome_WidgetWin_0:vis=true:688x1055@169,38; Chrome_WidgetWin_1:vis=true:688x1055@169,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@169,38; Intermediate D3D Window:vis=true:688x1055@169,38]
+[2026-11-10T07:42:20.934702300+00:00] [pid=6420] [webview-diag] page-load Finished url=http://127.0.0.1:1420/
+[2026-11-10T07:42:20.939531600+00:00] [pid=6420] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
+[2026-11-10T07:42:20.965502400+00:00] [pid=6420] [webview-diag] frontend IPC alive: get_session_snapshot called
+[2026-11-10T07:42:20.976711100+00:00] [pid=6420] [webview-diag] frontend IPC alive: get_session_snapshot called
+[2026-11-10T07:42:21.178139+00:00] [pid=6420] [window-diag] main vis=true rect=706x1102@160,0 affinity=0x0 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@169,38; Chrome_WidgetWin_0:vis=true:688x1055@169,38; Chrome_WidgetWin_1:vis=true:688x1055@169,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@169,38; Intermediate D3D Window:vis=true:688x1055@169,38]
+[2026-11-10T07:42:22.432792700+00:00] [pid=6420] [window-diag] main vis=true rect=706x1102@160,0 affinity=0x0 foreground=true children=[WRY_WEBVIEW:vis=true:688x1055@169,38; Chrome_WidgetWin_0:vis=true:688x1055@169,38; Chrome_WidgetWin_1:vis=true:688x1055@169,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@169,38; Intermediate D3D Window:vis=true:688x1055@169,38]
+[2026-11-10T07:42:24.191939700+00:00] [pid=6420] [window-diag] main vis=true rect=706x1102@160,0 affinity=0x11 foreground=true children=[WRY_WEBVIEW:vis=true:688x1055@169,38; Chrome_WidgetWin_0:vis=true:688x1055@169,38; Chrome_WidgetWin_1:vis=true:688x1055@169,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@169,38; Intermediate D3D Window:vis=true:688x1055@169,38]
+[2026-11-10T07:42:27.718397700+00:00] [pid=6420] [window-diag] main vis=true rect=706x1102@160,0 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@169,38; Chrome_WidgetWin_0:vis=true:688x1055@169,38; Chrome_WidgetWin_1:vis=true:688x1055@169,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@169,38; Intermediate D3D Window:vis=true:688x1055@169,38]
+[2026-11-10T07:42:28.725730700+00:00] [pid=6420] [window-diag] WM_ACTIVATE state=0 (0=inactive,1=active,2=click-active)
+[2026-11-10T07:42:29.372938200+00:00] [pid=6420] [window-diag] WM_ACTIVATE state=2 (0=inactive,1=active,2=click-active)
+[2026-11-10T07:42:52.029020400+00:00] [pid=6420] [window-diag] close-path arrival msg=0x0010 enabled=true quit_authorized=false user_hidden=false
+[2026-11-10T07:42:52.076709800+00:00] [pid=13700] GUI exited after 36.8979528s (mode=Normal); respawning in 500ms
+[2026-11-10T07:42:56.467135800+00:00] [pid=6064] Restored window geometry from session-snapshot.json
+[2026-11-10T07:42:56.469109900+00:00] [pid=6064] Installed window-proc hide-protection subclass
+[2026-11-10T07:42:56.478021500+00:00] [pid=6064] [webview-diag] page-load Started url=http://127.0.0.1:1420/
+[2026-11-10T07:42:56.721089500+00:00] [pid=6064] [window-diag] main vis=true rect=706x1102@160,0 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@169,38; Chrome_WidgetWin_0:vis=true:688x1055@169,38; Chrome_WidgetWin_1:vis=true:688x1055@169,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@169,38; Intermediate D3D Window:vis=true:688x1055@169,38]
+[2026-11-10T07:42:57.264722400+00:00] [pid=6064] [webview-diag] page-load Finished url=http://127.0.0.1:1420/
+[2026-11-10T07:42:57.268101+00:00] [pid=6064] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
+[2026-11-10T07:42:57.294155100+00:00] [pid=6064] [webview-diag] frontend IPC alive: get_session_snapshot called
+[2026-11-10T07:42:57.304141400+00:00] [pid=6064] [webview-diag] frontend IPC alive: get_session_snapshot called
+[2026-11-10T07:42:57.475205100+00:00] [pid=6064] [window-diag] main vis=true rect=706x1102@160,0 affinity=0x0 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@169,38; Chrome_WidgetWin_0:vis=true:688x1055@169,38; Chrome_WidgetWin_1:vis=true:688x1055@169,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@169,38; Intermediate D3D Window:vis=true:688x1055@169,38]
+[2026-11-10T07:43:01.753756800+00:00] [pid=6064] [window-diag] main vis=true rect=706x1102@160,0 affinity=0x0 foreground=true children=[WRY_WEBVIEW:vis=true:688x1055@169,38; Chrome_WidgetWin_0:vis=true:688x1055@169,38; Chrome_WidgetWin_1:vis=true:688x1055@169,38; Chrome_RenderWidgetHostHWND:vis=true:689x1055@169,38; Intermediate D3D Window:vis=true:688x1055@169,38]
+[2026-11-10T07:43:08.555500900+00:00] [pid=6064] [window-diag] WM_ACTIVATE state=0 (0=inactive,1=active,2=click-active)
+[2026-11-10T07:43:08.558156600+00:00] [pid=6064] [window-diag] main vis=true rect=706x1102@1272,51 affinity=0x0 foreground=false children=[WRY_WEBVIEW:vis=true:688x1055@1281,89; Chrome_WidgetWin_0:vis=true:688x1055@1281,89; Chrome_WidgetWin_1:vis=true:688x1055@1281,89; Chrome_RenderWidgetHostHWND:vis=true:689x1055@1281,89; Intermediate D3D Window:vis=true:688x1055@1281,89]
+[2026-11-10T07:43:22.508409100+00:00] [pid=6064] [window-diag] WM_ACTIVATE state=1 (0=inactive,1=active,2=click-active)
+[2026-11-10T07:43:22.633675800+00:00] [pid=6064] [window-diag] WM_ACTIVATE state=0 (0=inactive,1=active,2=click-active)
+
+
+PS D:\projects\cracking-interview> .\tools\proctor-sim\win-proctor.exe close
+[win-proctor] Found 6 window(s) for CrackingInterview
+[win-proctor] Sent WM_CLOSE to HWND=0x20970 (PID=6420) class='Tauri Window' visible=true
+[win-proctor] Sent WM_CLOSE to HWND=0x2096c (PID=6420) class='global_hotkey_app' visible=false
+[win-proctor] Sent WM_CLOSE to HWND=0x2095a (PID=6420) class='Tao Thread Event Target' visible=true
+[win-proctor] Sent WM_CLOSE to HWND=0x4707c2 (PID=6420) class='ConsoleWindowClass' visible=true
+[win-proctor] Sent WM_CLOSE to HWND=0x20968 (PID=6420) class='MSCTFIME UI' visible=false
+[win-proctor] Sent WM_CLOSE to HWND=0x20964 (PID=6420) class='IME' visible=false
+[win-proctor] 2s after WM_CLOSE: 1 window(s) still present
