@@ -17,3 +17,5 @@
 [2026-11-10T07:12:35.957030300+00:00] [pid=12076] Blocked external WM_CLOSE via window-proc subclass
 [2026-11-10T07:13:17.557964500+00:00] [pid=12076] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
 [2026-11-10T07:13:17.558838600+00:00] [pid=12076] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
+
+Get-Process | Where-Object { $_.Path -like "*cracking-interview*" } | Select-Object Id, Path
