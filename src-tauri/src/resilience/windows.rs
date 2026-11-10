@@ -453,6 +453,26 @@ unsafe extern "system" fn protected_window_proc(
     use windows::Win32::Foundation::LRESULT;
     use windows::Win32::UI::WindowsAndMessaging::*;
 
+    // [window-diag] Log every close-path message ON ARRIVAL, before any guard
+    // runs. A guardian-respawned GUI once died from an external WM_CLOSE with
+    // no block/authorization log at all; arrival logging distinguishes
+    // "message never reached this proc" (helper-window / proc replaced) from
+    // "guard let it through" (values below) from "died inside the handler"
+    // (arrival logged, nothing after). Close attempts are rare, so the
+    // filesystem-backed reads are acceptable here.
+    if msg == WM_CLOSE
+        || msg == WM_DESTROY
+        || (msg == WM_SYSCOMMAND && (wparam.0 & 0xFFF0) == SC_CLOSE as usize)
+    {
+        super::log_event(&format!(
+            "[window-diag] close-path arrival msg={:#06x} enabled={} quit_authorized={} user_hidden={}",
+            msg,
+            super::enabled(),
+            super::quit_was_authorized(),
+            super::USER_HIDDEN.load(Ordering::Relaxed)
+        ));
+    }
+
     // Only the hide/close messages need the (filesystem-backed) authorization
     // and config checks; every other message goes straight to the original
     // proc so the UI thread is not slowed down.
@@ -662,6 +682,10 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
             std::thread::sleep(Duration::from_millis(250));
 
             if super::quit_was_authorized() {
+                // Log before exiting: this is a legitimate silent-exit path
+                // (authorized quit observed cross-process) and must be
+                // distinguishable from an unexplained GUI death in the log.
+                super::log_event("Self-healer observed authorized quit; exiting GUI");
                 crate::stealth_hotkey::teardown_stealth_hotkeys();
                 app.exit(0);
                 break;

@@ -45,6 +45,7 @@ mod win {
         fn GetWindowThreadProcessId(hWnd: HWND, lpdwProcessId: *mut DWORD) -> DWORD;
         fn IsWindowVisible(hWnd: HWND) -> BOOL;
         fn PostMessageW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) -> BOOL;
+        fn GetClassNameW(hWnd: HWND, lpClassName: *mut u16, nMaxCount: i32) -> i32;
         fn ShowWindow(hWnd: HWND, nCmdShow: i32) -> BOOL;
         fn GetWindowLongPtrW(hWnd: HWND, nIndex: i32) -> LONG_PTR;
         fn SetWindowLongPtrW(hWnd: HWND, nIndex: i32, dwNewLong: LONG_PTR) -> LONG_PTR;
@@ -114,6 +115,15 @@ mod win {
         1
     }
 
+    fn window_class(hwnd: HWND) -> String {
+        let mut buf = [0u16; 256];
+        let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+        if n <= 0 {
+            return "<unknown>".to_string();
+        }
+        String::from_utf16_lossy(&buf[..n as usize])
+    }
+
     fn find_targets() -> Vec<(HWND, DWORD)> {
         let mut ctx = SearchCtx {
             targets: Vec::new(),
@@ -134,7 +144,13 @@ mod win {
                     unsafe {
                         PostMessageW(*hwnd, WM_CLOSE, 0, 0);
                     }
-                    println!("[win-proctor] Sent WM_CLOSE to HWND={:#x} (PID={})", hwnd, pid);
+                    println!(
+                        "[win-proctor] Sent WM_CLOSE to HWND={:#x} (PID={}) class='{}' visible={}",
+                        hwnd,
+                        pid,
+                        window_class(*hwnd),
+                        unsafe { IsWindowVisible(*hwnd) != 0 }
+                    );
                 }
                 thread::sleep(Duration::from_secs(2));
                 let after = find_targets();

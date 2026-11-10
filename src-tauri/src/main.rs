@@ -1993,6 +1993,15 @@ fn main() {
         })
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // [window-diag] Log arrival unconditionally: the prevent-path
+                // logs below, but an authorized close falls through silently,
+                // which made an external WM_CLOSE death indistinguishable
+                // from a user quit in the log.
+                resilience::log_event(&format!(
+                    "[window-diag] CloseRequested arrival enabled={} quit_authorized={}",
+                    resilience::enabled(),
+                    resilience::quit_was_authorized()
+                ));
                 // macOS: the red X / Cmd+W is a user quit. External tools
                 // terminate via quit AppleEvent / SIGTERM (handled on their
                 // own paths), not by synthesizing a window close, so it is
@@ -2115,6 +2124,12 @@ fn main() {
     app.run(|app_handle, event| {
         match event {
             tauri::RunEvent::ExitRequested { api, .. } => {
+                // [window-diag] Log arrival unconditionally (see CloseRequested).
+                resilience::log_event(&format!(
+                    "[window-diag] ExitRequested arrival enabled={} quit_authorized={}",
+                    resilience::enabled(),
+                    resilience::quit_was_authorized()
+                ));
                 if resilience::enabled() && !resilience::quit_was_authorized() {
                     if resilience::should_yield_to_assessment(app_handle) {
                         resilience::mark_killed_by_os(app_handle);
