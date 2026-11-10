@@ -342,9 +342,9 @@
     "semantic_hash": ""
   },
   "docs/AI_PROJECT_GUIDE.md": {
-    "mtime": 1793992526.3462927,
-    "seen": 1793992777.49908,
-    "ast_hash": "b8c9a66787e657684a06b976008d30bb",
+    "mtime": 1794296759.8530946,
+    "seen": 1794296787.115263,
+    "ast_hash": "0ebcab828570e2c0e744080afe3d0117",
     "semantic_hash": ""
   },
   "index.html": {
@@ -744,9 +744,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/guardian.rs": {
-    "mtime": 1793992498.0626223,
-    "seen": 1793992777.498079,
-    "ast_hash": "23bd2bd393a49adf8a5e3e9b7bea0312",
+    "mtime": 1794296755.1711302,
+    "seen": 1794296787.113973,
+    "ast_hash": "5aeb323112ac2388d6fd3aa815417b2f",
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/macos.rs": {
@@ -768,9 +768,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/windows.rs": {
-    "mtime": 1794296334.5975387,
-    "seen": 1794296392.470433,
-    "ast_hash": "df5ad0b59daa9c7de5a46be739763c0c",
+    "mtime": 1794296750.6628697,
+    "seen": 1794296787.114044,
+    "ast_hash": "751e1669fac65b182f7f7929994f63c1",
     "semantic_hash": ""
   },
   "src/services/recoveryState.ts": {

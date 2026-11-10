@@ -225,6 +225,15 @@ pub fn handle_early_cli_and_bootstrap() {
             "[webview-diag] desktop worker started (WebView2 args via tauri.conf additionalBrowserArgs)",
         );
     }
+    // Guardian-spawned Windows GUIs are allocated a fresh console window
+    // that a proctor can WM_CLOSE into a process kill (CTRL_CLOSE_EVENT);
+    // detach from it before any window exists. Direct dev runs (no --gui
+    // flag) keep the shared terminal console untouched.
+    #[cfg(target_os = "windows")]
+    if is_gui || is_desktop_worker {
+        super::windows::harden_console_for_gui(&config_dir);
+    }
+
     let lock_name = if is_desktop_worker {
         "desktop-worker.lock"
     } else {

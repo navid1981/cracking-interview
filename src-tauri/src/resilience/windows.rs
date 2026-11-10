@@ -87,6 +87,63 @@ pub fn start_desktop_switch_monitor(config_dir: PathBuf) {
 }
 
 #[cfg(target_os = "windows")]
+mod console_ffi {
+    pub type BOOL = i32;
+    pub type DWORD = u32;
+    pub type PHANDLER_ROUTINE = Option<unsafe extern "system" fn(DWORD) -> BOOL>;
+
+    pub const CTRL_CLOSE_EVENT: DWORD = 2;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        pub fn SetConsoleCtrlHandler(HandlerRoutine: PHANDLER_ROUTINE, Add: BOOL) -> BOOL;
+        pub fn FreeConsole() -> BOOL;
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn swallow_console_close_handler(ctrl_type: u32) -> i32 {
+    // Returning TRUE marks the event handled: the process keeps running.
+    // Only CTRL_CLOSE_EVENT is swallowed — Ctrl+C/Ctrl+Break keep their
+    // default behavior so dev terminals stay interruptible.
+    if ctrl_type == console_ffi::CTRL_CLOSE_EVENT {
+        1
+    } else {
+        0
+    }
+}
+
+/// Removes the console as a kill vector for guardian-spawned GUI processes.
+///
+/// A GUI spawned by the detached (console-less) guardian is a
+/// console-subsystem process, so Windows allocates it a fresh console —
+/// complete with a top-level `ConsoleWindowClass` window owned by the GUI
+/// process. A proctor enumerating the process's top-level windows
+/// (win-proctor does; SEB-style sweeps can too) that posts `WM_CLOSE` to
+/// that console window triggers `CTRL_CLOSE_EVENT`, whose default handler
+/// terminates the process immediately, bypassing the window-proc subclass,
+/// Tauri's `CloseRequested`, and every other window-level defense (and
+/// outrunning their log writes). Detaching from the console removes the
+/// window entirely; the control handler is belt-and-braces for any console
+/// the process remains attached to. No-ops for window-subsystem (release)
+/// processes, which never have a console.
+#[cfg(target_os = "windows")]
+pub fn harden_console_for_gui(config_dir: &std::path::Path) {
+    unsafe {
+        let handler_ok =
+            console_ffi::SetConsoleCtrlHandler(Some(swallow_console_close_handler), 1) != 0;
+        let freed = console_ffi::FreeConsole() != 0;
+        super::log_event_in_dir(
+            config_dir,
+            &format!(
+                "Hardened GUI console (ctrl-handler={}, detached={}); CTRL_CLOSE_EVENT can no longer kill this process",
+                handler_ok, freed
+            ),
+        );
+    }
+}
+
+#[cfg(target_os = "windows")]
 mod win_desktop_ffi {
     pub type HANDLE = isize;
     pub type HDESK = isize;
