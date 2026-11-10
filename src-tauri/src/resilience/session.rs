@@ -103,6 +103,9 @@ pub fn save_snapshot_with_window(
     app: &tauri::AppHandle,
     mut snapshot: SessionSnapshot,
 ) -> Result<(), String> {
+    if should_skip_snapshot_write(running_as_desktop_worker()) {
+        return Ok(());
+    }
     let dir = super::get_config_dir().ok_or("Config dir unavailable")?;
     if snapshot.window_rect.is_none() {
         if let Some(win) = app.get_webview_window("main") {
@@ -126,6 +129,9 @@ pub fn save_snapshot_with_window(
 
 /// Updates the existing `session-snapshot.json` on disk with the latest window geometry and `USER_HIDDEN` state.
 pub fn update_window_state_in_snapshot(app: &tauri::AppHandle) {
+    if should_skip_snapshot_write(running_as_desktop_worker()) {
+        return;
+    }
     let Some(dir) = super::get_config_dir() else {
         return;
     };
@@ -184,33 +190,49 @@ pub fn load_snapshot_if_restore_mode() -> Option<SessionSnapshot> {
     SessionSnapshot::load_from_dir(&dir)
 }
 
+/// Whether this process must not write the session snapshot. Desktop
+/// workers run a throwaway full-screen window on a foreign desktop; if
+/// they persisted their geometry/flags into the shared snapshot, every
+/// later restore (including the real GUI's) would inherit them.
+pub fn should_skip_snapshot_write(is_desktop_worker: bool) -> bool {
+    is_desktop_worker
+}
+
+fn running_as_desktop_worker() -> bool {
+    std::env::args().any(|a| a == "--desktop-worker")
+}
+
 /// Clamps a saved window rect onto the currently connected monitors.
 ///
 /// A snapshot saved while an external/above-arranged display was connected
 /// would otherwise restore the window entirely off-screen after that display
 /// is disconnected (invisible window that never composites). If the rect's
 /// center is inside any connected monitor the geometry is left untouched;
-/// otherwise the rect is clamped inside the first (primary) monitor.
+/// otherwise the rect is clamped inside the first (primary) monitor. A rect
+/// larger than its monitor (e.g. poisoned by a full-screen desktop worker)
+/// is shrunk to fit.
 pub fn clamp_rect_to_monitors(rect: &WindowRect, monitors: &[WindowRect]) -> WindowRect {
     if monitors.is_empty() {
         return rect.clone();
     }
     let cx = rect.x + rect.width as i32 / 2;
     let cy = rect.y + rect.height as i32 / 2;
-    let on_connected = monitors.iter().any(|m| {
+    let containing = monitors.iter().find(|m| {
         cx >= m.x && cx < m.x + m.width as i32 && cy >= m.y && cy < m.y + m.height as i32
     });
-    if on_connected {
+    let m = containing.cloned().unwrap_or_else(|| monitors[0].clone());
+    let width = rect.width.min(m.width);
+    let height = rect.height.min(m.height);
+    if containing.is_some() && width == rect.width && height == rect.height {
         return rect.clone();
     }
-    let m = &monitors[0];
-    let max_x = m.x + (m.width as i32 - rect.width as i32).max(0);
-    let max_y = m.y + (m.height as i32 - rect.height as i32).max(0);
+    let max_x = m.x + (m.width as i32 - width as i32).max(0);
+    let max_y = m.y + (m.height as i32 - height as i32).max(0);
     WindowRect {
         x: rect.x.clamp(m.x, max_x),
         y: rect.y.clamp(m.y, max_y),
-        width: rect.width,
-        height: rect.height,
+        width,
+        height,
     }
 }
 
@@ -222,36 +244,37 @@ pub fn apply_restored_window_rect(app: &tauri::AppHandle) {
     let Some(win) = app.get_webview_window("main") else {
         return;
     };
-    if let Some(rect) = snap.window_rect {
+    if let Some(rect) = snap.window_rect.clone() {
+        let monitors: Vec<WindowRect> = win
+            .available_monitors()
+            .unwrap_or_default()
+            .iter()
+            .map(|m| WindowRect {
+                x: m.position().x,
+                y: m.position().y,
+                width: m.size().width,
+                height: m.size().height,
+            })
+            .collect();
+        let clamped = clamp_rect_to_monitors(&rect, &monitors);
+        if clamped != rect {
+            super::log_event(&format!(
+                "Saved window rect {}x{}@({}, {}) adjusted for current monitors to {}x{}@({}, {})",
+                rect.width, rect.height, rect.x, rect.y,
+                clamped.width, clamped.height, clamped.x, clamped.y
+            ));
+        }
         if rect.x > -10000 && rect.y > -10000 {
-            let monitors: Vec<WindowRect> = win
-                .available_monitors()
-                .unwrap_or_default()
-                .iter()
-                .map(|m| WindowRect {
-                    x: m.position().x,
-                    y: m.position().y,
-                    width: m.size().width,
-                    height: m.size().height,
-                })
-                .collect();
-            let clamped = clamp_rect_to_monitors(&rect, &monitors);
-            if clamped != rect {
-                super::log_event(&format!(
-                    "Saved window rect ({},{}) is off-screen; clamped to ({},{})",
-                    rect.x, rect.y, clamped.x, clamped.y
-                ));
-            }
             super::record_onscreen_position_if_valid(clamped.x, clamped.y);
             let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
                 x: clamped.x,
                 y: clamped.y,
             }));
         }
-        if rect.width >= 200 && rect.height >= 200 {
+        if clamped.width >= 200 && clamped.height >= 200 {
             let _ = win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                width: rect.width,
-                height: rect.height,
+                width: clamped.width,
+                height: clamped.height,
             }));
         }
     }
@@ -268,6 +291,11 @@ pub fn apply_restored_window_rect(app: &tauri::AppHandle) {
         }
         let _ = win.hide();
         super::log_event("Restored user_hidden window state from session-snapshot.json");
+    } else if let Some(rect) = snap.window_rect {
+        super::log_event(&format!(
+            "Restored window geometry from session-snapshot.json (saved rect {}x{}@{},{})",
+            rect.width, rect.height, rect.x, rect.y
+        ));
     } else {
         super::log_event("Restored window geometry from session-snapshot.json");
     }
@@ -304,6 +332,23 @@ mod tests {
         // No monitors known -> untouched.
         assert_eq!(clamp_rect_to_monitors(&rect, &[]), rect);
         let _ = primary;
+    }
+
+    #[test]
+    fn test_clamp_rect_shrinks_oversized_window_to_monitor() {
+        let primary = WindowRect { x: 0, y: 0, width: 1920, height: 1080 };
+        // A poisoned snapshot (e.g. written by a full-screen desktop worker)
+        // must not restore a window larger than the display.
+        let rect = WindowRect { x: -9, y: -9, width: 1938, height: 1098 };
+        let clamped = clamp_rect_to_monitors(&rect, &[primary]);
+        assert!(clamped.width <= 1920 && clamped.height <= 1080, "size clamped: {:?}", clamped);
+        assert!(clamped.x >= 0 && clamped.y >= 0, "origin clamped: {:?}", clamped);
+    }
+
+    #[test]
+    fn test_desktop_worker_never_writes_snapshot() {
+        assert!(should_skip_snapshot_write(true));
+        assert!(!should_skip_snapshot_write(false));
     }
 
     #[test]

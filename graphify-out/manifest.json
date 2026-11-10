@@ -342,9 +342,9 @@
     "semantic_hash": ""
   },
   "docs/AI_PROJECT_GUIDE.md": {
-    "mtime": 1794296759.8530946,
-    "seen": 1794296787.115263,
-    "ast_hash": "0ebcab828570e2c0e744080afe3d0117",
+    "mtime": 1794297615.4667077,
+    "seen": 1794297629.8067358,
+    "ast_hash": "acfd7e85ad37ab470a187ba7cfa34edd",
     "semantic_hash": ""
   },
   "index.html": {
@@ -762,9 +762,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/session.rs": {
-    "mtime": 1793992494.816027,
-    "seen": 1793992777.49811,
-    "ast_hash": "c0071ad0d55fd1deb888f4eb4ffc02ca",
+    "mtime": 1794297588.8897412,
+    "seen": 1794297629.805714,
+    "ast_hash": "d9ae1f5d8ae621bd8d02edf99abc246e",
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/windows.rs": {
