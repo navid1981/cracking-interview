@@ -2947,7 +2947,6 @@ function App() {
                   onStealthModeChange={handleStealthModeChange}
                   hotkeySwallowingActive={!!stealthStatus?.swallowing_active}
                   isMac={runtimePlatform === 'macos'}
-                  isWindows={runtimePlatform === 'windows'}
                   onRequestAccessibility={handleRequestAccessibility}
                   onRefreshStealthStatus={handleRefreshStealthStatus}
                   setupChecklist={setupChecklistProps}

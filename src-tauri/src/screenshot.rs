@@ -1,4 +1,4 @@
-// Screen capture module; backend (GDI / DXGI / WGC) chosen in capture_backend
+// Screen capture module using screenshots crate
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DisplayInfo {
@@ -34,27 +34,33 @@ pub fn capture_display_screenshot(display_id: &str) -> Result<Vec<u8>, String> {
     let index: usize = display_id.parse()
         .map_err(|_| "Invalid display ID")?;
     
-    let image = crate::capture_backend::capture_rgba(index)?;
+    let screens = screenshots::Screen::all()
+        .map_err(|e| format!("Failed to get displays: {}", e))?;
     
-    println!("📸 Original ({}): {}x{}", crate::capture_backend::current().as_str(), image.width, image.height);
+    let screen = screens.get(index)
+        .ok_or("Display not found")?;
+    
+    let image = screen.capture()
+        .map_err(|e| format!("Failed to capture: {}", e))?;
+    
+    println!("📸 Original: {}x{}", image.width(), image.height());
     
     // Convert Image to DynamicImage
     use image::{DynamicImage, RgbaImage};
     let rgba = RgbaImage::from_raw(
-        image.width,
-        image.height,
-        image.rgba
+        image.width(),
+        image.height(),
+        image.rgba().to_vec()
     ).ok_or("Failed to create image")?;
     
     let mut dynamic_image = DynamicImage::ImageRgba8(rgba);
     
     // Resize if too large (max 2000px on longest side to stay under 5MB)
     let max_dimension = 2000;
-    let (img_w, img_h) = (dynamic_image.width(), dynamic_image.height());
-    if img_w > max_dimension || img_h > max_dimension {
-        let scale = (max_dimension as f32) / img_w.max(img_h) as f32;
-        let new_width = (img_w as f32 * scale) as u32;
-        let new_height = (img_h as f32 * scale) as u32;
+    if image.width() > max_dimension || image.height() > max_dimension {
+        let scale = (max_dimension as f32) / image.width().max(image.height()) as f32;
+        let new_width = (image.width() as f32 * scale) as u32;
+        let new_height = (image.height() as f32 * scale) as u32;
         
         println!("📏 Resizing to {}x{} to reduce file size", new_width, new_height);
         dynamic_image = dynamic_image.resize(new_width, new_height, image::imageops::FilterType::Lanczos3);
@@ -105,16 +111,27 @@ pub fn capture_display_thumbnail(display_id: &str) -> Result<Vec<u8>, String> {
     let index: usize = display_id.parse()
         .map_err(|_| "Invalid display ID")?;
     
-    let image = crate::capture_backend::capture_rgba(index)?;
+    let screens = screenshots::Screen::all()
+        .map_err(|e| format!("Failed to get displays: {}", e))?;
     
-    println!("✅ Image captured ({}): {}x{} pixels", crate::capture_backend::current().as_str(), image.width, image.height);
+    println!("📊 Total screens available: {}", screens.len());
+    
+    let screen = screens.get(index)
+        .ok_or("Display not found")?;
+    
+    println!("📸 Capturing screen {} ({}x{})", index, screen.display_info.width, screen.display_info.height);
+    
+    let image = screen.capture()
+        .map_err(|e| format!("Failed to capture: {}", e))?;
+    
+    println!("✅ Image captured: {}x{} pixels", image.width(), image.height());
     
     // Create RGBA image
     use image::{DynamicImage, RgbaImage};
     let rgba = RgbaImage::from_raw(
-        image.width,
-        image.height,
-        image.rgba
+        image.width(),
+        image.height(),
+        image.rgba().to_vec()
     ).ok_or("Failed to create image")?;
     
     let dynamic_image = DynamicImage::ImageRgba8(rgba);
