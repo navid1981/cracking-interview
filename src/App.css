@@ -1757,3 +1757,13 @@ span.status-indicator.chrome-user-mode {
 [data-theme="dark"] .mermaid-diagram {
   background: #ffffff;
 }
+.capture-method-select {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}

@@ -36,9 +36,9 @@
     "semantic_hash": "7a2c42ebb05949e073c068b869348892"
   },
   "src-tauri/Cargo.toml": {
-    "mtime": 1793989092.1843653,
-    "seen": 1793989483.779147,
-    "ast_hash": "543feaf95d3be63157d590012e45b79f",
+    "mtime": 1794427193.9725993,
+    "seen": 1794427261.572073,
+    "ast_hash": "e66afd56d99d67219a7751ca96834b08",
     "semantic_hash": ""
   },
   "src-tauri/build.rs": {
@@ -126,15 +126,15 @@
     "semantic_hash": "8e734ea5be135a77623dec3091fe2439"
   },
   "src-tauri/src/main.rs": {
-    "mtime": 1794296338.1953514,
-    "seen": 1794296392.47037,
-    "ast_hash": "9e5900f48e5e510a653850df2431cb6b",
+    "mtime": 1794427193.9741704,
+    "seen": 1794427261.57232,
+    "ast_hash": "c3f621513173aedf3f1e293d43b7de43",
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot.rs": {
-    "mtime": 1793988091.1732059,
-    "seen": 1793988101.086359,
-    "ast_hash": "29dceaddcbf4ed9931ceb920c306e6b1",
+    "mtime": 1794427193.9732673,
+    "seen": 1794427261.572396,
+    "ast_hash": "366aafb49d223bf5380977f744c5e3b1",
     "semantic_hash": ""
   },
   "src-tauri/src/stealth_hotkey.rs": {
@@ -156,9 +156,9 @@
     "semantic_hash": ""
   },
   "src/App.tsx": {
-    "mtime": 1793989092.1894546,
-    "seen": 1793989483.7794602,
-    "ast_hash": "bae855b61e074ebb708e96fee899f8fd",
+    "mtime": 1794427238.9276264,
+    "seen": 1794427261.572448,
+    "ast_hash": "f42b2ffbbf79804b8c5d20c6a0fa52ff",
     "semantic_hash": ""
   },
   "src/components/AIResponseDisplay.tsx": {
@@ -564,9 +564,9 @@
     "semantic_hash": ""
   },
   "src/components/settings/AppSettingsTab.tsx": {
-    "mtime": 1793943764.443555,
-    "seen": 1793953209.077564,
-    "ast_hash": "ae3b81a489365583781bffd88c781003",
+    "mtime": 1794427238.9183497,
+    "seen": 1794427261.572582,
+    "ast_hash": "041a763e752e430b6b67361fe00f38a5",
     "semantic_hash": ""
   },
   "src/components/settings/HotkeysSettingsTab.tsx": {
@@ -939,6 +939,18 @@
     "mtime": 1793992520.4790027,
     "seen": 1793992777.499125,
     "ast_hash": "b4f54ab54ab787c7ecf16b6960f59094",
+    "semantic_hash": ""
+  },
+  "src-tauri/src/capture_backend.rs": {
+    "mtime": 1794427180.8529882,
+    "seen": 1794427261.572256,
+    "ast_hash": "18c75464e254f10e55af22ea32207e5b",
+    "semantic_hash": ""
+  },
+  "src-tauri/src/capture_win.rs": {
+    "mtime": 1794427230.6966422,
+    "seen": 1794427261.572257,
+    "ast_hash": "6866fe4aa97899183fa881f895f1494c",
     "semantic_hash": ""
   }
 }

@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import SetupChecklist from '../SetupChecklist';
 import type { ComponentProps } from 'react';
 
@@ -14,6 +16,7 @@ interface Props {
   /** macOS only: whether the event tap that hides hotkeys from other apps is running. */
   hotkeySwallowingActive: boolean;
   isMac: boolean;
+  isWindows: boolean;
   onRequestAccessibility: () => void;
   onRefreshStealthStatus: () => void;
   setupChecklist: Omit<ComponentProps<typeof SetupChecklist>, 'variant'>;
@@ -21,9 +24,20 @@ interface Props {
 
 export default function AppSettingsTab({
   windowOpacity, onOpacityChange, theme, onThemeChange,
-  isPro, stealthMode, onStealthModeChange, hotkeySwallowingActive, isMac,
+  isPro, stealthMode, onStealthModeChange, hotkeySwallowingActive, isMac, isWindows,
   onRequestAccessibility, onRefreshStealthStatus, setupChecklist,
 }: Props) {
+  const [captureMethod, setCaptureMethod] = useState<string>('gdi');
+  useEffect(() => {
+    if (!isWindows) return;
+    invoke<string>('get_capture_method').then(setCaptureMethod).catch(() => {});
+  }, [isWindows]);
+  const handleCaptureMethodChange = (method: string) => {
+    const prev = captureMethod;
+    setCaptureMethod(method);
+    invoke('set_capture_method', { method }).catch(() => setCaptureMethod(prev));
+  };
+
   const restartNote = isMac && (
     <div className="stealth-note">* Stealth changes take effect after restarting the app.</div>
   );
@@ -58,6 +72,24 @@ export default function AppSettingsTab({
           </button>
         </div>
       </div>
+
+      {isWindows && (
+        <div className="app-settings-group">
+          <div className="app-settings-label">Screenshot Method (Windows)</div>
+          <div className="app-settings-desc">
+            Choose how the screen is captured. If the selected method fails, the app falls back to GDI automatically.
+          </div>
+          <select
+            className="capture-method-select"
+            value={captureMethod}
+            onChange={(e) => handleCaptureMethodChange(e.target.value)}
+          >
+            <option value="gdi">GDI (legacy, default)</option>
+            <option value="dxgi">DXGI Desktop Duplication</option>
+            <option value="wgc">Windows Graphics Capture (Win10 1903+)</option>
+          </select>
+        </div>
+      )}
 
       <div className="app-settings-group">
         <div className="app-settings-label stealth-heading">

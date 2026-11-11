@@ -4,6 +4,9 @@
 mod chrome;
 mod ai;
 mod screenshot;
+mod capture_backend;
+#[cfg(target_os = "windows")]
+mod capture_win;
 pub(crate) mod audio;
 mod transcription;
 mod documents;
@@ -179,6 +182,28 @@ fn save_stealth_preference(app: &tauri::AppHandle, enabled: bool) {
         let json = format!("{{\"enabled\":{}}}", enabled);
         let _ = std::fs::write(path, json);
     }
+}
+
+fn load_capture_method(app: &tauri::AppHandle) -> Option<capture_backend::CaptureMethod> {
+    let path = app_config_dir(app).ok()?.join("capture.json");
+    let data = std::fs::read_to_string(&path).ok()?;
+    let val: serde_json::Value = serde_json::from_str(&data).ok()?;
+    capture_backend::CaptureMethod::parse(val.get("method")?.as_str()?)
+}
+
+#[tauri::command]
+fn get_capture_method() -> String {
+    capture_backend::current().as_str().to_string()
+}
+
+#[tauri::command]
+fn set_capture_method(app: tauri::AppHandle, method: String) -> Result<(), String> {
+    let m = capture_backend::CaptureMethod::parse(&method)
+        .ok_or_else(|| format!("Unknown capture method: {}", method))?;
+    capture_backend::set(m);
+    let dir = app_config_dir(&app)?;
+    std::fs::write(dir.join("capture.json"), format!("{{\"method\":\"{}\"}}", m.as_str()))
+        .map_err(|e| format!("Failed to save capture method: {}", e))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1935,6 +1960,8 @@ fn main() {
             get_displays,
             capture_display_screenshot,
             get_display_thumbnail,
+            get_capture_method,
+            set_capture_method,
             warm_audio_capture,
             cooldown_audio_capture,
             query_ai,
@@ -2031,6 +2058,9 @@ fn main() {
                 resilience::init_config_dir(cfg_dir);
             }
             resilience::session::apply_restored_window_rect(app.handle());
+            if let Some(m) = load_capture_method(app.handle()) {
+                capture_backend::set(m);
+            }
             screenshot::request_screen_recording_permission();
             
             // Pre-compile audio recorder helper in background (eliminates first-recording delay)
