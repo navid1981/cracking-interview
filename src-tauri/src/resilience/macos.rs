@@ -67,6 +67,8 @@ pub fn install_guardian_signal_guard() {
 /// Spawns a 300ms macOS self-healing thread that dispatches onto the main thread to verify:
 /// 1. If `SIGTERM_INTERCEPTED` was set, logs the intercepted signal and checks if we should yield to `assessmentagent`.
 /// 2. If `!USER_HIDDEN`, verifies `ns_window.isVisible`, `ns_window.level == 1001`, and `sharingType == 0` (when stealth is enabled).
+///    A miniaturized (Dock-minimized) window also reports `isVisible == false`, so the healer
+///    stands down while `isMiniaturized` instead of "healing" the user's minimize back on screen.
 pub fn start_window_self_healer(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         // Check for a lockdown (AAC / SEB) on the first iteration, then ~every 3s.
@@ -141,6 +143,7 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
 
                 unsafe {
                     let is_vis_sel = sel_registerName(b"isVisible\0".as_ptr() as *const _);
+                    let is_mini_sel = sel_registerName(b"isMiniaturized\0".as_ptr() as *const _);
                     let level_sel = sel_registerName(b"level\0".as_ptr() as *const _);
                     let behavior_sel =
                         sel_registerName(b"collectionBehavior\0".as_ptr() as *const _);
@@ -151,6 +154,27 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
                     let get_u64: GetU64 = std::mem::transmute(objc_msgSend as *const ());
 
                     let visible = get_bool(ns_window, is_vis_sel);
+
+                    // A Dock-minimized window reports isVisible == false, just
+                    // like an externally hidden one. Minimizing is a legitimate
+                    // user action (yellow title-bar button), not a hide attack:
+                    // stand down until the window is deminiaturized, otherwise
+                    // orderFrontRegardless bounces it straight back on screen.
+                    let miniaturized = get_bool(ns_window, is_mini_sel);
+                    if miniaturized {
+                        if !super::USER_MINIMIZED.swap(true, Ordering::SeqCst) {
+                            super::log_event(
+                                "User minimized NSWindow (isMiniaturized); self-healer standing down (macOS)",
+                            );
+                        }
+                        return;
+                    }
+                    if super::USER_MINIMIZED.swap(false, Ordering::SeqCst) {
+                        super::log_event(
+                            "NSWindow deminiaturized; self-healer resuming (macOS)",
+                        );
+                    }
+
                     if !visible {
                         crate::stealth_hotkey::bring_to_front_without_focus(&win);
                         super::log_event(

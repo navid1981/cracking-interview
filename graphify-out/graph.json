@@ -70291,7 +70291,7 @@
       "file_type": "code",
       "norm_label": "launch_agent_file_name",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L192"
+      "source_location": "L216"
     },
     {
       "id": "src_tauri_src_resilience_macos_launch_agent_label",
@@ -70302,7 +70302,7 @@
       "file_type": "code",
       "norm_label": "launch_agent_label",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L191"
+      "source_location": "L215"
     },
     {
       "id": "src_tauri_src_resilience_macos_min_floating_window_level",
@@ -70335,7 +70335,7 @@
       "file_type": "code",
       "norm_label": "render_launch_agent_plist()",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L194"
+      "source_location": "L218"
     },
     {
       "id": "src_tauri_src_resilience_macos_rs_apphandle",
@@ -70368,7 +70368,7 @@
       "file_type": "code",
       "norm_label": "set_launch_agent_enabled()",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L239"
+      "source_location": "L263"
     },
     {
       "id": "src_tauri_src_resilience_macos_set_launch_agent_enabled_in_dir",
@@ -70379,7 +70379,7 @@
       "file_type": "code",
       "norm_label": "set_launch_agent_enabled_in_dir()",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L222"
+      "source_location": "L246"
     },
     {
       "id": "src_tauri_src_resilience_macos_sigterm_handler",
@@ -70412,7 +70412,7 @@
       "file_type": "code",
       "norm_label": "start_window_self_healer()",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L70"
+      "source_location": "L72"
     },
     {
       "id": "src_tauri_src_resilience_macos_stationary",
@@ -70434,7 +70434,7 @@
       "file_type": "code",
       "norm_label": "test_compute_kiosk_collection_behavior_bits()",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L259"
+      "source_location": "L283"
     },
     {
       "id": "src_tauri_src_resilience_macos_test_guardian_signal_guard_ignores_sigterm",
@@ -70445,7 +70445,7 @@
       "file_type": "code",
       "norm_label": "test_guardian_signal_guard_ignores_sigterm()",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L282"
+      "source_location": "L306"
     },
     {
       "id": "src_tauri_src_resilience_macos_test_launch_agent_plist_generation_and_toggle",
@@ -70456,7 +70456,7 @@
       "file_type": "code",
       "norm_label": "test_launch_agent_plist_generation_and_toggle()",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L298"
+      "source_location": "L322"
     },
     {
       "id": "src_tauri_src_resilience_macos_test_sigterm_guard_intercepts_unauthorized_sigterm",
@@ -70467,7 +70467,7 @@
       "file_type": "code",
       "norm_label": "test_sigterm_guard_intercepts_unauthorized_sigterm()",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L271"
+      "source_location": "L295"
     },
     {
       "id": "atomicu16",
@@ -76891,7 +76891,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L246",
+      "source_location": "L270",
       "weight": 1.0
     },
     {
@@ -76903,7 +76903,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L230",
+      "source_location": "L254",
       "weight": 1.0
     },
     {
@@ -76915,7 +76915,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L261",
+      "source_location": "L285",
       "weight": 1.0
     },
     {
@@ -76927,7 +76927,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L283",
+      "source_location": "L307",
       "weight": 1.0
     },
     {
@@ -76939,7 +76939,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L303",
+      "source_location": "L327",
       "weight": 1.0
     },
     {
@@ -76951,7 +76951,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L274",
+      "source_location": "L298",
       "weight": 1.0
     },
     {
@@ -208526,7 +208526,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L256",
+      "source_location": "L280",
       "weight": 1.0
     },
     {
@@ -210218,7 +210218,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L70",
+      "source_location": "L72",
       "weight": 1.0
     },
     {
@@ -218081,13 +218081,24 @@
     },
     {
       "source": "src_tauri_src_resilience_macos",
+      "target": "src_tauri_src_resilience_macos_min_floating_window_level",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src-tauri/src/resilience/macos.rs",
+      "source_location": "L20",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_macos",
       "target": "src_tauri_src_resilience_macos_launch_agent_label",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L191",
+      "source_location": "L215",
       "weight": 1.0
     },
     {
@@ -218098,7 +218109,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L192",
+      "source_location": "L216",
       "weight": 1.0
     },
     {
@@ -218109,18 +218120,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L194",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_macos",
-      "target": "src_tauri_src_resilience_macos_min_floating_window_level",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L20",
+      "source_location": "L218",
       "weight": 1.0
     },
     {
@@ -218136,28 +218136,6 @@
     },
     {
       "source": "src_tauri_src_resilience_macos",
-      "target": "src_tauri_src_resilience_macos_set_launch_agent_enabled_in_dir",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L222",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_macos",
-      "target": "src_tauri_src_resilience_macos_set_launch_agent_enabled",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L239",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_macos",
       "target": "src_tauri_src_resilience_macos_compute_kiosk_collection_behavior",
       "relation": "contains",
       "_origin": "ast",
@@ -218169,13 +218147,35 @@
     },
     {
       "source": "src_tauri_src_resilience_macos",
+      "target": "src_tauri_src_resilience_macos_set_launch_agent_enabled_in_dir",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src-tauri/src/resilience/macos.rs",
+      "source_location": "L246",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_macos",
+      "target": "src_tauri_src_resilience_macos_set_launch_agent_enabled",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src-tauri/src/resilience/macos.rs",
+      "source_location": "L263",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_macos",
       "target": "src_tauri_src_resilience_macos_test_compute_kiosk_collection_behavior_bits",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L259",
+      "source_location": "L283",
       "weight": 1.0
     },
     {
@@ -218186,7 +218186,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L271",
+      "source_location": "L295",
       "weight": 1.0
     },
     {
@@ -218197,18 +218197,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L282",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_macos",
-      "target": "src_tauri_src_resilience_macos_test_launch_agent_plist_generation_and_toggle",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L298",
+      "source_location": "L306",
       "weight": 1.0
     },
     {
@@ -218220,6 +218209,17 @@
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/macos.rs",
       "source_location": "L31",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_macos",
+      "target": "src_tauri_src_resilience_macos_test_launch_agent_plist_generation_and_toggle",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src-tauri/src/resilience/macos.rs",
+      "source_location": "L322",
       "weight": 1.0
     },
     {
@@ -218252,7 +218252,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/macos.rs",
-      "source_location": "L70",
+      "source_location": "L72",
       "weight": 1.0
     },
     {
@@ -280310,5 +280310,5 @@
       "source_file": "docs/AI_PROJECT_GUIDE.md"
     }
   ],
-  "built_at_commit": "7ae260d155cc54fabaa338b0b375585ce0d9dd10"
+  "built_at_commit": "da2b6fbcf4c7dfed0cb5efabac06d04c89162e26"
 }
