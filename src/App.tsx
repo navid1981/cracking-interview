@@ -12,6 +12,7 @@ import SetupChecklist from './components/SetupChecklist';
 import { useSetupStatus } from './hooks/useSetupStatus';
 import { useKeyboardInputMode } from './hooks/useKeyboardInputMode';
 import { scheduleSessionSnapshot, fetchRestoredSessionSnapshot } from './services/recoveryState';
+import { startPromptStateSync } from './services/promptStateSync';
 import AppSettingsTab from './components/settings/AppSettingsTab';
 import HotkeysSettingsTab from './components/settings/HotkeysSettingsTab';
 import { getMessageActions, MESSAGE_ACTION_LABELS, MessageActionKind } from './services/messageActions';
@@ -252,6 +253,20 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keep prompt selection/definitions in sync with the desktop worker via
+  // the shared backend prompt-state file (localStorage is per-WebView2
+  // profile, and the worker deliberately runs an isolated profile).
+  useEffect(() => startPromptStateSync({
+    onRemoteChange: (bundle) => {
+      if (bundle.selectedTemplateId) {
+        setSelectedTemplate((prev) =>
+          prev === bundle.selectedTemplateId ? prev : bundle.selectedTemplateId!,
+        );
+      }
+      setPromptSyncVersion((v) => v + 1);
+    },
+  }), []);
+
   // Debounced non-sensitive session checkpoint for guardian/desktop recovery
   useEffect(() => {
     scheduleSessionSnapshot({
@@ -329,6 +344,9 @@ function App() {
   // Prompt editing state
   const [promptEditMode, setPromptEditMode] = useState<'list' | 'edit'>('list');
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
+  // Bumped whenever the shared prompt state changes in the OTHER process
+  // (main GUI <-> desktop worker) so the prompt list remounts with fresh data.
+  const [promptSyncVersion, setPromptSyncVersion] = useState(0);
   const solveWithAIRef = useRef<((mode?: 'auto' | 'text' | 'screenshot') => Promise<void>) | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const previousTemplateRef = useRef<string | null>(null); // Stores template before auto-switching to Audio
@@ -2258,11 +2276,11 @@ function App() {
                   type="button"
                   role="radio"
                   aria-checked={!screenshotActive}
-                  aria-label="Text Extraction"
+                  aria-label="Content Capture"
                   className={`mode-segment-btn ${!screenshotActive ? 'active' : ''}`}
                   onClick={() => setUseScreenshot(false)}
                   disabled={isLoading || displayLocked}
-                  title={displayLocked ? lockedHint : withHotkey('Text Extraction', activeHotkeys?.text)}
+                  title={displayLocked ? lockedHint : withHotkey('Content Capture', activeHotkeys?.text)}
                 >
                   <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
@@ -2858,8 +2876,8 @@ function App() {
                         className={`toggle-btn mode-btn ${!useScreenshot ? 'active' : ''}`}
                       >
                         <span className="mode-icon">📝</span>
-                        <span className="mode-label">Text Extraction</span>
-                        <span className="mode-desc">Chrome tabs only</span>
+                        <span className="mode-label">Content Capture</span>
+                        <span className="mode-desc">Chrome tabs · Full page, frames & images</span>
                       </button>
                       <button
                         onClick={() => setUseScreenshot(true)}
@@ -2875,10 +2893,10 @@ function App() {
                   <div className="info-note">
                     <h4 style={{marginBottom: '8px'}}>Mode Comparison:</h4>
                     <p className="small" style={{marginBottom: '12px'}}>
-                      <strong>📝 Text:</strong> Extracts text from Chrome tabs only. Fast and efficient for text-based problems.
+                      <strong>📝 Content Capture:</strong> Reads the entire Chrome tab, including embedded frames and images, even when the question is too long to fit in one screenshot. Exact text, fast and low cost.
                     </p>
                     <p className="small">
-                      <strong>📸 Screenshot:</strong> Captures visual content including diagrams, tables, and formatting. Works with any source. Display source always uses screenshot mode.
+                      <strong>📸 Screenshot:</strong> Captures only the visible area, including diagrams, charts, and formatting. Works with any source. Display source always uses screenshot mode.
                     </p>
                   </div>
                 </>
@@ -2888,6 +2906,7 @@ function App() {
                 <>
                   {promptEditMode === 'list' ? (
                     <PromptListView
+                      key={`prompt-list-${promptSyncVersion}`}
                       selectedTemplate={selectedTemplate}
                       onSelectTemplate={(id: string) => {
                         setSelectedTemplate(id);

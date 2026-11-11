@@ -98,6 +98,96 @@ fn quarantine_corrupt_file(path: &Path) {
     let _ = fs::rename(path, quarantine_path);
 }
 
+// ---------------------------------------------------------------------------
+// Shared prompt state (`prompt-state.json`)
+//
+// Prompts live in WebView `localStorage`, which is scoped to the WebView2
+// profile — and the desktop worker deliberately runs an isolated profile
+// (`WebView2_DeskWorker`), so it cannot see the main GUI's selected prompt
+// or custom prompt definitions. This file is the cross-process source of
+// truth both instances sync against: the worker may read AND write it
+// (unlike `session-snapshot.json`, whose geometry it must never touch).
+// Field names are camelCase to match the TypeScript prompt model.
+// ---------------------------------------------------------------------------
+
+pub const PROMPT_STATE_SCHEMA_VERSION: u32 = 1;
+pub const MAX_PROMPT_STATE_BYTES: usize = 524_288; // 512 KiB
+const PROMPT_STATE_FILE_NAME: &str = "prompt-state.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomPromptEntry {
+    pub id: String,
+    pub name: String,
+    pub system_prompt: String,
+    pub user_prompt: String,
+    pub supports_language: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BuiltinPromptOverride {
+    pub system: Option<String>,
+    pub user: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptState {
+    pub schema_version: u32,
+    /// Monotonic counter assigned by the backend on every save; frontends
+    /// use it to detect changes made by the other process.
+    pub revision: u64,
+    pub updated_at_unix_ms: u64,
+    pub selected_template_id: Option<String>,
+    pub custom_prompts: Vec<CustomPromptEntry>,
+    pub builtin_overrides: std::collections::BTreeMap<String, BuiltinPromptOverride>,
+}
+
+impl PromptState {
+    pub fn load_from_dir(config_dir: &Path) -> Option<Self> {
+        let raw = fs::read_to_string(config_dir.join(PROMPT_STATE_FILE_NAME)).ok()?;
+        if raw.len() > MAX_PROMPT_STATE_BYTES {
+            return None;
+        }
+        serde_json::from_str::<PromptState>(&raw).ok()
+    }
+}
+
+/// Persists `incoming` as the new shared prompt state, assigning the next
+/// revision. Last-writer-wins between processes; the revision lets the
+/// other instance notice the change on its next poll.
+pub fn save_prompt_state_in_dir(
+    config_dir: &Path,
+    mut incoming: PromptState,
+) -> Result<PromptState, String> {
+    let next_revision = PromptState::load_from_dir(config_dir)
+        .map(|existing| existing.revision.saturating_add(1))
+        .unwrap_or(1);
+    incoming.schema_version = PROMPT_STATE_SCHEMA_VERSION;
+    incoming.revision = next_revision;
+    incoming.updated_at_unix_ms = super::now_unix_ms();
+    let json = serde_json::to_vec_pretty(&incoming).map_err(|e| e.to_string())?;
+    if json.len() > MAX_PROMPT_STATE_BYTES {
+        return Err(format!(
+            "Prompt state exceeds {} KiB cap",
+            MAX_PROMPT_STATE_BYTES / 1024
+        ));
+    }
+    super::write_atomic(&config_dir.join(PROMPT_STATE_FILE_NAME), &json)?;
+    Ok(incoming)
+}
+
+pub fn load_prompt_state() -> Option<PromptState> {
+    let dir = super::get_config_dir()?;
+    PromptState::load_from_dir(&dir)
+}
+
+pub fn save_prompt_state(incoming: PromptState) -> Result<PromptState, String> {
+    let dir = super::get_config_dir().ok_or("Config dir unavailable")?;
+    save_prompt_state_in_dir(&dir, incoming)
+}
+
 /// Captures current native window rect and merges it into the snapshot before saving.
 pub fn save_snapshot_with_window(
     app: &tauri::AppHandle,
@@ -343,6 +433,62 @@ mod tests {
         let clamped = clamp_rect_to_monitors(&rect, &[primary]);
         assert!(clamped.width <= 1920 && clamped.height <= 1080, "size clamped: {:?}", clamped);
         assert!(clamped.x >= 0 && clamped.y >= 0, "origin clamped: {:?}", clamped);
+    }
+
+    fn sample_prompt_state() -> PromptState {
+        PromptState {
+            schema_version: PROMPT_STATE_SCHEMA_VERSION,
+            revision: 0,
+            updated_at_unix_ms: 0,
+            selected_template_id: Some("custom_123".to_string()),
+            custom_prompts: vec![CustomPromptEntry {
+                id: "custom_123".to_string(),
+                name: "My Prompt".to_string(),
+                system_prompt: "You are helpful".to_string(),
+                user_prompt: "Solve {CONTENT}".to_string(),
+                supports_language: true,
+            }],
+            builtin_overrides: std::collections::BTreeMap::from([(
+                "algorithm_optimal".to_string(),
+                BuiltinPromptOverride {
+                    system: Some("Custom system".to_string()),
+                    user: None,
+                },
+            )]),
+        }
+    }
+
+    #[test]
+    fn test_prompt_state_round_trip_and_revision_increments() {
+        let dir = temp_test_dir("promptstate");
+        assert!(PromptState::load_from_dir(&dir).is_none());
+
+        let saved1 = save_prompt_state_in_dir(&dir, sample_prompt_state()).unwrap();
+        assert_eq!(saved1.revision, 1);
+        let loaded = PromptState::load_from_dir(&dir).unwrap();
+        assert_eq!(loaded.selected_template_id.as_deref(), Some("custom_123"));
+        assert_eq!(loaded.custom_prompts.len(), 1);
+        assert_eq!(loaded.custom_prompts[0].system_prompt, "You are helpful");
+        assert_eq!(
+            loaded.builtin_overrides["algorithm_optimal"].system.as_deref(),
+            Some("Custom system")
+        );
+
+        let saved2 = save_prompt_state_in_dir(&dir, sample_prompt_state()).unwrap();
+        assert_eq!(saved2.revision, 2, "revision must increase on every save");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_prompt_state_corrupt_file_returns_none() {
+        let dir = temp_test_dir("promptcorrupt");
+        fs::write(dir.join("prompt-state.json"), "{not json").unwrap();
+        assert!(PromptState::load_from_dir(&dir).is_none());
+        // A save over a corrupt file restarts revision numbering cleanly.
+        let saved = save_prompt_state_in_dir(&dir, sample_prompt_state()).unwrap();
+        assert_eq!(saved.revision, 1);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

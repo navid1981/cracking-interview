@@ -16,6 +16,10 @@ pub mod guardian;
 
 pub static AUTHORIZED_QUIT: AtomicBool = AtomicBool::new(false);
 pub static USER_HIDDEN: AtomicBool = AtomicBool::new(false);
+/// Set when the user minimizes the window (SC_MINIMIZE). A minimized window
+/// reports as not visible, which the self-healer must not mistake for an
+/// external hide attack — healing it makes the window bounce straight back.
+pub static USER_MINIMIZED: AtomicBool = AtomicBool::new(false);
 pub static KEYBOARD_INPUT_ACTIVE: AtomicBool = AtomicBool::new(false);
 #[allow(dead_code)]
 pub static SAVED_X: AtomicI32 = AtomicI32::new(0);
@@ -81,6 +85,30 @@ pub fn is_webview_render_surface_class(class: &str) -> bool {
 #[cfg(any(target_os = "windows", test))]
 pub fn is_user_mouse_close_command(wparam: usize, lparam: isize) -> bool {
     (wparam & 0xFFF0) == 0xF060 && lparam != 0
+}
+
+/// Whether a `WM_SYSCOMMAND` wParam is `SC_MINIMIZE` (0xF020; low 4 bits are
+/// internal flags). Minimize is always a legitimate user action — it is
+/// recorded, never blocked, so the self-healer can stand down.
+#[cfg(any(target_os = "windows", test))]
+pub fn is_minimize_command(wparam: usize) -> bool {
+    (wparam & 0xFFF0) == 0xF020
+}
+
+/// Whether a `WM_SYSCOMMAND` wParam is `SC_RESTORE` (0xF120).
+#[cfg(any(target_os = "windows", test))]
+pub fn is_restore_command(wparam: usize) -> bool {
+    (wparam & 0xFFF0) == 0xF120
+}
+
+/// Whether the self-healer should re-show the main window. Only the pure
+/// attack signature qualifies: window not visible, not iconic, and not
+/// user-minimized. A minimized window reports `IsWindowVisible == false`
+/// on current Windows builds, so without the iconic/minimized guards the
+/// healer "repairs" the user's minimize within 250 ms and the window
+/// visibly bounces back.
+pub fn should_heal_hidden_window(is_visible: bool, is_iconic: bool, user_minimized: bool) -> bool {
+    !is_visible && !is_iconic && !user_minimized
 }
 
 /// Authorizes a quit without an `AppHandle` (e.g. from inside the Windows
@@ -844,6 +872,28 @@ mod tests {
         assert!(!is_user_mouse_close_command(0xF120, 0x01E0_0280)); // SC_RESTORE
         // Low bits of wParam are internal flags and must be masked off.
         assert!(is_user_mouse_close_command(0xF063, 0x01E0_0280));
+    }
+
+    #[test]
+    fn test_minimize_restore_command_classification() {
+        assert!(is_minimize_command(0xF020)); // SC_MINIMIZE
+        assert!(is_minimize_command(0xF021)); // low bits are internal flags
+        assert!(!is_minimize_command(0xF060)); // SC_CLOSE
+        assert!(is_restore_command(0xF120)); // SC_RESTORE
+        assert!(is_restore_command(0xF123));
+        assert!(!is_restore_command(0xF020));
+    }
+
+    #[test]
+    fn test_heal_hidden_window_respects_user_minimize() {
+        // Externally hidden, not minimized -> heal (the attack case).
+        assert!(should_heal_hidden_window(false, false, false));
+        // Minimized windows report not-visible but are a legitimate user
+        // state; healing them makes the window bounce back instantly.
+        assert!(!should_heal_hidden_window(false, true, false));
+        assert!(!should_heal_hidden_window(false, false, true));
+        // Already visible -> nothing to heal.
+        assert!(!should_heal_hidden_window(true, false, false));
     }
 
     #[test]

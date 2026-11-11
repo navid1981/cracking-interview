@@ -1975,6 +1975,8 @@ fn main() {
             move_window_by,
             save_session_snapshot,
             get_session_snapshot,
+            get_prompt_state,
+            save_prompt_state,
             report_frontend_diagnostic,
             frontend_heartbeat,
         ])
@@ -2354,6 +2356,21 @@ fn save_session_snapshot(
     snapshot: resilience::session::SessionSnapshot,
 ) -> Result<(), String> {
     resilience::session::save_snapshot_with_window(&app, snapshot)
+}
+
+/// Shared prompt state (selected prompt + custom prompt definitions) used
+/// to keep the main GUI and the desktop worker in sync. Unlike the session
+/// snapshot, desktop workers may read AND write this file.
+#[tauri::command]
+fn get_prompt_state() -> Option<resilience::session::PromptState> {
+    resilience::session::load_prompt_state()
+}
+
+#[tauri::command]
+fn save_prompt_state(
+    snapshot: resilience::session::PromptState,
+) -> Result<resilience::session::PromptState, String> {
+    resilience::session::save_prompt_state(snapshot)
 }
 
 #[tauri::command]

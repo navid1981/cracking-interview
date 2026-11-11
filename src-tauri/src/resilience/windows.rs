@@ -575,6 +575,17 @@ unsafe extern "system" fn protected_window_proc(
             super::log_event("Blocked external WM_CLOSE via window-proc subclass");
             return LRESULT(0);
         }
+        // Minimize/restore are always legitimate user actions: never block,
+        // just record them so the self-healer stands down instead of
+        // "healing" the minimized window back onto the screen.
+        WM_SYSCOMMAND if super::is_minimize_command(wparam.0) => {
+            super::USER_MINIMIZED.store(true, Ordering::SeqCst);
+            super::log_event("User minimized window (SC_MINIMIZE); self-healer standing down");
+        }
+        WM_SYSCOMMAND if super::is_restore_command(wparam.0) => {
+            super::USER_MINIMIZED.store(false, Ordering::SeqCst);
+            super::log_event("User restored window (SC_RESTORE); self-healer resuming");
+        }
         // The user clicking the title-bar X (mouse coords in lParam) is an
         // authorized quit: persist it so the guardian exits cleanly, then
         // fall through to the original proc to close normally. Programmatic
@@ -787,8 +798,19 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
                     continue;
                 }
 
-                // 1. Heal visibility if an external monitor called ShowWindow(SW_HIDE)
-                if !IsWindowVisible(hwnd).as_bool() {
+                // 1. Heal visibility if an external monitor called ShowWindow(SW_HIDE).
+                // A minimized window also reports not-visible on current
+                // Windows builds; healing it makes the user's minimize bounce
+                // straight back, so iconic/user-minimized always stands down.
+                let is_iconic = IsIconic(hwnd).as_bool();
+                if !is_iconic {
+                    super::USER_MINIMIZED.store(false, Ordering::Relaxed);
+                }
+                if super::should_heal_hidden_window(
+                    IsWindowVisible(hwnd).as_bool(),
+                    is_iconic,
+                    super::USER_MINIMIZED.load(Ordering::Relaxed),
+                ) {
                     let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
                     let _ = SetWindowPos(
                         hwnd,
@@ -803,9 +825,10 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
                 }
 
                 // 2. Heal topmost & stealth extended styles if stripped
+                // (never poke a minimized window with SetWindowPos).
                 let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
                 let is_topmost = (ex_style & (WS_EX_TOPMOST.0 as isize)) != 0;
-                if !is_topmost {
+                if !is_topmost && !is_iconic {
                     let _ = SetWindowPos(
                         hwnd,
                         HWND_TOPMOST,
