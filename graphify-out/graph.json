@@ -53373,7 +53373,7 @@
       "file_type": "code",
       "norm_label": "appsettingstab()",
       "source_file": "src/components/settings/AppSettingsTab.tsx",
-      "source_location": "L22"
+      "source_location": "L29"
     },
     {
       "id": "src_components_setupchecklist_getsetupsteps",
@@ -74251,7 +74251,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/components/settings/AppSettingsTab.tsx",
-      "source_location": "L114",
+      "source_location": "L122",
       "weight": 1.0
     },
     {
@@ -214182,7 +214182,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/components/settings/AppSettingsTab.tsx",
-      "source_location": "L22",
+      "source_location": "L29",
       "weight": 1.0
     },
     {
@@ -280310,5 +280310,5 @@
       "source_file": "docs/AI_PROJECT_GUIDE.md"
     }
   ],
-  "built_at_commit": "da2b6fbcf4c7dfed0cb5efabac06d04c89162e26"
+  "built_at_commit": "f423561d6b4c15febf6200418f45f206b546d60f"
 }

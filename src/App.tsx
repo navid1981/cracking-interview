@@ -2673,7 +2673,7 @@ function App() {
                     <div className="upgrade-section">
                       <h4>🚀 Upgrade to Pro</h4>
                       <ul className="upgrade-benefits">
-                        <li>✓ Stealth mode: Undetectable and fully private plus hidden hotkeys</li>
+                        <li>✓ Stealth mode: hidden hotkeys and hidden window</li>
                         <li>✓ {proRequestLimitLabel} AI requests per month</li>
                         <li>✓ {proAudioHoursLabel} hours audio recording per month</li>
                         {proModelNames && <li>✓ {proModelNames}</li>}
@@ -2858,7 +2858,7 @@ function App() {
                     <div className="info-note" style={{ marginTop: '16px' }}>
                       <h4 style={{ marginBottom: '8px' }}>✨ Pro Features</h4>
                       <ul style={{ fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
-                        <li>Stealth Mode with Anti-Detection Protection</li>
+                        <li>Stealth Mode (hidden hotkeys and window)</li>
                         <li>{modelConfig ? `All ${modelConfig.pro_models.length} premium AI models` : 'All premium AI models'}</li>
                         <li>{proRequestLimitLabel} requests per month</li>
                         <li>Display/screen capture</li>

@@ -156,9 +156,9 @@
     "semantic_hash": ""
   },
   "src/App.tsx": {
-    "mtime": 1794432806.1401274,
-    "seen": 1794432957.243846,
-    "ast_hash": "2dcf695e99666acc9758a2a032581617",
+    "mtime": 1794746174.4480932,
+    "seen": 1794746189.282785,
+    "ast_hash": "26e0f39723c30c8184974a5c7dc118d5",
     "semantic_hash": ""
   },
   "src/components/AIResponseDisplay.tsx": {
@@ -342,9 +342,9 @@
     "semantic_hash": ""
   },
   "docs/AI_PROJECT_GUIDE.md": {
-    "mtime": 1794432942.3511405,
-    "seen": 1794432957.244761,
-    "ast_hash": "9a0f22eb23eb6a26e553c6583a5bca21",
+    "mtime": 1794433719.382875,
+    "seen": 1794746189.2837498,
+    "ast_hash": "ec38fb7003f2b28153440cd28a9e8acd",
     "semantic_hash": ""
   },
   "index.html": {
@@ -564,9 +564,9 @@
     "semantic_hash": ""
   },
   "src/components/settings/AppSettingsTab.tsx": {
-    "mtime": 1794429647.3632946,
-    "seen": 1794432578.421046,
-    "ast_hash": "ae3b81a489365583781bffd88c781003",
+    "mtime": 1794746174.4108665,
+    "seen": 1794746189.2829309,
+    "ast_hash": "9d85cae832c2ae3988246dc7a5b02e75",
     "semantic_hash": ""
   },
   "src/components/settings/HotkeysSettingsTab.tsx": {
