@@ -77,6 +77,8 @@ pub enum HotkeyAction {
     MoveRight,
     ToggleVisibility,
     QuitApp,
+    CaptureSelection,
+    PasteSelection,
 }
 
 impl HotkeyAction {
@@ -94,6 +96,8 @@ impl HotkeyAction {
             HotkeyAction::MoveRight => Some("hotkey-move-right"),
             HotkeyAction::ToggleVisibility => None,
             HotkeyAction::QuitApp => None,
+            HotkeyAction::CaptureSelection => None,
+            HotkeyAction::PasteSelection => None, // emitted by selection::paste with the text as payload
         }
     }
 
@@ -110,6 +114,8 @@ impl HotkeyAction {
             HotkeyAction::MoveRight => "move-right",
             HotkeyAction::ToggleVisibility => "toggle-visibility",
             HotkeyAction::QuitApp => "quit-app",
+            HotkeyAction::CaptureSelection => "capture-selection",
+            HotkeyAction::PasteSelection => "paste-selection",
         }
     }
 }
@@ -358,6 +364,12 @@ pub fn dispatch_action(app: &tauri::AppHandle, action: HotkeyAction) {
             teardown_stealth_hotkeys();
             app.exit(0);
         }
+        HotkeyAction::CaptureSelection => {
+            crate::selection::capture(app);
+        }
+        HotkeyAction::PasteSelection => {
+            crate::selection::paste(app);
+        }
     }
 }
 
@@ -457,6 +469,8 @@ pub fn setup_stealth_hotkeys(app: &tauri::AppHandle, cfg: &crate::HotkeysConfig)
         (&cfg.move_right, HotkeyAction::MoveRight),
         (&cfg.toggle_visibility, HotkeyAction::ToggleVisibility),
         (&cfg.quit_app, HotkeyAction::QuitApp),
+        (&cfg.capture_selection, HotkeyAction::CaptureSelection),
+        (&cfg.paste_selection, HotkeyAction::PasteSelection),
     ];
 
     for (hotkey_str, action) in pairs {

@@ -16,7 +16,7 @@ import { startPromptStateSync } from './services/promptStateSync';
 import AppSettingsTab from './components/settings/AppSettingsTab';
 import HotkeysSettingsTab from './components/settings/HotkeysSettingsTab';
 import { getMessageActions, MESSAGE_ACTION_LABELS, MessageActionKind } from './services/messageActions';
-import { HotkeysConfig, formatHotkey } from './services/hotkeys';
+import { HotkeysConfig, formatHotkey, insertTextIntoActiveField } from './services/hotkeys';
 import { TabExtraction, MAX_QUESTION_IMAGES, needsTabScreenshot, isWhiteboard } from './services/tabExtraction';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts, StoredDocPlaceholder } from './services/prompts';
 import { 
@@ -335,7 +335,7 @@ function App() {
   const sessionMaxSecondsRef = useRef(Infinity);
   const audioSecondsRef = useRef(0);
 
-  const [hotkeysDraft, setHotkeysDraft] = useState<HotkeysConfig>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
+  const [hotkeysDraft, setHotkeysDraft] = useState<HotkeysConfig>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '', capture_selection: '', paste_selection: '' });
   // Saved hotkeys (the draft above may hold unsaved edits from the HotKeys tab).
   const [activeHotkeys, setActiveHotkeys] = useState<HotkeysConfig | null>(null);
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
@@ -1179,6 +1179,12 @@ function App() {
         });
         if (cancelled) { uMoveRight(); return; }
         unsubs.push(uMoveRight);
+
+        const uPasteSelection = await listen<string>('hotkey-paste-selection', (event) => {
+          insertTextIntoActiveField(event.payload);
+        });
+        if (cancelled) { uPasteSelection(); return; }
+        unsubs.push(uPasteSelection);
       } catch (e) {
         // Silent fail - hotkey registration error
       }
@@ -1248,6 +1254,8 @@ function App() {
         moveRightHotkey: hotkeysDraft.move_right,
         toggleVisibilityHotkey: hotkeysDraft.toggle_visibility,
         quitAppHotkey: hotkeysDraft.quit_app,
+        captureSelectionHotkey: hotkeysDraft.capture_selection,
+        pasteSelectionHotkey: hotkeysDraft.paste_selection,
       });
       setHotkeysDraft(updated);
       setActiveHotkeys(updated);

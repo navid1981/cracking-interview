@@ -8,6 +8,7 @@ pub(crate) mod audio;
 mod transcription;
 mod documents;
 mod stealth_hotkey;
+mod selection;
 mod setup;
 pub(crate) mod resilience;
 
@@ -78,6 +79,8 @@ pub(crate) struct HotkeysConfig {
     pub(crate) move_right: String,
     pub(crate) toggle_visibility: String,
     pub(crate) quit_app: String,
+    pub(crate) capture_selection: String,
+    pub(crate) paste_selection: String,
 }
 
 struct HotkeysState(Mutex<HotkeysConfig>);
@@ -95,8 +98,24 @@ fn default_hotkeys() -> HotkeysConfig {
         move_right: DEFAULT_MOVE_RIGHT_HOTKEY.to_string(),
         toggle_visibility: DEFAULT_TOGGLE_VISIBILITY_HOTKEY.to_string(),
         quit_app: DEFAULT_QUIT_APP_HOTKEY.to_string(),
+        capture_selection: DEFAULT_CAPTURE_SELECTION_HOTKEY.to_string(),
+        paste_selection: DEFAULT_PASTE_SELECTION_HOTKEY.to_string(),
     }
 }
+
+// Capture selected text from another app into app memory / paste it into the app (configurable).
+#[cfg(target_os = "macos")]
+const DEFAULT_CAPTURE_SELECTION_HOTKEY: &str = "Cmd+4";
+#[cfg(target_os = "macos")]
+const DEFAULT_PASTE_SELECTION_HOTKEY: &str = "Cmd+5";
+#[cfg(target_os = "windows")]
+const DEFAULT_CAPTURE_SELECTION_HOTKEY: &str = "Alt+4";
+#[cfg(target_os = "windows")]
+const DEFAULT_PASTE_SELECTION_HOTKEY: &str = "Alt+5";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const DEFAULT_CAPTURE_SELECTION_HOTKEY: &str = "Ctrl+4";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const DEFAULT_PASTE_SELECTION_HOTKEY: &str = "Ctrl+5";
 
 // Scroll hotkeys defaults (configurable).
 #[cfg(target_os = "macos")]
@@ -194,6 +213,8 @@ struct HotkeysConfigFile {
     move_right: Option<String>,
     toggle_visibility: Option<String>,
     quit_app: Option<String>,
+    capture_selection: Option<String>,
+    paste_selection: Option<String>,
 }
 
 fn load_hotkeys_from_disk(app: &tauri::AppHandle) -> HotkeysConfig {
@@ -224,6 +245,8 @@ fn load_hotkeys_from_disk(app: &tauri::AppHandle) -> HotkeysConfig {
                 if let Some(v) = cfg_file.move_right { if !v.trim().is_empty() { cfg.move_right = v; } }
                 if let Some(v) = cfg_file.toggle_visibility { if !v.trim().is_empty() { cfg.toggle_visibility = v; } }
                 if let Some(v) = cfg_file.quit_app { if !v.trim().is_empty() { cfg.quit_app = v; } }
+                if let Some(v) = cfg_file.capture_selection { if !v.trim().is_empty() { cfg.capture_selection = v; } }
+                if let Some(v) = cfg_file.paste_selection { if !v.trim().is_empty() { cfg.paste_selection = v; } }
 
                 // Migrate legacy default hotkeys to new defaults (Cmd+1, Cmd+2, Cmd+3) so existing users
                 // pick up the change automatically unless they had customized it.
@@ -361,6 +384,8 @@ pub(crate) fn unregister_all_fallback_hotkeys(app: &tauri::AppHandle, cfg: &Hotk
     unregister_hotkey_best_effort(app, &cfg.move_right);
     unregister_hotkey_best_effort(app, &cfg.toggle_visibility);
     unregister_hotkey_best_effort(app, &cfg.quit_app);
+    unregister_hotkey_best_effort(app, &cfg.capture_selection);
+    unregister_hotkey_best_effort(app, &cfg.paste_selection);
 }
 
 /// Reapply screen-capture exclusion after win.show() on Windows.
@@ -476,7 +501,29 @@ fn register_hotkeys(app: &tauri::AppHandle, cfg: &HotkeysConfig) -> Result<(), S
     register_hotkey(app, &cfg.move_right, "hotkey-move-right", "move-right")?;
     register_toggle_visibility_hotkey(app, &cfg.toggle_visibility)?;
     register_quit_app_hotkey(app, &cfg.quit_app)?;
+    register_selection_hotkey(app, &cfg.capture_selection, stealth_hotkey::HotkeyAction::CaptureSelection)?;
+    register_selection_hotkey(app, &cfg.paste_selection, stealth_hotkey::HotkeyAction::PasteSelection)?;
     Ok(())
+}
+
+/// Fallback (global-shortcut) registration for the capture/paste selection hotkeys.
+/// Unlike `register_hotkey`, these must not bring the window to the front.
+fn register_selection_hotkey(
+    app: &tauri::AppHandle,
+    hotkey: &str,
+    action: stealth_hotkey::HotkeyAction,
+) -> Result<(), String> {
+    let handle = app.clone();
+    app.global_shortcut()
+        .on_shortcut(hotkey, move |_app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                let h = handle.clone();
+                let _ = handle.run_on_main_thread(move || {
+                    stealth_hotkey::dispatch_action(&h, action);
+                });
+            }
+        })
+        .map_err(|e| e.to_string())
 }
 
 fn register_toggle_visibility_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Result<(), String> {
@@ -2451,6 +2498,8 @@ fn set_hotkeys(
     move_right_hotkey: String,
     toggle_visibility_hotkey: String,
     quit_app_hotkey: String,
+    capture_selection_hotkey: String,
+    paste_selection_hotkey: String,
 ) -> Result<HotkeysConfig, String> {
     let text = normalize_hotkey(&text_hotkey);
     let screenshot = normalize_hotkey(&screenshot_hotkey);
@@ -2463,6 +2512,8 @@ fn set_hotkeys(
     let move_right = normalize_hotkey(&move_right_hotkey);
     let toggle_visibility = normalize_hotkey(&toggle_visibility_hotkey);
     let quit_app = normalize_hotkey(&quit_app_hotkey);
+    let capture_selection = normalize_hotkey(&capture_selection_hotkey);
+    let paste_selection = normalize_hotkey(&paste_selection_hotkey);
 
     if text.is_empty()
         || screenshot.is_empty()
@@ -2475,6 +2526,8 @@ fn set_hotkeys(
         || move_right.is_empty()
         || toggle_visibility.is_empty()
         || quit_app.is_empty()
+        || capture_selection.is_empty()
+        || paste_selection.is_empty()
     {
         return Err("Hotkeys cannot be empty".to_string());
     }
@@ -2503,6 +2556,8 @@ fn set_hotkeys(
         move_right.as_str(),
         toggle_visibility.as_str(),
         quit_app.as_str(),
+        capture_selection.as_str(),
+        paste_selection.as_str(),
     ];
     for i in 0..all.len() {
         for j in (i + 1)..all.len() {
@@ -2524,6 +2579,8 @@ fn set_hotkeys(
     validate_hotkey_for_global_use(&move_right)?;
     validate_hotkey_for_global_use(&toggle_visibility)?;
     validate_hotkey_for_global_use(&quit_app)?;
+    validate_hotkey_for_global_use(&capture_selection)?;
+    validate_hotkey_for_global_use(&paste_selection)?;
     validate_scroll_hotkey(&scroll_up)?;
     validate_scroll_hotkey(&scroll_down)?;
     validate_move_hotkey(&move_up)?;
@@ -2548,6 +2605,8 @@ fn set_hotkeys(
         move_right,
         toggle_visibility,
         quit_app,
+        capture_selection,
+        paste_selection,
     };
 
     // Register text first, then screenshot; rollback if anything fails.
@@ -2661,6 +2720,18 @@ fn set_hotkeys(
         unregister_hotkey_best_effort(&app, &next.toggle_visibility);
         register_hotkeys(&app, &previous).ok();
         return Err(format!("Failed to register quit hotkey: {}", e));
+    }
+
+    if let Err(e) = register_selection_hotkey(&app, &next.capture_selection, stealth_hotkey::HotkeyAction::CaptureSelection) {
+        unregister_all_fallback_hotkeys(&app, &next);
+        register_hotkeys(&app, &previous).ok();
+        return Err(format!("Failed to register capture selection hotkey: {}", e));
+    }
+
+    if let Err(e) = register_selection_hotkey(&app, &next.paste_selection, stealth_hotkey::HotkeyAction::PasteSelection) {
+        unregister_all_fallback_hotkeys(&app, &next);
+        register_hotkeys(&app, &previous).ok();
+        return Err(format!("Failed to register paste selection hotkey: {}", e));
     }
 
     save_hotkeys_to_disk(&app, &next)?;

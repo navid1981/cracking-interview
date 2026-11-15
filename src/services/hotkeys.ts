@@ -10,6 +10,37 @@ export interface HotkeysConfig {
   move_right: string;
   toggle_visibility: string;
   quit_app: string;
+  capture_selection: string;
+  paste_selection: string;
+}
+
+/**
+ * Insert text at the caret of the currently focused field (input, textarea or contenteditable).
+ * Uses the native value setter + an input event so React-controlled fields pick up the change.
+ * Returns false when no suitable field is focused.
+ */
+export function insertTextIntoActiveField(text: string): boolean {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el) return false;
+
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    if (el instanceof HTMLInputElement && el.type === 'password') return false;
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? start;
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (!setter) return false;
+    setter.call(el, el.value.slice(0, start) + text + el.value.slice(end));
+    const caret = start + text.length;
+    try { el.setSelectionRange(caret, caret); } catch { /* some input types don't support selection */ }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  }
+
+  if (el.isContentEditable) {
+    return document.execCommand('insertText', false, text);
+  }
+  return false;
 }
 
 const MAC_SYMBOLS: Record<string, string> = {

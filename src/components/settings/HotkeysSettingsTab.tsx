@@ -22,6 +22,13 @@ const SECTIONS: Array<{ title: string; fields: Field[] }> = [
     ],
   },
   {
+    title: '📋 Selection',
+    fields: [
+      { key: 'capture_selection', label: 'Capture selected text (from any app)', keys: '4' },
+      { key: 'paste_selection', label: 'Paste captured text (into the app)', keys: '5' },
+    ],
+  },
+  {
     title: '🧭 Navigation',
     fields: [
       { key: 'scroll_up', label: 'Scroll up (Explanation)', keys: 'Up', ctrlOnWindows: true },

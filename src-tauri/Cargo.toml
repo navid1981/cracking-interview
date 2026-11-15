@@ -29,6 +29,9 @@ chrono = "0.4"
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 futures-util = "0.3"
 
+# Clipboard access (selection capture hotkey fallback)
+arboard = "3"
+
 # Thread-safe globals
 lazy_static = "1.5"
 
