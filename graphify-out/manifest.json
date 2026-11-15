@@ -36,9 +36,9 @@
     "semantic_hash": "7a2c42ebb05949e073c068b869348892"
   },
   "src-tauri/Cargo.toml": {
-    "mtime": 1794746766.0457106,
-    "seen": 1794746872.181458,
-    "ast_hash": "21ea19d885ce7a704312505c77a07fce",
+    "mtime": 1794749806.9334083,
+    "seen": 1794749940.479241,
+    "ast_hash": "c8097f9372091b3b20a7a3a79f95dd60",
     "semantic_hash": ""
   },
   "src-tauri/build.rs": {
@@ -138,9 +138,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/stealth_hotkey.rs": {
-    "mtime": 1794746788.3663273,
-    "seen": 1794746872.181792,
-    "ast_hash": "ee3c4e1f5f4477d1b599a01d4811f871",
+    "mtime": 1794749818.145988,
+    "seen": 1794749940.479595,
+    "ast_hash": "eec346951b464aaa89f971faf4172709",
     "semantic_hash": ""
   },
   "src-tauri/src/transcription.rs": {
@@ -948,9 +948,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/selection.rs": {
-    "mtime": 1794746831.8356082,
-    "seen": 1794746872.181778,
-    "ast_hash": "d66498f63029c686c8ec5e9660115aa3",
+    "mtime": 1794749875.1064558,
+    "seen": 1794749940.4795818,
+    "ast_hash": "94f9b7157f39f29326aba6d7ed8ad8f3",
     "semantic_hash": ""
   }
 }

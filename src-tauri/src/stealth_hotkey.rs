@@ -365,9 +365,11 @@ pub fn dispatch_action(app: &tauri::AppHandle, action: HotkeyAction) {
             app.exit(0);
         }
         HotkeyAction::CaptureSelection => {
+            crate::resilience::log_event("[selection] CaptureSelection hotkey dispatched");
             crate::selection::capture(app);
         }
         HotkeyAction::PasteSelection => {
+            crate::resilience::log_event("[selection] PasteSelection hotkey dispatched");
             crate::selection::paste(app);
         }
     }
