@@ -1,21 +1,26 @@
-error[E0583]: file not found for module `selection`                                                                                                                                             
-  --> src\main.rs:11:1
-   |
-11 | mod selection;
-   | ^^^^^^^^^^^^^^
-   |
-   = help: to create the module `selection`, create file "src\selection.rs" or "src\selection\mod.rs"
-   = note: if there is a `mod selection` elsewhere in the crate already, import it with `use crate::...` instead
+error[E0277]: the trait bound `core::variant::VARIANT: Param<core::variant::VARIANT, CloneType>` is not satisfied
+    --> src\selection.rs:508:17
+     |
+ 506 |             .CreatePropertyCondition(
+     |              ----------------------- required by a bound introduced by this call
+ 507 |                 UIA_ControlTypePropertyId,
+ 508 |                 windows::core::VARIANT::from(UIA_DocumentControlTypeId.0),
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Param<core::variant::VARIANT, CloneType>` is not implemented for `core::variant::VARIANT`
+     |
+note: required by a bound in `IUIAutomation::CreatePropertyCondition`
+    --> C:\Users\navid\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-0.58.0\src\Windows\Win32\UI\Accessibility\mod.rs:3192:13
+     |
+3190 |     pub unsafe fn CreatePropertyCondition<P0>(&self, propertyid: UIA_PROPERTY_ID, value: P0) -> windows_core::Result<IUIAutomationCondition>
+     |                   ----------------------- required by a bound in this associated function
+3191 |     where
+3192 |         P0: windows_core::Param<windows_core::VARIANT>,
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `IUIAutomation::CreatePropertyCondition`
+help: consider borrowing here
+     |
+ 508 |                 &windows::core::VARIANT::from(UIA_DocumentControlTypeId.0),
+     |                 +
 
-warning: type `PHANDLER_ROUTINE` should have an upper camel case name                                                                                                                           
-  --> src\resilience\windows.rs:93:14
-   |
-93 |     pub type PHANDLER_ROUTINE = Option<unsafe extern "system" fn(DWORD) -> BOOL>;
-   |              ^^^^^^^^^^^^^^^^ help: convert the identifier to upper camel case: `PhandlerRoutine`
-   |
-   = note: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
-
-For more information about this error, try `rustc --explain E0583`.                                                                                                                             
+For more information about this error, try `rustc --explain E0277`.
 warning: `cracking-interview` (bin "cracking-interview") generated 1 warning                                                                                                                    
 error: could not compile `cracking-interview` (bin "cracking-interview") due to 1 previous error; 1 warning emitted
 failed to build app: failed to build app
