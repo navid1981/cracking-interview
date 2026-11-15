@@ -505,7 +505,7 @@ mod windows_impl {
         let doc_cond = automation
             .CreatePropertyCondition(
                 UIA_ControlTypePropertyId,
-                windows::core::VARIANT::from(UIA_DocumentControlTypeId.0),
+                &windows::core::VARIANT::from(UIA_DocumentControlTypeId.0),
             )
             .ok();
 

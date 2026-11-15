@@ -948,9 +948,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/selection.rs": {
-    "mtime": 1794749875.1064558,
-    "seen": 1794749940.4795818,
-    "ast_hash": "94f9b7157f39f29326aba6d7ed8ad8f3",
+    "mtime": 1794750569.3857987,
+    "seen": 1794750602.7854772,
+    "ast_hash": "2cab5aecd9a2275c3447c48b9df62b17",
     "semantic_hash": ""
   }
 }
