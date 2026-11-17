@@ -125,7 +125,13 @@ fn capture_selected_text() -> Option<String> {
 
 /// Simulate the OS copy shortcut and read the result, restoring the previous clipboard text.
 fn capture_via_clipboard() -> Option<String> {
-    let mut clipboard = arboard::Clipboard::new().ok()?;
+    let mut clipboard = match arboard::Clipboard::new() {
+        Ok(c) => c,
+        Err(e) => {
+            crate::resilience::log_event(&format!("[selection] clipboard open failed: {}", e));
+            return None;
+        }
+    };
     let previous = clipboard.get_text().ok();
 
     // Sentinel lets us tell "copy produced nothing" apart from "clipboard unchanged".
@@ -136,19 +142,28 @@ fn capture_via_clipboard() -> Option<String> {
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     );
-    clipboard.set_text(sentinel.clone()).ok()?;
+    if let Err(e) = clipboard.set_text(sentinel.clone()) {
+        crate::resilience::log_event(&format!("[selection] clipboard set_text failed: {}", e));
+        return None;
+    }
 
     wait_for_modifiers_released();
     send_copy_keystroke();
 
     let mut result = None;
+    let mut saw_cleared = false;
     for _ in 0..30 {
         std::thread::sleep(Duration::from_millis(20));
-        if let Ok(t) = clipboard.get_text() {
-            if t != sentinel {
-                result = Some(t);
-                break;
+        match clipboard.get_text() {
+            Ok(t) if t != sentinel => {
+                if t.is_empty() {
+                    saw_cleared = true;
+                } else {
+                    result = Some(t);
+                    break;
+                }
             }
+            _ => {}
         }
     }
 
@@ -159,6 +174,13 @@ fn capture_via_clipboard() -> Option<String> {
         None => {
             let _ = clipboard.clear();
         }
+    }
+
+    if result.is_none() {
+        crate::resilience::log_event(&format!(
+            "[selection] clipboard fallback returned nothing (cleared_by_target={})",
+            saw_cleared
+        ));
     }
 
     result.filter(|t| !t.is_empty())
@@ -347,33 +369,54 @@ mod macos {
 }
 
 pub(crate) fn is_browser_render_child_class(class: &str) -> bool {
+    let lower = class.to_ascii_lowercase();
     matches!(
         class,
         "Chrome_RenderWidgetHostHWND"
+            | "Chrome_WidgetWin_0"
+            | "Chrome_WidgetWin_1"
             | "CefBrowserWindow"
+            | "CefWebViewWnd"
+            | "WebViewHost"
             | "Internet Explorer_Server"
             | "MozillaWindowClass"
-    )
+    ) || lower.contains("chrome")
+        || lower.contains("cef")
+        || lower.contains("webview")
+        || lower.contains("mozilla")
+        || lower.contains("internet explorer_server")
 }
 
 // ── Windows ─────────────────────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
 mod windows_impl {
+    use std::collections::BTreeSet;
     use std::time::Duration;
-    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RPC_E_CHANGED_MODE, S_FALSE, S_OK};
+    use windows::Win32::Foundation::{
+        BOOL, CloseHandle, HANDLE, HWND, LPARAM, RPC_E_CHANGED_MODE, S_FALSE, S_OK, WPARAM,
+    };
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
     };
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken,
+        QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
     use windows::Win32::UI::Accessibility::{
-        CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomationElement,
-        IUIAutomationTextChildPattern, IUIAutomationTextPattern, IUIAutomationTextPattern2,
-        TreeScope_Descendants, UIA_ControlTypePropertyId, UIA_DocumentControlTypeId,
-        UIA_TextChildPatternId, UIA_TextPattern2Id, UIA_TextPatternId,
+        CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomationCondition,
+        IUIAutomationElement, IUIAutomationTextChildPattern, IUIAutomationTextPattern,
+        IUIAutomationTextPattern2, TreeScope_Descendants, UIA_ControlTypePropertyId,
+        UIA_DocumentControlTypeId, UIA_IsTextPattern2AvailablePropertyId,
+        UIA_IsTextPatternAvailablePropertyId, UIA_TextChildPatternId, UIA_TextPattern2Id,
+        UIA_TextPatternId,
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumChildWindows, GetClassNameW, GetForegroundWindow,
+        EnumChildWindows, EnumWindows, GetClassNameW, GetForegroundWindow,
+        GetWindowThreadProcessId, IsWindowVisible, SendMessageTimeoutW, OBJID_CLIENT,
+        SMTO_ABORTIFHUNG, WM_GETOBJECT,
     };
 
     const VK_C: u16 = 0x43;
@@ -405,6 +448,58 @@ mod windows_impl {
         }
     }
 
+    unsafe fn hwnd_class_name(hwnd: HWND) -> String {
+        let mut buf = [0u16; 128];
+        let len = GetClassNameW(hwnd, &mut buf);
+        if len > 0 {
+            String::from_utf16_lossy(&buf[..len as usize])
+        } else {
+            String::new()
+        }
+    }
+
+    unsafe fn process_exe_and_elevation(pid: u32) -> (String, Option<bool>) {
+        let Ok(hproc) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return ("<open-denied>".to_string(), None);
+        };
+        let mut buf = [0u16; 512];
+        let mut size = buf.len() as u32;
+        let exe = if QueryFullProcessImageNameW(
+            hproc,
+            PROCESS_NAME_WIN32,
+            windows::core::PWSTR(buf.as_mut_ptr()),
+            &mut size,
+        )
+        .is_ok()
+        {
+            let full = String::from_utf16_lossy(&buf[..size as usize]);
+            full.rsplit('\\').next().unwrap_or(&full).to_string()
+        } else {
+            "<unknown>".to_string()
+        };
+        let elevated = query_process_elevation(hproc);
+        let _ = CloseHandle(hproc);
+        (exe, elevated)
+    }
+
+    unsafe fn query_process_elevation(hproc: HANDLE) -> Option<bool> {
+        let mut token = HANDLE::default();
+        if OpenProcessToken(hproc, TOKEN_QUERY, &mut token).is_err() {
+            return None;
+        }
+        let mut elev = TOKEN_ELEVATION::default();
+        let mut ret_len = 0u32;
+        let res = GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elev as *mut TOKEN_ELEVATION as *mut core::ffi::c_void),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut ret_len,
+        );
+        let _ = CloseHandle(token);
+        res.ok().map(|_| elev.TokenIsElevated != 0)
+    }
+
     unsafe fn create_uiautomation() -> Option<IUIAutomation> {
         CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER)
             .or_else(|_| CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER))
@@ -417,7 +512,11 @@ mod windows_impl {
         let mut frags = Vec::with_capacity(len.max(0) as usize);
         for i in 0..len {
             if let Ok(range) = ranges.GetElement(i) {
-                if let Ok(bstr) = range.GetText(super::MAX_CAPTURE_CHARS as i32) {
+                let bstr = range
+                    .GetText(super::MAX_CAPTURE_CHARS as i32)
+                    .or_else(|_| range.GetText(-1))
+                    .ok();
+                if let Some(bstr) = bstr {
                     let s = bstr.to_string();
                     if !s.is_empty() {
                         frags.push(s);
@@ -442,66 +541,125 @@ mod windows_impl {
         None
     }
 
-    unsafe fn extract_from_focused_and_ancestors(automation: &IUIAutomation) -> Option<String> {
-        let focused = automation.GetFocusedElement().ok()?;
+    unsafe fn extract_from_focused_and_ancestors(
+        automation: &IUIAutomation,
+    ) -> (Option<String>, String) {
+        let focused = match automation.GetFocusedElement() {
+            Ok(f) => f,
+            Err(e) => return (None, format!("GetFocusedElement err={:?}", e.code())),
+        };
+        let f_ctrl = focused.CurrentControlType().map(|c| c.0).unwrap_or(-1);
+        let f_class = focused
+            .CurrentClassName()
+            .map(|b| b.to_string())
+            .unwrap_or_default();
+        let diag = format!("focused(ctrl={},class='{}')", f_ctrl, f_class);
+
         if let Some(t) = extract_text_from_element(&focused) {
-            return Some(t);
+            return (Some(t), diag);
         }
         if let Ok(tcp) =
             focused.GetCurrentPatternAs::<IUIAutomationTextChildPattern>(UIA_TextChildPatternId)
         {
             if let Ok(container) = tcp.TextContainer() {
                 if let Some(t) = extract_text_from_element(&container) {
-                    return Some(t);
+                    return (Some(t), diag);
                 }
             }
         }
-        let walker = automation.RawViewWalker().ok()?;
-        let mut cur = focused;
-        for _ in 0..16 {
-            let Ok(parent) = walker.GetParentElement(&cur) else {
-                break;
-            };
-            if let Some(t) = extract_text_from_element(&parent) {
-                return Some(t);
+        if let Ok(walker) = automation.RawViewWalker() {
+            let mut cur = focused;
+            for _ in 0..16 {
+                let Ok(parent) = walker.GetParentElement(&cur) else {
+                    break;
+                };
+                if let Some(t) = extract_text_from_element(&parent) {
+                    return (Some(t), diag);
+                }
+                cur = parent;
             }
-            cur = parent;
         }
-        None
+        (None, diag)
     }
 
-    unsafe fn collect_renderer_children(parent: HWND) -> Vec<HWND> {
-        unsafe extern "system" fn enum_cb(child: HWND, lparam: LPARAM) -> BOOL {
-            let list = &mut *(lparam.0 as *mut Vec<HWND>);
-            let mut buf = [0u16; 128];
-            let len = GetClassNameW(child, &mut buf);
-            if len > 0 {
-                let class = String::from_utf16_lossy(&buf[..len as usize]);
-                if super::is_browser_render_child_class(&class) {
-                    list.push(child);
+    unsafe fn collect_top_windows_for_pid(pid: u32, primary: HWND) -> Vec<HWND> {
+        struct Ctx {
+            pid: u32,
+            primary: HWND,
+            list: Vec<HWND>,
+        }
+        unsafe extern "system" fn enum_top(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            let ctx = &mut *(lparam.0 as *mut Ctx);
+            if hwnd != ctx.primary && IsWindowVisible(hwnd).as_bool() {
+                let mut wpid = 0u32;
+                GetWindowThreadProcessId(hwnd, Some(&mut wpid));
+                if wpid == ctx.pid {
+                    ctx.list.push(hwnd);
                 }
             }
             BOOL(1)
         }
-        let mut children = Vec::new();
+        let mut ctx = Ctx {
+            pid,
+            primary,
+            list: vec![primary],
+        };
+        if pid != 0 {
+            let _ = EnumWindows(Some(enum_top), LPARAM(&mut ctx as *mut Ctx as isize));
+        }
+        ctx.list
+    }
+
+    unsafe fn collect_renderer_children(
+        parent: HWND,
+        child_classes: &mut BTreeSet<String>,
+    ) -> Vec<HWND> {
+        struct ChildCtx<'a> {
+            list: Vec<HWND>,
+            classes: &'a mut BTreeSet<String>,
+        }
+        unsafe extern "system" fn enum_cb(child: HWND, lparam: LPARAM) -> BOOL {
+            let ctx = &mut *(lparam.0 as *mut ChildCtx<'_>);
+            let mut buf = [0u16; 128];
+            let len = GetClassNameW(child, &mut buf);
+            if len > 0 {
+                let class = String::from_utf16_lossy(&buf[..len as usize]);
+                if ctx.classes.len() < 16 {
+                    ctx.classes.insert(class.clone());
+                }
+                if super::is_browser_render_child_class(&class) {
+                    ctx.list.push(child);
+                }
+            }
+            BOOL(1)
+        }
+        let mut ctx = ChildCtx {
+            list: Vec::new(),
+            classes: child_classes,
+        };
         let _ = EnumChildWindows(
             parent,
             Some(enum_cb),
-            LPARAM(&mut children as *mut Vec<HWND> as isize),
+            LPARAM(&mut ctx as *mut ChildCtx<'_> as isize),
         );
-        children
+        ctx.list
     }
 
-    unsafe fn extract_from_foreground_documents(
+    unsafe fn build_text_search_condition(
         automation: &IUIAutomation,
-    ) -> (Option<String>, bool) {
-        let fg = GetForegroundWindow();
-        if fg.0.is_null() {
-            return (None, false);
-        }
-        let mut candidates = collect_renderer_children(fg);
-        candidates.push(fg);
-
+    ) -> Option<IUIAutomationCondition> {
+        let text_avail = automation
+            .CreatePropertyCondition(
+                UIA_IsTextPatternAvailablePropertyId,
+                &windows::core::VARIANT::from(true),
+            )
+            .ok();
+        let text2_avail = automation
+            .CreatePropertyCondition(
+                UIA_IsTextPattern2AvailablePropertyId,
+                &windows::core::VARIANT::from(true),
+            )
+            .ok();
         let doc_cond = automation
             .CreatePropertyCondition(
                 UIA_ControlTypePropertyId,
@@ -509,24 +667,51 @@ mod windows_impl {
             )
             .ok();
 
-        let mut found_any_doc = false;
-        for hwnd in candidates {
+        let mut cond: Option<IUIAutomationCondition> = None;
+        for next in [text_avail, text2_avail, doc_cond].into_iter().flatten() {
+            cond = match cond {
+                None => Some(next),
+                Some(prev) => automation.CreateOrCondition(&prev, &next).ok().or(Some(prev)),
+            };
+        }
+        cond
+    }
+
+    unsafe fn wake_accessibility(hwnds: &[HWND]) {
+        for &hwnd in hwnds {
+            let _ = SendMessageTimeoutW(
+                hwnd,
+                WM_GETOBJECT,
+                WPARAM(0),
+                LPARAM(OBJID_CLIENT.0 as isize),
+                SMTO_ABORTIFHUNG,
+                50,
+                None,
+            );
+        }
+    }
+
+    unsafe fn probe_uia_candidates(
+        automation: &IUIAutomation,
+        candidates: &[HWND],
+        search_cond: &Option<IUIAutomationCondition>,
+    ) -> (Option<String>, usize) {
+        let mut total_matches = 0usize;
+        for &hwnd in candidates {
             let Ok(root) = automation.ElementFromHandle(hwnd) else {
                 continue;
             };
             if let Some(t) = extract_text_from_element(&root) {
-                return (Some(t), true);
+                return (Some(t), total_matches + 1);
             }
-            if let Some(ref cond) = doc_cond {
-                if let Ok(docs) = root.FindAll(TreeScope_Descendants, cond) {
-                    if let Ok(len) = docs.Length() {
-                        if len > 0 {
-                            found_any_doc = true;
-                        }
+            if let Some(ref cond) = search_cond {
+                if let Ok(nodes) = root.FindAll(TreeScope_Descendants, cond) {
+                    if let Ok(len) = nodes.Length() {
+                        total_matches += len.max(0) as usize;
                         for i in 0..len {
-                            if let Ok(doc) = docs.GetElement(i) {
-                                if let Some(t) = extract_text_from_element(&doc) {
-                                    return (Some(t), true);
+                            if let Ok(node) = nodes.GetElement(i) {
+                                if let Some(t) = extract_text_from_element(&node) {
+                                    return (Some(t), total_matches);
                                 }
                             }
                         }
@@ -534,7 +719,7 @@ mod windows_impl {
                 }
             }
         }
-        (None, found_any_doc)
+        (None, total_matches)
     }
 
     /// Read selected text from the foreground app via Windows UI Automation (`TextPattern`).
@@ -543,26 +728,79 @@ mod windows_impl {
         let _com = ComGuard::init()?;
         unsafe {
             let automation = create_uiautomation()?;
-            if let Some(t) = extract_from_focused_and_ancestors(&automation) {
-                return Some(t);
+            let fg = GetForegroundWindow();
+            let mut fg_pid = 0u32;
+            if !fg.0.is_null() {
+                GetWindowThreadProcessId(fg, Some(&mut fg_pid));
             }
-            let (text, found_doc) = extract_from_foreground_documents(&automation);
-            if text.is_some() {
-                return text;
+            let (fg_exe, fg_elev) = if fg_pid != 0 {
+                process_exe_and_elevation(fg_pid)
+            } else {
+                ("<none>".to_string(), None)
+            };
+            let self_elev = query_process_elevation(GetCurrentProcess());
+            let fg_class = if !fg.0.is_null() {
+                hwnd_class_name(fg)
+            } else {
+                String::new()
+            };
+
+            let (focused_res, focused_diag) = extract_from_focused_and_ancestors(&automation);
+            if focused_res.is_some() {
+                return focused_res;
             }
-            // Chromium / CefSharp (used by Safe Exam Browser) enables its accessibility tree
-            // lazily on the first WM_GETOBJECT / UIA call. Give it a brief moment to populate
-            // its Document/TextPattern tree and probe once more.
-            if !found_doc {
-                std::thread::sleep(Duration::from_millis(60));
-                if let Some(t) = extract_from_focused_and_ancestors(&automation) {
-                    return Some(t);
-                }
-                let (retry_text, _) = extract_from_foreground_documents(&automation);
-                if retry_text.is_some() {
-                    return retry_text;
-                }
+
+            if fg.0.is_null() || fg_pid == GetCurrentProcessId() {
+                crate::resilience::log_event(&format!(
+                    "[selection] UIA skipped foreground probe (fg_null={} fg_pid={} {})",
+                    fg.0.is_null(),
+                    fg_pid,
+                    focused_diag
+                ));
+                return None;
             }
+
+            let top_windows = collect_top_windows_for_pid(fg_pid, fg);
+            let mut child_classes = BTreeSet::new();
+            let mut candidates = Vec::new();
+            for &top in &top_windows {
+                candidates.extend(collect_renderer_children(top, &mut child_classes));
+            }
+            candidates.extend(top_windows.iter().copied());
+
+            wake_accessibility(&candidates);
+            let search_cond = build_text_search_condition(&automation);
+
+            let (text1, matches1) = probe_uia_candidates(&automation, &candidates, &search_cond);
+            if text1.is_some() {
+                return text1;
+            }
+
+            // Chromium / CefSharp / LockDown Browser initializes its accessibility tree lazily
+            // after the first WM_GETOBJECT / UIA call. Give it 150ms and probe once more.
+            std::thread::sleep(Duration::from_millis(150));
+            let (focused_res2, _) = extract_from_focused_and_ancestors(&automation);
+            if focused_res2.is_some() {
+                return focused_res2;
+            }
+            let (text2, matches2) = probe_uia_candidates(&automation, &candidates, &search_cond);
+            if text2.is_some() {
+                return text2;
+            }
+
+            let classes_summary: Vec<String> = child_classes.into_iter().collect();
+            crate::resilience::log_event(&format!(
+                "[selection] UIA empty: fg_exe='{}' fg_class='{}' fg_elev={:?} self_elev={:?} {} candidates={} child_classes=[{}] matches=({},{})",
+                fg_exe,
+                fg_class,
+                fg_elev,
+                self_elev,
+                focused_diag,
+                candidates.len(),
+                classes_summary.join(","),
+                matches1,
+                matches2
+            ));
         }
         None
     }
