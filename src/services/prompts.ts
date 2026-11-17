@@ -386,8 +386,8 @@ export function buildPrompt(
   if (userTemplate) {
     finalPrompt += userTemplate
       .replace(/{LANGUAGE}/g, language)
-      .replace(/{CONTENT}/g, content || '')
-      .replace(/{PROBLEM}/g, content || '');
+      .replace(/{CONTENT}/gi, content || '')
+      .replace(/{PROBLEM}/gi, content || '');
   } else if (content) {
     finalPrompt += '\nQuestion:\n' + content;
   }
@@ -429,8 +429,8 @@ export function getConversationPrompts(
   if (userTemplate) {
     userMessage = userTemplate
       .replace(/{INTERVIEW_LANGUAGE}/g, langInstruction)
-      .replace(/{CONTENT}/g, content)
-      .replace(/{PROBLEM}/g, content);
+      .replace(/{CONTENT}/gi, content)
+      .replace(/{PROBLEM}/gi, content);
   } else {
     userMessage = content;
   }

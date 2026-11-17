@@ -1,28 +1,20 @@
-// Selection capture / paste hotkeys.
+// Selection capture -> solve hotkey.
 //
-// Capture: reads the text currently selected in whatever app is frontmost and keeps it in
-// app memory (never left on the system clipboard).
+// Capture: reads the text currently selected in whatever app is frontmost and emits it to the
+// frontend to populate {CONTENT} and solve with AI (never left on the system clipboard).
 //   1. macOS: ask the Accessibility API for the focused element's selected text (walking
 //      up AXParent for WebKit/Chromium views; works even when the source app blocks copying).
 //   2. Windows: ask Windows UI Automation (IUIAutomation TextPattern, including CefSharp/
 //      Chromium document nodes) for the selected text without sending Ctrl+C or touching
-//      the clipboard (works even when Safe Exam Browser blocks copy/paste & clipboard).
+//      the clipboard (works even when Safe Exam Browser / LockDown Browser blocks copy/paste).
 //   3. Fallback: simulate the OS copy shortcut, read the clipboard, then restore
 //      the previous clipboard text.
-//
-// Paste: emits the stored text to the frontend, which inserts it into the focused field of the
-// app window. No OS key injection and no window activation, so no focus is stolen.
 
-use std::sync::Mutex;
 use std::time::Duration;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 /// Cap on stored text so a huge selection can't bloat memory or the IPC payload.
 const MAX_CAPTURE_CHARS: usize = 200_000;
-
-lazy_static::lazy_static! {
-    static ref CAPTURED: Mutex<Option<String>> = Mutex::new(None);
-}
 
 fn truncate_capture(text: String) -> Option<String> {
     let trimmed: String = text.chars().take(MAX_CAPTURE_CHARS).collect();
@@ -45,51 +37,38 @@ where
     }
 }
 
-/// Capture the current selection into app memory. Runs on a background thread because it
-/// may query UIA/AX or wait for hotkey modifiers to be released.
+/// Capture the current selection and send it to the frontend to solve with AI (or display a
+/// notice if nothing was captured). Runs on a background thread because it may query UIA/AX
+/// or wait for hotkey modifiers to be released.
 pub fn capture(app: &tauri::AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
-        let text = capture_selected_text();
-        match text {
+        let payload = match capture_selected_text() {
             Some(t) => {
                 let t = truncate_capture(t).unwrap_or_default();
                 let count = t.chars().count();
                 println!("📋 [selection] Captured {} chars", count);
-                crate::resilience::log_event(&format!("[selection] Stored {} chars in app memory", count));
-                if let Ok(mut guard) = CAPTURED.lock() {
-                    *guard = Some(t);
-                }
-                let _ = app.emit("selection-captured", ());
+                crate::resilience::log_event(&format!("[selection] Captured {} chars for solve", count));
+                t
             }
             None => {
                 println!("⚠️ [selection] Nothing captured (no selection, or the source blocked it)");
                 crate::resilience::log_event(
                     "[selection] Nothing captured (no selection, or source blocked UIA/AX and clipboard)",
                 );
+                String::new()
             }
-        }
-    });
-}
+        };
 
-/// Send the stored text to the frontend to be inserted into the focused field.
-pub fn paste(app: &tauri::AppHandle) {
-    let text = CAPTURED.lock().ok().and_then(|g| g.clone());
-    match text {
-        Some(t) => {
-            crate::resilience::log_event(&format!(
-                "[selection] Pasting {} chars to frontend",
-                t.chars().count()
-            ));
-            let _ = app.emit("hotkey-paste-selection", t);
-        }
-        None => {
-            println!("ℹ️ [selection] Paste hotkey pressed but nothing has been captured yet");
-            crate::resilience::log_event(
-                "[selection] Paste hotkey pressed but nothing has been captured yet",
-            );
-        }
-    }
+        let app_for_main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(win) = app_for_main.get_webview_window("main") {
+                crate::stealth_hotkey::bring_to_front_without_focus(&win);
+                crate::reapply_stealth_after_show(&win);
+            }
+            let _ = app_for_main.emit("hotkey-solve-selection", payload);
+        });
+    });
 }
 
 fn capture_selected_text() -> Option<String> {

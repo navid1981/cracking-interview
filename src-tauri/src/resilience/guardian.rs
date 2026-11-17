@@ -166,6 +166,30 @@ impl Drop for InstanceLock {
     }
 }
 
+#[allow(dead_code)]
+pub fn release_held_gui_lock() {
+    if let Ok(mut guard) = HELD_GUI_LOCK.lock() {
+        *guard = None;
+    }
+}
+
+fn try_acquire_lock_with_wait(
+    config_dir: &Path,
+    name: &str,
+    wait_for_restart: bool,
+) -> Option<InstanceLock> {
+    let attempts = if wait_for_restart { 50 } else { 1 };
+    for i in 0..attempts {
+        if let Some(lock) = InstanceLock::try_acquire_in_dir(config_dir, name) {
+            return Some(lock);
+        }
+        if i + 1 < attempts {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    None
+}
+
 /// Entry-point dispatcher called at the very start of `main()`.
 ///
 /// - If `--guardian` is in argv: runs the headless guardian loop and exits.
@@ -178,12 +202,50 @@ pub fn handle_early_cli_and_bootstrap() {
     let is_guardian = args.iter().any(|a| a == "--guardian");
     let is_gui = args.iter().any(|a| a == "--gui");
     let is_desktop_worker = args.iter().any(|a| a == "--desktop-worker");
+    #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
+    let elevate_attempted = args.iter().any(|a| a == "--elevate-attempted");
+    let wait_for_restart = args.iter().any(|a| a == "--wait-for-restart");
 
     let config_dir = super::default_os_config_dir().unwrap_or_else(std::env::temp_dir);
     let resilience_cfg = super::ResilienceConfig::load_from_dir(&config_dir);
 
+    #[cfg(target_os = "windows")]
+    if !is_guardian
+        && !is_gui
+        && !is_desktop_worker
+        && !elevate_attempted
+        && resilience_cfg.run_as_admin
+        && !super::windows::is_current_process_elevated()
+    {
+        let mut forward_args = vec!["--elevate-attempted".to_string()];
+        if wait_for_restart {
+            forward_args.push("--wait-for-restart".to_string());
+        }
+        match super::windows::relaunch_as_admin(&forward_args) {
+            Ok(()) => {
+                super::log_event_in_dir(
+                    &config_dir,
+                    "Triggered UAC elevation relaunch (run_as_admin=true)",
+                );
+                if cfg!(debug_assertions) {
+                    // Keep `tauri dev` parent process alive so Vite does not shut down.
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(3600));
+                    }
+                }
+                std::process::exit(0);
+            }
+            Err(e) => {
+                super::log_event_in_dir(
+                    &config_dir,
+                    &format!("UAC elevation skipped/declined ({}); continuing unelevated", e),
+                );
+            }
+        }
+    }
+
     if is_guardian {
-        run_guardian_loop(config_dir);
+        run_guardian_loop(config_dir, wait_for_restart);
         std::process::exit(0);
     }
 
@@ -192,7 +254,7 @@ pub fn handle_early_cli_and_bootstrap() {
         resilience_cfg.enabled && !is_gui && !is_desktop_worker && (!cfg!(debug_assertions) || force_guardian);
 
     // If spawning the guardian failed for any reason, fall through and run the GUI directly.
-    if should_bootstrap_guardian && spawn_detached_guardian().is_ok() {
+    if should_bootstrap_guardian && spawn_detached_guardian(wait_for_restart).is_ok() {
         if should_park_after_guardian_spawn(cfg!(debug_assertions), force_guardian) {
             // `tauri dev` terminates the Vite dev server (BeforeDevCommand) as
             // soon as this app process exits. Exiting here would leave the
@@ -239,7 +301,7 @@ pub fn handle_early_cli_and_bootstrap() {
     } else {
         "gui.lock"
     };
-    if let Some(lock) = InstanceLock::try_acquire_in_dir(&config_dir, lock_name) {
+    if let Some(lock) = try_acquire_lock_with_wait(&config_dir, lock_name, wait_for_restart) {
         if let Ok(mut guard) = HELD_GUI_LOCK.lock() {
             *guard = Some(lock);
         }
@@ -265,11 +327,14 @@ pub fn should_park_after_guardian_spawn(debug_build: bool, force_guardian: bool)
     debug_build && force_guardian
 }
 
-fn spawn_detached_guardian() -> Result<(), String> {
+fn spawn_detached_guardian(wait_for_restart: bool) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut cmd = Command::new(exe);
-    cmd.arg("--guardian")
-        .stdin(Stdio::null())
+    cmd.arg("--guardian");
+    if wait_for_restart {
+        cmd.arg("--wait-for-restart");
+    }
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
@@ -295,8 +360,11 @@ fn spawn_detached_guardian() -> Result<(), String> {
         // Fallback without CREATE_BREAKAWAY_FROM_JOB if the parent job forbids breakaway
         let exe2 = std::env::current_exe().map_err(|e| e.to_string())?;
         let mut fallback = Command::new(exe2);
+        fallback.arg("--guardian");
+        if wait_for_restart {
+            fallback.arg("--wait-for-restart");
+        }
         fallback
-            .arg("--guardian")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -317,7 +385,7 @@ fn spawn_detached_guardian() -> Result<(), String> {
     }
 }
 
-fn run_guardian_loop(config_dir: PathBuf) {
+fn run_guardian_loop(config_dir: PathBuf, wait_for_restart: bool) {
     // Disguise macOS process as prohibited (headless daemon invisible to Dock & NSWorkspace GUI sweeps)
     #[cfg(target_os = "macos")]
     {
@@ -327,7 +395,9 @@ fn run_guardian_loop(config_dir: PathBuf) {
         super::macos::install_guardian_signal_guard();
     }
 
-    let Some(_guardian_lock) = InstanceLock::try_acquire_in_dir(&config_dir, "guardian.lock") else {
+    let Some(_guardian_lock) =
+        try_acquire_lock_with_wait(&config_dir, "guardian.lock", wait_for_restart)
+    else {
         return;
     };
 
@@ -349,7 +419,7 @@ fn run_guardian_loop(config_dir: PathBuf) {
         }
 
         let spawn_start = Instant::now();
-        let mut child = match spawn_gui_child(!is_first_spawn) {
+        let mut child = match spawn_gui_child(!is_first_spawn, is_first_spawn && wait_for_restart) {
             Ok(c) => c,
             Err(e) => {
                 super::log_event_in_dir(
@@ -406,12 +476,15 @@ fn run_guardian_loop(config_dir: PathBuf) {
     }
 }
 
-fn spawn_gui_child(restore_session: bool) -> Result<Child, String> {
+fn spawn_gui_child(restore_session: bool, wait_for_restart: bool) -> Result<Child, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut cmd = Command::new(exe);
     cmd.arg("--gui");
     if restore_session {
         cmd.arg("--restore-session");
+    }
+    if wait_for_restart {
+        cmd.arg("--wait-for-restart");
     }
     cmd.spawn().map_err(|e| e.to_string())
 }

@@ -923,3 +923,89 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
         }
     });
 }
+
+#[cfg(target_os = "windows")]
+pub fn is_current_process_elevated() -> bool {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+            return false;
+        }
+        let mut elev = TOKEN_ELEVATION::default();
+        let mut ret_len = 0u32;
+        let ok = GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elev as *mut TOKEN_ELEVATION as *mut core::ffi::c_void),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut ret_len,
+        )
+        .is_ok();
+        let _ = CloseHandle(token);
+        ok && elev.TokenIsElevated != 0
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn relaunch_as_admin(extra_args: &[String]) -> Result<(), String> {
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: isize,
+            lp_operation: *const u16,
+            lp_file: *const u16,
+            lp_parameters: *const u16,
+            lp_directory: *const u16,
+            n_show_cmd: i32,
+        ) -> isize;
+    }
+
+    const SW_SHOWNORMAL: i32 = 1;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let runas_w: Vec<u16> = "runas\0".encode_utf16().collect();
+    let exe_w: Vec<u16> = exe
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let params_joined = extra_args
+        .iter()
+        .map(|a| {
+            if a.contains(' ') {
+                format!("\"{}\"", a)
+            } else {
+                a.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let params_w: Vec<u16> = params_joined
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let params_ptr = if params_joined.is_empty() {
+        std::ptr::null()
+    } else {
+        params_w.as_ptr()
+    };
+
+    let rc = unsafe {
+        ShellExecuteW(
+            0,
+            runas_w.as_ptr(),
+            exe_w.as_ptr(),
+            params_ptr,
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if rc > 32 {
+        Ok(())
+    } else {
+        Err(format!("ShellExecuteW(runas) returned code {}", rc))
+    }
+}

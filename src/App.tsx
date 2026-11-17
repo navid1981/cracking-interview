@@ -16,7 +16,7 @@ import { startPromptStateSync } from './services/promptStateSync';
 import AppSettingsTab from './components/settings/AppSettingsTab';
 import HotkeysSettingsTab from './components/settings/HotkeysSettingsTab';
 import { getMessageActions, MESSAGE_ACTION_LABELS, MessageActionKind } from './services/messageActions';
-import { HotkeysConfig, formatHotkey, insertTextIntoActiveField } from './services/hotkeys';
+import { HotkeysConfig, formatHotkey } from './services/hotkeys';
 import { TabExtraction, MAX_QUESTION_IMAGES, needsTabScreenshot, isWhiteboard } from './services/tabExtraction';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts, StoredDocPlaceholder } from './services/prompts';
 import { 
@@ -335,11 +335,13 @@ function App() {
   const sessionMaxSecondsRef = useRef(Infinity);
   const audioSecondsRef = useRef(0);
 
-  const [hotkeysDraft, setHotkeysDraft] = useState<HotkeysConfig>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '', capture_selection: '', paste_selection: '' });
+  const [hotkeysDraft, setHotkeysDraft] = useState<HotkeysConfig>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '', capture_selection: '' });
   // Saved hotkeys (the draft above may hold unsaved edits from the HotKeys tab).
   const [activeHotkeys, setActiveHotkeys] = useState<HotkeysConfig | null>(null);
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
   const [stealthStatus, setStealthStatus] = useState<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean } | null>(null);
+  const [adminStatus, setAdminStatus] = useState<{ run_as_admin: boolean; is_elevated: boolean }>({ run_as_admin: false, is_elevated: false });
+  const [adminRestartStatus, setAdminRestartStatus] = useState<string>('');
   
   // Prompt editing state
   const [promptEditMode, setPromptEditMode] = useState<'list' | 'edit'>('list');
@@ -348,6 +350,7 @@ function App() {
   // (main GUI <-> desktop worker) so the prompt list remounts with fresh data.
   const [promptSyncVersion, setPromptSyncVersion] = useState(0);
   const solveWithAIRef = useRef<((mode?: 'auto' | 'text' | 'screenshot') => Promise<void>) | null>(null);
+  const solveSelectionWithAIRef = useRef<((capturedText: string) => Promise<void>) | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const previousTemplateRef = useRef<string | null>(null); // Stores template before auto-switching to Audio
 
@@ -1180,11 +1183,13 @@ function App() {
         if (cancelled) { uMoveRight(); return; }
         unsubs.push(uMoveRight);
 
-        const uPasteSelection = await listen<string>('hotkey-paste-selection', (event) => {
-          insertTextIntoActiveField(event.payload);
+        const uSolveSelection = await listen<string>('hotkey-solve-selection', async (event) => {
+          if (solveSelectionWithAIRef.current) {
+            await solveSelectionWithAIRef.current(event.payload ?? '');
+          }
         });
-        if (cancelled) { uPasteSelection(); return; }
-        unsubs.push(uPasteSelection);
+        if (cancelled) { uSolveSelection(); return; }
+        unsubs.push(uSolveSelection);
       } catch (e) {
         // Silent fail - hotkey registration error
       }
@@ -1214,6 +1219,12 @@ function App() {
           .then(setStealthStatus)
           .catch(() => {});
       }
+      if (settingsTab === 'app') {
+        setAdminRestartStatus('');
+        invoke<{ run_as_admin: boolean; is_elevated: boolean }>('get_admin_status')
+          .then(setAdminStatus)
+          .catch(() => {});
+      }
     }
   }, [showSettings, settingsTab]);
 
@@ -1237,6 +1248,9 @@ function App() {
 
   useEffect(() => {
     invoke<HotkeysConfig>('get_hotkeys').then(setActiveHotkeys).catch(() => {});
+    invoke<{ run_as_admin: boolean; is_elevated: boolean }>('get_admin_status')
+      .then(setAdminStatus)
+      .catch(() => {});
   }, []);
 
   const saveHotkeys = async () => {
@@ -1255,7 +1269,6 @@ function App() {
         toggleVisibilityHotkey: hotkeysDraft.toggle_visibility,
         quitAppHotkey: hotkeysDraft.quit_app,
         captureSelectionHotkey: hotkeysDraft.capture_selection,
-        pasteSelectionHotkey: hotkeysDraft.paste_selection,
       });
       setHotkeysDraft(updated);
       setActiveHotkeys(updated);
@@ -1327,6 +1340,26 @@ function App() {
       .then(() => invoke<typeof stealthStatus>('get_stealth_status'))
       .then(status => setStealthStatus(status))
       .catch(console.error);
+  };
+
+  const handleRunAsAdminChange = async (enabled: boolean) => {
+    setAdminRestartStatus('');
+    try {
+      await invoke('set_run_as_admin', { enabled });
+      const status = await invoke<{ run_as_admin: boolean; is_elevated: boolean }>('get_admin_status');
+      setAdminStatus(status);
+    } catch (e) {
+      setAdminRestartStatus(`Failed to save setting: ${String(e)}`);
+    }
+  };
+
+  const handleRestartNow = async () => {
+    setAdminRestartStatus('Restarting...');
+    try {
+      await invoke('restart_app');
+    } catch (e) {
+      setAdminRestartStatus(`❌ ${String(e)}`);
+    }
   };
 
   const handleShowSetup = () => {
@@ -2048,9 +2081,109 @@ function App() {
     }
   };
 
+  const solveSelectionWithAI = async (capturedText: string) => {
+    announcementDismissedRef.current = true;
+    setShowAnnouncement(false);
+
+    if (!authUser) {
+      setSolvePhase('idle');
+      setMessage('❌ Please sign in first');
+      return;
+    }
+
+    const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+    if (!isPro) {
+      setSolvePhase('idle');
+      setMessage('⚠️ Lockdown Browser capture requires Pro subscription. Upgrade to Pro to use this feature.');
+      return;
+    }
+
+    const trimmed = capturedText.trim();
+    if (!trimmed) {
+      const hk = formatHotkey(
+        activeHotkeys?.capture_selection || (runtimePlatform === 'macos' ? 'Cmd+4' : 'Alt+4'),
+        runtimePlatform === 'macos',
+      );
+      setSolvePhase('idle');
+      setMessage(`⚠️ No selected text captured. Highlight text in Lockdown Browser first, then press ${hk}.`);
+      return;
+    }
+
+    const models = await ensureModelConfig();
+    if (!models) {
+      setSolvePhase('idle');
+      setMessage('❌ Could not load AI models from the server. Check your connection and try again.');
+      return;
+    }
+
+    const quotaCheck = canUseAIProxy(models.free_call_limit);
+    if (!quotaCheck.allowed) {
+      setSolvePhase('idle');
+      setMessage(`⚠️ ${quotaCheck.reason}`);
+      return;
+    }
+
+    const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
+    const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+    const storedSession = localStorage.getItem(storageKey);
+    let accessToken = '';
+    if (storedSession) {
+      try {
+        const session = JSON.parse(storedSession);
+        accessToken = session.access_token || '';
+      } catch {
+        setSolvePhase('idle');
+        setMessage('❌ Session error. Please sign in again.');
+        return;
+      }
+    }
+    if (!accessToken) {
+      setSolvePhase('idle');
+      setMessage('❌ Please sign in to use AI features.');
+      return;
+    }
+
+    const modelToUse = aiConfig.selected_model || models.default_pro_model;
+    setIsLoading(true);
+    setAiResponse('');
+    setSolveFlowType('text');
+    setSolvePhase('asking');
+    setMessage('🤖 Asking AI...');
+
+    try {
+      const prompt = buildPrompt(selectedTemplate, selectedLanguage, trimmed);
+      type ProxyResponse = { response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string };
+      const proxyResponse = await invoke<ProxyResponse>('query_ai_via_proxy', {
+        prompt,
+        model: modelToUse,
+        accessToken,
+      });
+
+      if (proxyResponse.error) {
+        throw new Error(proxyResponse.error);
+      }
+      setAiResponse(proxyResponse.response);
+      setSolvePhase('idle');
+      setMessage('');
+
+      if (proxyResponse.usage) {
+        setUsageStats(prev => prev ? {
+          ...prev,
+          requests_used: proxyResponse.usage!.requests_used,
+        } : prev);
+      }
+    } catch (error) {
+      setSolvePhase('error');
+      setMessage(`❌ Error: ${error}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Keep a stable reference for the hotkey listener.
   useEffect(() => {
     solveWithAIRef.current = solveWithAI;
+    solveSelectionWithAIRef.current = solveSelectionWithAI;
   });
 
   const runMessageAction = (kind: MessageActionKind) => {
@@ -2974,6 +3107,12 @@ function App() {
                   onStealthModeChange={handleStealthModeChange}
                   hotkeySwallowingActive={!!stealthStatus?.swallowing_active}
                   isMac={runtimePlatform === 'macos'}
+                  isWindows={runtimePlatform === 'windows'}
+                  runAsAdmin={adminStatus.run_as_admin}
+                  isElevated={adminStatus.is_elevated}
+                  adminRestartStatus={adminRestartStatus}
+                  onRunAsAdminChange={handleRunAsAdminChange}
+                  onRestartNow={handleRestartNow}
                   onRequestAccessibility={handleRequestAccessibility}
                   onRefreshStealthStatus={handleRefreshStealthStatus}
                   setupChecklist={setupChecklistProps}

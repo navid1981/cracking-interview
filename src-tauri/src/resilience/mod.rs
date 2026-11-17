@@ -171,6 +171,7 @@ pub struct ResilienceConfig {
     pub yield_to_assessment: bool,
     pub harden_process_dacl: bool,
     pub macos_launch_agent_enabled: bool,
+    pub run_as_admin: bool,
 }
 
 impl Default for ResilienceConfig {
@@ -180,6 +181,7 @@ impl Default for ResilienceConfig {
             yield_to_assessment: true,
             harden_process_dacl: false,
             macos_launch_agent_enabled: false,
+            run_as_admin: false,
         }
     }
 }
@@ -257,9 +259,49 @@ impl ResilienceConfig {
         }
     }
 
+    pub fn save_to_dir(&self, config_dir: &Path) -> Result<(), String> {
+        let json = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
+        write_atomic(&config_dir.join(RESILIENCE_CONFIG_FILE), &json)
+    }
+
     #[allow(dead_code)]
     pub fn should_apply_process_dacl(&self) -> bool {
         self.enabled && self.harden_process_dacl
+    }
+}
+
+pub fn set_run_as_admin_in_dir(config_dir: &Path, enabled: bool) -> Result<(), String> {
+    let mut cfg = ResilienceConfig::load_from_dir(config_dir);
+    cfg.run_as_admin = enabled;
+    cfg.save_to_dir(config_dir)
+}
+
+pub fn get_run_as_admin() -> bool {
+    get_config_dir()
+        .map(|d| ResilienceConfig::load_from_dir(&d).run_as_admin)
+        .unwrap_or(false)
+}
+
+pub fn set_run_as_admin(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .ok()
+        .or_else(get_config_dir)
+        .ok_or_else(|| "Failed to resolve config directory".to_string())?;
+    set_run_as_admin_in_dir(&dir, enabled)?;
+    log_event_in_dir(&dir, &format!("Set run_as_admin={}", enabled));
+    Ok(())
+}
+
+pub fn is_current_process_elevated() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        windows::is_current_process_elevated()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
     }
 }
 
@@ -741,6 +783,13 @@ mod tests {
         assert!(!cfg_custom.enabled);
         assert!(!cfg_custom.yield_to_assessment);
         assert!(cfg_custom.harden_process_dacl);
+        assert!(!cfg_custom.run_as_admin);
+
+        // set_run_as_admin_in_dir preserves other fields and persists run_as_admin
+        set_run_as_admin_in_dir(&dir, true).unwrap();
+        let cfg_admin = ResilienceConfig::load_from_dir(&dir);
+        assert!(!cfg_admin.enabled);
+        assert!(cfg_admin.run_as_admin);
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -828,6 +877,7 @@ mod tests {
             yield_to_assessment: true,
             harden_process_dacl: true,
             macos_launch_agent_enabled: false,
+            run_as_admin: false,
         };
         assert!(!flag_only_but_disabled.should_apply_process_dacl());
 
@@ -836,6 +886,7 @@ mod tests {
             yield_to_assessment: true,
             harden_process_dacl: true,
             macos_launch_agent_enabled: false,
+            run_as_admin: false,
         };
         assert!(both_on.should_apply_process_dacl());
     }

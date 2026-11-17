@@ -24,6 +24,11 @@ cargo tree
   cargo test                                  # unit tests
   cargo test -- --ignored chrome_integration  # real Rust code against headless Chrome
 
+
+---------------------------
+Where it lives: The app already stores local JSON settings files (stealth.json, hotkeys.json, resilience.json) in:
+Windows: %APPDATA%\com.crackinginterview.app\ (e.g. C:\Users\<you>\AppData\Roaming\com.crackinginterview.app\)
+macOS: ~/Library/Application Support/com.crackinginterview.app/
 ---------------------------
 # 1. Check your certificates
 security find-identity -v -p codesigning

@@ -19,13 +19,7 @@ const SECTIONS: Array<{ title: string; fields: Field[] }> = [
       { key: 'text', label: 'Extract text → Solve', keys: '1' },
       { key: 'screenshot', label: 'Screenshot → Solve', keys: '2' },
       { key: 'audio_toggle', label: 'Audio Start/Stop → Solve', keys: '3' },
-    ],
-  },
-  {
-    title: '📋 Selection',
-    fields: [
-      { key: 'capture_selection', label: 'Capture selected text (from any app)', keys: '4' },
-      { key: 'paste_selection', label: 'Paste captured text (into the app)', keys: '5' },
+      { key: 'capture_selection', label: 'Capture Lockdown Browser text → Solve', keys: '4' },
     ],
   },
   {

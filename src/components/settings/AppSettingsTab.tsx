@@ -14,6 +14,12 @@ interface Props {
   /** macOS only: whether the event tap that hides hotkeys from other apps is running. */
   hotkeySwallowingActive: boolean;
   isMac: boolean;
+  isWindows: boolean;
+  runAsAdmin: boolean;
+  isElevated: boolean;
+  adminRestartStatus: string;
+  onRunAsAdminChange: (enabled: boolean) => void;
+  onRestartNow: () => void;
   onRequestAccessibility: () => void;
   onRefreshStealthStatus: () => void;
   setupChecklist: Omit<ComponentProps<typeof SetupChecklist>, 'variant'>;
@@ -29,6 +35,7 @@ const STEALTH_FEATURES = (
 export default function AppSettingsTab({
   windowOpacity, onOpacityChange, theme, onThemeChange,
   isPro, stealthMode, onStealthModeChange, hotkeySwallowingActive, isMac,
+  isWindows, runAsAdmin, isElevated, adminRestartStatus, onRunAsAdminChange, onRestartNow,
   onRequestAccessibility, onRefreshStealthStatus, setupChecklist,
 }: Props) {
   const restartNote = isMac && (
@@ -117,6 +124,70 @@ export default function AppSettingsTab({
           </div>
         )}
       </div>
+
+      {isWindows && (
+        <div className="app-settings-group">
+          <div className="app-settings-label stealth-heading">
+            Run as Administrator
+            {!isPro && <span className="pro-only-tag">Pro Only</span>}
+          </div>
+          <div className="app-settings-desc">
+            Automatically prompts for Windows elevation at launch so Lockdown Browser text capture can read protected windows.
+          </div>
+          <div className="stealth-toggle-row">
+            <label className={`toggle-switch ${!isPro ? 'disabled' : ''}`}>
+              <input
+                type="checkbox"
+                checked={isPro && runAsAdmin}
+                disabled={!isPro}
+                onChange={(e) => isPro && onRunAsAdminChange(e.target.checked)}
+              />
+              <span className="toggle-switch-slider" />
+            </label>
+            <span className="stealth-label">
+              {!isPro
+                ? 'Disabled (Pro Only)'
+                : runAsAdmin
+                  ? (isElevated ? 'Enabled (Elevated)' : 'Enabled (Restart required)')
+                  : (isElevated ? 'Disabled (Currently Elevated)' : 'Disabled')}
+            </span>
+          </div>
+
+          {isPro ? (
+            <div className={`stealth-box ${isElevated ? 'is-active' : 'is-inactive'}`}>
+              <div className="stealth-box-title">
+                {isElevated ? '🛡️ Running as Administrator' : '🛡️ Running with Standard Privileges'}
+              </div>
+              <div className="stealth-box-text">
+                {runAsAdmin
+                  ? (isElevated
+                    ? 'The app will automatically request Windows administrator elevation on future launches.'
+                    : 'Administrator mode is saved. Restart the app to trigger the Windows elevation prompt.')
+                  : (isElevated
+                    ? 'Administrator mode is turned off. Quit and reopen the app to return to standard privileges.'
+                    : 'Enable Run as Administrator if Lockdown Browser blocks text capture.')}
+              </div>
+              {runAsAdmin && !isElevated && (
+                <div className="stealth-actions">
+                  <button type="button" className="stealth-btn primary" onClick={onRestartNow}>
+                    🔄 Restart Now
+                  </button>
+                </div>
+              )}
+              {adminRestartStatus && (
+                <div className="stealth-note">{adminRestartStatus}</div>
+              )}
+            </div>
+          ) : (
+            <div className="stealth-box is-locked">
+              <div className="stealth-box-title">🔒 Pro Feature: Run as Administrator</div>
+              <div className="stealth-box-text">
+                Upgrade to Pro to launch elevated on Windows for Lockdown Browser text capture.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="app-settings-group">
         <SetupChecklist variant="panel" {...setupChecklist} />
