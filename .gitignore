@@ -22,4 +22,4 @@ notarize.sh
 .playwright-mcp/
 graphify-out/cache/
 graphify-out/**/
-supabase/.temp/
+supabase/.temp/*/.DS_Store
