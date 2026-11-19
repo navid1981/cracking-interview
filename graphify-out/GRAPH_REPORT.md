@@ -1,17 +1,17 @@
 # Graph Report - cracking-interview  (2026-11-19)
 
 ## Corpus Check
-- 119 files · ~696,355 words
+- 119 files · ~696,329 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 24 file(s) not represented in the graph (top: (none) 13, .css 7, .log 1)
 
 ## Summary
-- 6211 nodes · 17866 edges · 245 communities (186 shown, 59 thin omitted)
-- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 497 edges (avg confidence: 0.86)
+- 6211 nodes · 17868 edges · 244 communities (186 shown, 58 thin omitted)
+- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 498 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `66a63e53`
+- Built from commit: `b3ed0239`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -206,7 +206,6 @@
 - BitbucketResolver
 - BufferReporter
 - .has
-- get_chrome_tabs
 - get_setup_status
 - STEALTH_ENABLED
 - win-proctor.rs
@@ -280,7 +279,7 @@
 - **Texas LLC Formation & Tax Registration Document Set** — cracking_interview_llc_entity, docs_certificate_texas_sos_filing, docs_original_document_certificate_of_formation, docs_ein_letter_irs_notice, docs_texas_sales_use_tax_permit, docs_texas_comptroller_franchise_tax_letter, docs_summary_franchise_questionnaire, docs_dun_bradstreet_duns_profile [EXTRACTED 1.00]
 - **Stealth Mode / Anti-Detection Protection Layers** — docs_ai_project_guide_blur_prevention, docs_ai_project_guide_key_event_swallowing, docs_ai_project_guide_screen_capture_protection, docs_ai_project_guide_stealth_hotkey_rs, md_video_scripts_stealth_features_section, md_marketing_strategy_zoom_stealth_demo [INFERRED 0.90]
 
-## Communities (245 total, 59 thin omitted)
+## Communities (244 total, 58 thin omitted)
 
 ### Community 0 - "yarn-1.22.19.cjs"
 Cohesion: 0.00
@@ -360,7 +359,7 @@ Nodes (46): any(), checkForGypIfNeeded(), constructYamlBinary(), contains(), cre
 
 ### Community 20 - "main.rs"
 Cohesion: 0.04
-Nodes (65): AdminStatus, AI_IMAGE_TOTAL_BYTES, app_config_dir(), apply_macos_dock_hiding(), apply_macos_fullscreen_overlay(), apply_macos_screen_capture_protection(), DEFAULT_AUDIO_TOGGLE_HOTKEY, DEFAULT_CAPTURE_SELECTION_HOTKEY (+57 more)
+Nodes (66): AdminStatus, AI_IMAGE_TOTAL_BYTES, app_config_dir(), apply_macos_dock_hiding(), apply_macos_fullscreen_overlay(), apply_macos_screen_capture_protection(), DEFAULT_AUDIO_TOGGLE_HOTKEY, DEFAULT_CAPTURE_SELECTION_HOTKEY (+58 more)
 
 ### Community 21 - ".parse"
 Cohesion: 0.10
@@ -1029,7 +1028,7 @@ Nodes (5): Building & Running, macOS (`mac-proctor.swift`), Proctor & Kiosk Atta
 ## Knowledge Gaps
 - **336 isolated node(s):** `YarnResolver`, `RFC-5234`, `RFC-3110`, `RFC-3986`, `RFC-5280` (+331 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1188 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **59 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **58 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_

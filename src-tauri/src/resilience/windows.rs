@@ -296,9 +296,12 @@ fn query_active_input_desktop_name() -> Option<String> {
     }
 }
 
-/// Spawns `--desktop-worker` at Medium integrity (unelevated) when the guardian is elevated.
-/// On SEB's isolated kiosk desktop, an elevated worker fails WebView2 initialization / gets
-/// killed with -1 (0xFFFFFFFF), while a Medium-integrity worker runs cleanly and is allowed.
+/// Spawns `--desktop-worker` using the shell's genuine unelevated (Medium-integrity,
+/// non-restricted) user token when the guardian is running elevated.
+/// Unlike `CreateRestrictedToken` (which keeps `TokenIsElevated=1` and sets restricted
+/// flags that hang Edge WebView2), duplicating the desktop shell's primary token and calling
+/// `CreateProcessWithTokenW` gives the worker a real `elevated=false` token that SEB allows
+/// and WebView2 initializes cleanly.
 #[cfg(target_os = "windows")]
 fn spawn_worker_unelevated_on_desktop(
     cmd_line: &mut [u16],
@@ -307,124 +310,86 @@ fn spawn_worker_unelevated_on_desktop(
     use windows::core::{PCWSTR, PWSTR};
     use windows::Win32::Foundation::{CloseHandle as WinCloseHandle, HANDLE};
     use windows::Win32::Security::{
-        AllocateAndInitializeSid, CreateRestrictedToken, FreeSid, GetLengthSid,
-        SetTokenInformation, TokenIntegrityLevel, DISABLE_MAX_PRIVILEGE, PSID,
-        SECURITY_MANDATORY_LABEL_AUTHORITY, SECURITY_NT_AUTHORITY, SID_AND_ATTRIBUTES,
-        TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_MANDATORY_LABEL,
-        TOKEN_QUERY,
+        DuplicateTokenEx, GetTokenInformation, SecurityImpersonation, TokenElevation,
+        TokenPrimary, TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_SESSIONID, TOKEN_ASSIGN_PRIMARY,
+        TOKEN_DUPLICATE, TOKEN_ELEVATION, TOKEN_QUERY,
     };
     use windows::Win32::System::Threading::{
-        CreateProcessAsUserW, GetCurrentProcess, OpenProcessToken, PROCESS_CREATION_FLAGS,
-        PROCESS_INFORMATION as WinProcessInformation, STARTUPINFOW as WinStartupInfoW,
+        CreateProcessWithTokenW, OpenProcess, CREATE_PROCESS_LOGON_FLAGS, OpenProcessToken,
+        PROCESS_CREATION_FLAGS, PROCESS_INFORMATION as WinProcessInformation,
+        PROCESS_QUERY_LIMITED_INFORMATION, STARTUPINFOW as WinStartupInfoW,
     };
-
-    const SECURITY_BUILTIN_DOMAIN_RID: u32 = 32;
-    const DOMAIN_ALIAS_RID_ADMINS: u32 = 544;
-    const SECURITY_MANDATORY_MEDIUM_RID: u32 = 0x2000;
-    const SE_GROUP_INTEGRITY: u32 = 0x20;
+    use windows::Win32::UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId};
 
     unsafe {
-        let mut cur_token = HANDLE::default();
-        OpenProcessToken(
-            GetCurrentProcess(),
-            TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY | TOKEN_ADJUST_DEFAULT,
-            &mut cur_token,
+        let shell_hwnd = GetShellWindow();
+        if shell_hwnd.0.is_null() {
+            return Err("GetShellWindow returned null (explorer shell unavailable)".to_string());
+        }
+
+        let mut shell_pid: u32 = 0;
+        GetWindowThreadProcessId(shell_hwnd, Some(&mut shell_pid));
+        if shell_pid == 0 {
+            return Err("GetWindowThreadProcessId returned 0 for shell window".to_string());
+        }
+
+        let shell_proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, shell_pid)
+            .map_err(|e| format!("OpenProcess(shell pid={}): {}", shell_pid, e))?;
+
+        let mut shell_token = HANDLE::default();
+        let open_tok_res = OpenProcessToken(shell_proc, TOKEN_DUPLICATE | TOKEN_QUERY, &mut shell_token);
+        let _ = WinCloseHandle(shell_proc);
+        open_tok_res.map_err(|e| format!("OpenProcessToken(shell): {}", e))?;
+
+        let mut elev = TOKEN_ELEVATION::default();
+        let mut ret_len = 0u32;
+        let elev_ok = GetTokenInformation(
+            shell_token,
+            TokenElevation,
+            Some(&mut elev as *mut TOKEN_ELEVATION as *mut core::ffi::c_void),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut ret_len,
         )
-        .map_err(|e| format!("OpenProcessToken: {}", e))?;
-
-        let mut admins_sid = PSID::default();
-        if let Err(e) = AllocateAndInitializeSid(
-            &SECURITY_NT_AUTHORITY,
-            2,
-            SECURITY_BUILTIN_DOMAIN_RID,
-            DOMAIN_ALIAS_RID_ADMINS,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            &mut admins_sid,
-        ) {
-            let _ = WinCloseHandle(cur_token);
-            return Err(format!("AllocateAndInitializeSid(Admins): {}", e));
+        .is_ok();
+        if elev_ok && elev.TokenIsElevated != 0 {
+            let _ = WinCloseHandle(shell_token);
+            return Err("Shell token is itself elevated".to_string());
         }
 
-        let disable_sids = [SID_AND_ATTRIBUTES {
-            Sid: admins_sid,
-            Attributes: 0,
-        }];
-        let mut restricted_token = HANDLE::default();
-        let restrict_res = CreateRestrictedToken(
-            cur_token,
-            DISABLE_MAX_PRIVILEGE,
-            Some(&disable_sids),
+        let mut primary_token = HANDLE::default();
+        let dup_res = DuplicateTokenEx(
+            shell_token,
+            TOKEN_ASSIGN_PRIMARY
+                | TOKEN_DUPLICATE
+                | TOKEN_QUERY
+                | TOKEN_ADJUST_DEFAULT
+                | TOKEN_ADJUST_SESSIONID,
             None,
-            None,
-            &mut restricted_token,
+            SecurityImpersonation,
+            TokenPrimary,
+            &mut primary_token,
         );
-        FreeSid(admins_sid);
-        let _ = WinCloseHandle(cur_token);
-        restrict_res.map_err(|e| format!("CreateRestrictedToken: {}", e))?;
-
-        let mut medium_sid = PSID::default();
-        if let Err(e) = AllocateAndInitializeSid(
-            &SECURITY_MANDATORY_LABEL_AUTHORITY,
-            1,
-            SECURITY_MANDATORY_MEDIUM_RID,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            &mut medium_sid,
-        ) {
-            let _ = WinCloseHandle(restricted_token);
-            return Err(format!("AllocateAndInitializeSid(Medium): {}", e));
-        }
-
-        let tml = TOKEN_MANDATORY_LABEL {
-            Label: SID_AND_ATTRIBUTES {
-                Sid: medium_sid,
-                Attributes: SE_GROUP_INTEGRITY,
-            },
-        };
-        let tml_len =
-            std::mem::size_of::<TOKEN_MANDATORY_LABEL>() as u32 + GetLengthSid(medium_sid);
-        let set_res = SetTokenInformation(
-            restricted_token,
-            TokenIntegrityLevel,
-            &tml as *const TOKEN_MANDATORY_LABEL as *const core::ffi::c_void,
-            tml_len,
-        );
-        FreeSid(medium_sid);
-        if let Err(e) = set_res {
-            let _ = WinCloseHandle(restricted_token);
-            return Err(format!("SetTokenInformation(Medium): {}", e));
-        }
+        let _ = WinCloseHandle(shell_token);
+        dup_res.map_err(|e| format!("DuplicateTokenEx(shell): {}", e))?;
 
         let mut si = WinStartupInfoW::default();
         si.cb = std::mem::size_of::<WinStartupInfoW>() as u32;
         si.lpDesktop = PWSTR(desk_wide.as_mut_ptr());
 
         let mut pi = WinProcessInformation::default();
-        let spawn_res = CreateProcessAsUserW(
-            restricted_token,
+        let spawn_res = CreateProcessWithTokenW(
+            primary_token,
+            CREATE_PROCESS_LOGON_FLAGS(0),
             PCWSTR::null(),
             PWSTR(cmd_line.as_mut_ptr()),
-            None,
-            None,
-            false,
             PROCESS_CREATION_FLAGS(0),
             None,
             PCWSTR::null(),
             &si,
             &mut pi,
         );
-        let _ = WinCloseHandle(restricted_token);
-        spawn_res.map_err(|e| format!("CreateProcessAsUserW: {}", e))?;
+        let _ = WinCloseHandle(primary_token);
+        spawn_res.map_err(|e| format!("CreateProcessWithTokenW: {}", e))?;
 
         let _ = WinCloseHandle(pi.hThread);
         Ok(WorkerProc {

@@ -61217,7 +61217,7 @@
       "file_type": "code",
       "norm_label": "apply_experimental_process_dacl_hardening()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L639"
+      "source_location": "L604"
     },
     {
       "id": "src_tauri_src_resilience_windows_build_window_diag_snapshot",
@@ -61228,7 +61228,7 @@
       "file_type": "code",
       "norm_label": "build_window_diag_snapshot()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L879"
+      "source_location": "L844"
     },
     {
       "id": "src_tauri_src_resilience_windows_install_window_protect_subclass",
@@ -61239,7 +61239,7 @@
       "file_type": "code",
       "norm_label": "install_window_protect_subclass()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L836"
+      "source_location": "L801"
     },
     {
       "id": "src_tauri_src_resilience_windows_protected_window_proc",
@@ -61250,7 +61250,7 @@
       "file_type": "code",
       "norm_label": "protected_window_proc()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L714"
+      "source_location": "L679"
     },
     {
       "id": "src_tauri_src_resilience_windows_rs_apphandle",
@@ -61316,7 +61316,7 @@
       "file_type": "code",
       "norm_label": "start_window_self_healer()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L947"
+      "source_location": "L912"
     },
     {
       "id": "tools_proctor_sim_win_proctor_getwindowlongptrw",
@@ -62905,28 +62905,6 @@
       "source_location": "L161"
     },
     {
-      "id": "chrometab",
-      "label": "ChromeTab",
-      "_origin": "ast",
-      "community": 193,
-      "community_name": "get_chrome_tabs",
-      "file_type": "code",
-      "norm_label": "chrometab",
-      "source_file": "",
-      "source_location": ""
-    },
-    {
-      "id": "src_tauri_src_main_get_chrome_tabs",
-      "label": "get_chrome_tabs()",
-      "_origin": "ast",
-      "community": 193,
-      "community_name": "get_chrome_tabs",
-      "file_type": "code",
-      "norm_label": "get_chrome_tabs()",
-      "source_file": "src-tauri/src/main.rs",
-      "source_location": "L614"
-    },
-    {
       "id": "setupstatus",
       "label": "SetupStatus",
       "_origin": "ast",
@@ -62969,6 +62947,17 @@
       "norm_label": "stealth_enabled",
       "source_file": "src-tauri/src/main.rs",
       "source_location": "L19"
+    },
+    {
+      "id": "chrometab",
+      "label": "ChromeTab",
+      "_origin": "ast",
+      "community": 20,
+      "community_name": "main.rs",
+      "file_type": "code",
+      "norm_label": "chrometab",
+      "source_file": "",
+      "source_location": ""
     },
     {
       "id": "displayinfo",
@@ -63343,6 +63332,17 @@
       "norm_label": "get_chrome_connection_mode()",
       "source_file": "src-tauri/src/main.rs",
       "source_location": "L669"
+    },
+    {
+      "id": "src_tauri_src_main_get_chrome_tabs",
+      "label": "get_chrome_tabs()",
+      "_origin": "ast",
+      "community": 20,
+      "community_name": "main.rs",
+      "file_type": "code",
+      "norm_label": "get_chrome_tabs()",
+      "source_file": "src-tauri/src/main.rs",
+      "source_location": "L614"
     },
     {
       "id": "src_tauri_src_main_get_display_thumbnail",
@@ -68566,7 +68566,7 @@
       "file_type": "code",
       "norm_label": "is_current_process_elevated()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1138"
+      "source_location": "L1103"
     },
     {
       "id": "src_tauri_src_resilience_windows_is_handle_alive_win32",
@@ -68577,7 +68577,7 @@
       "file_type": "code",
       "norm_label": "is_handle_alive_win32()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L509"
+      "source_location": "L474"
     },
     {
       "id": "src_tauri_src_resilience_windows_open_url_shell_independent",
@@ -68588,7 +68588,7 @@
       "file_type": "code",
       "norm_label": "open_url_shell_independent()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L547"
+      "source_location": "L512"
     },
     {
       "id": "src_tauri_src_resilience_windows_openinputdesktop",
@@ -68621,7 +68621,7 @@
       "file_type": "code",
       "norm_label": "original_wndproc",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L702"
+      "source_location": "L667"
     },
     {
       "id": "src_tauri_src_resilience_windows_process_synchronize",
@@ -68654,7 +68654,7 @@
       "file_type": "code",
       "norm_label": "protect_subclass_installed",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L703"
+      "source_location": "L668"
     },
     {
       "id": "src_tauri_src_resilience_windows_query_active_input_desktop_name",
@@ -68676,7 +68676,7 @@
       "file_type": "code",
       "norm_label": "query_exit_code_win32()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L518"
+      "source_location": "L483"
     },
     {
       "id": "src_tauri_src_resilience_windows_relaunch_as_admin",
@@ -68687,7 +68687,7 @@
       "file_type": "code",
       "norm_label": "relaunch_as_admin()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1164"
+      "source_location": "L1129"
     },
     {
       "id": "src_tauri_src_resilience_windows_resolve_windows_browser_exe",
@@ -68698,7 +68698,7 @@
       "file_type": "code",
       "norm_label": "resolve_windows_browser_exe()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L563"
+      "source_location": "L528"
     },
     {
       "id": "src_tauri_src_resilience_windows_rs_atomicbool",
@@ -68786,7 +68786,7 @@
       "file_type": "code",
       "norm_label": "spawn_worker_on_desktop()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L438"
+      "source_location": "L403"
     },
     {
       "id": "src_tauri_src_resilience_windows_spawn_worker_unelevated_on_desktop",
@@ -68797,7 +68797,7 @@
       "file_type": "code",
       "norm_label": "spawn_worker_unelevated_on_desktop()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L303"
+      "source_location": "L306"
     },
     {
       "id": "src_tauri_src_resilience_windows_start_desktop_switch_monitor",
@@ -68830,7 +68830,7 @@
       "file_type": "code",
       "norm_label": "terminate_pid_win32()",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L534"
+      "source_location": "L499"
     },
     {
       "id": "src_tauri_src_resilience_windows_terminateprocess",
@@ -78824,7 +78824,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1158",
+      "source_location": "L1123",
       "weight": 1.0
     },
     {
@@ -78836,7 +78836,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L514",
+      "source_location": "L479",
       "weight": 1.0
     },
     {
@@ -78848,7 +78848,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L550",
+      "source_location": "L515",
       "weight": 1.0
     },
     {
@@ -78896,7 +78896,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L525",
+      "source_location": "L490",
       "weight": 1.0
     },
     {
@@ -78908,7 +78908,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L458",
+      "source_location": "L423",
       "weight": 1.0
     },
     {
@@ -78920,7 +78920,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L459",
+      "source_location": "L424",
       "weight": 1.0
     },
     {
@@ -78932,7 +78932,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L485",
+      "source_location": "L450",
       "weight": 1.0
     },
     {
@@ -78944,7 +78944,19 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L500",
+      "source_location": "L465",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_windows_spawn_worker_unelevated_on_desktop",
+      "target": "src_tauri_src_resilience_windows_openprocess",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src-tauri/src/resilience/windows.rs",
+      "source_location": "L336",
       "weight": 1.0
     },
     {
@@ -79016,7 +79028,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1083",
+      "source_location": "L1048",
       "weight": 1.0
     },
     {
@@ -79028,7 +79040,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L949",
+      "source_location": "L914",
       "weight": 1.0
     },
     {
@@ -79040,7 +79052,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L953",
+      "source_location": "L918",
       "weight": 1.0
     },
     {
@@ -79052,7 +79064,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L537",
+      "source_location": "L502",
       "weight": 1.0
     },
     {
@@ -79064,7 +79076,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L539",
+      "source_location": "L504",
       "weight": 1.0
     },
     {
@@ -79076,7 +79088,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L540",
+      "source_location": "L505",
       "weight": 1.0
     },
     {
@@ -205496,7 +205508,7 @@
       "confidence_score": 1.0,
       "context": "constructor",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L913",
+      "source_location": "L878",
       "weight": 1.0
     },
     {
@@ -205508,7 +205520,7 @@
       "confidence_score": 1.0,
       "context": "constructor",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L852",
+      "source_location": "L817",
       "weight": 1.0
     },
     {
@@ -205520,19 +205532,7 @@
       "confidence_score": 1.0,
       "context": "constructor",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L768",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_windows_start_window_self_healer",
-      "target": "src_tauri_src_resilience_windows_rs_hwnd",
-      "relation": "references",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "constructor",
-      "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1006",
+      "source_location": "L733",
       "weight": 1.0
     },
     {
@@ -205544,7 +205544,19 @@
       "confidence_score": 1.0,
       "context": "constructor",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1120",
+      "source_location": "L1085",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_windows_start_window_self_healer",
+      "target": "src_tauri_src_resilience_windows_rs_hwnd",
+      "relation": "references",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "constructor",
+      "source_file": "src-tauri/src/resilience/windows.rs",
+      "source_location": "L971",
       "weight": 1.0
     },
     {
@@ -206108,7 +206120,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L702",
+      "source_location": "L667",
       "weight": 1.0
     },
     {
@@ -206168,7 +206180,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L703",
+      "source_location": "L668",
       "weight": 1.0
     },
     {
@@ -207152,7 +207164,7 @@
       "confidence_score": 1.0,
       "context": "generic_arg",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L438",
+      "source_location": "L403",
       "weight": 1.0
     },
     {
@@ -207164,7 +207176,7 @@
       "confidence_score": 1.0,
       "context": "generic_arg",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L303",
+      "source_location": "L306",
       "weight": 1.0
     },
     {
@@ -212031,7 +212043,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L879",
+      "source_location": "L844",
       "weight": 1.0
     },
     {
@@ -212151,7 +212163,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L836",
+      "source_location": "L801",
       "weight": 1.0
     },
     {
@@ -212211,7 +212223,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L714",
+      "source_location": "L679",
       "weight": 1.0
     },
     {
@@ -212223,7 +212235,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L714",
+      "source_location": "L679",
       "weight": 1.0
     },
     {
@@ -212235,7 +212247,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L714",
+      "source_location": "L679",
       "weight": 1.0
     },
     {
@@ -212259,7 +212271,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L947",
+      "source_location": "L912",
       "weight": 1.0
     },
     {
@@ -221462,7 +221474,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1138",
+      "source_location": "L1103",
       "weight": 1.0
     },
     {
@@ -221473,7 +221485,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1164",
+      "source_location": "L1129",
       "weight": 1.0
     },
     {
@@ -221781,7 +221793,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L303",
+      "source_location": "L306",
       "weight": 1.0
     },
     {
@@ -221792,7 +221804,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L438",
+      "source_location": "L403",
       "weight": 1.0
     },
     {
@@ -221803,7 +221815,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L509",
+      "source_location": "L474",
       "weight": 1.0
     },
     {
@@ -221814,7 +221826,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L518",
+      "source_location": "L483",
       "weight": 1.0
     },
     {
@@ -221825,7 +221837,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L534",
+      "source_location": "L499",
       "weight": 1.0
     },
     {
@@ -221836,7 +221848,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L547",
+      "source_location": "L512",
       "weight": 1.0
     },
     {
@@ -221847,7 +221859,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L563",
+      "source_location": "L528",
       "weight": 1.0
     },
     {
@@ -221858,7 +221870,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L639",
+      "source_location": "L604",
       "weight": 1.0
     },
     {
@@ -221869,7 +221881,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L702",
+      "source_location": "L667",
       "weight": 1.0
     },
     {
@@ -221880,7 +221892,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L703",
+      "source_location": "L668",
       "weight": 1.0
     },
     {
@@ -221891,7 +221903,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L714",
+      "source_location": "L679",
       "weight": 1.0
     },
     {
@@ -221902,7 +221914,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L836",
+      "source_location": "L801",
       "weight": 1.0
     },
     {
@@ -221913,7 +221925,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L879",
+      "source_location": "L844",
       "weight": 1.0
     },
     {
@@ -221935,7 +221947,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L947",
+      "source_location": "L912",
       "weight": 1.0
     },
     {
@@ -280105,7 +280117,7 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L919",
+      "source_location": "L884",
       "weight": 1.0
     },
     {
@@ -280117,43 +280129,19 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L857",
+      "source_location": "L822",
       "weight": 1.0
     },
     {
-      "source": "src_tauri_src_resilience_windows_start_window_self_healer",
-      "target": "tools_proctor_sim_win_proctor_iswindowvisible",
+      "source": "src_tauri_src_resilience_windows_spawn_worker_unelevated_on_desktop",
+      "target": "tools_proctor_sim_win_proctor_getwindowthreadprocessid",
       "relation": "calls",
       "_origin": "ast",
       "confidence": "INFERRED",
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1020",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_windows_start_window_self_healer",
-      "target": "tools_proctor_sim_win_proctor_showwindow",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "INFERRED",
-      "confidence_score": 0.85,
-      "context": "call",
-      "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1024",
-      "weight": 1.0
-    },
-    {
-      "source": "src_tauri_src_resilience_windows_start_window_self_healer",
-      "target": "tools_proctor_sim_win_proctor_setwindowpos",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "INFERRED",
-      "confidence_score": 0.85,
-      "context": "call",
-      "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1025",
+      "source_location": "L331",
       "weight": 1.0
     },
     {
@@ -280165,7 +280153,7 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1039",
+      "source_location": "L1004",
       "weight": 1.0
     },
     {
@@ -280177,7 +280165,43 @@
       "confidence_score": 0.85,
       "context": "call",
       "source_file": "src-tauri/src/resilience/windows.rs",
-      "source_location": "L1066",
+      "source_location": "L1031",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_windows_start_window_self_healer",
+      "target": "tools_proctor_sim_win_proctor_iswindowvisible",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "context": "call",
+      "source_file": "src-tauri/src/resilience/windows.rs",
+      "source_location": "L985",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_windows_start_window_self_healer",
+      "target": "tools_proctor_sim_win_proctor_showwindow",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "context": "call",
+      "source_file": "src-tauri/src/resilience/windows.rs",
+      "source_location": "L989",
+      "weight": 1.0
+    },
+    {
+      "source": "src_tauri_src_resilience_windows_start_window_self_healer",
+      "target": "tools_proctor_sim_win_proctor_setwindowpos",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "context": "call",
+      "source_file": "src-tauri/src/resilience/windows.rs",
+      "source_location": "L990",
       "weight": 1.0
     },
     {
@@ -282890,5 +282914,5 @@
       "source_file": "docs/AI_PROJECT_GUIDE.md"
     }
   ],
-  "built_at_commit": "66a63e53d67fae0ebac239bebb1117d9595c5133"
+  "built_at_commit": "b3ed0239126481bd84e798e4cdce8968f4ab2e6b"
 }
