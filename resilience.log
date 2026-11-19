@@ -1,48 +1,23 @@
-[2026-11-19T08:06:03.353770100+00:00] [pid=1528] Guardian supervisor started
-[2026-11-19T08:06:03.369348300+00:00] [pid=8756] Hardened GUI console (ctrl-handler=true, detached=true); CTRL_CLOSE_EVENT can no longer kill this process
-[2026-11-19T08:06:03.370009700+00:00] [pid=8756] [startup] building Tauri app (desktop_worker=false elevated=false)
-[2026-11-19T08:06:04.035247600+00:00] [pid=8756] [startup] entered setup()
-[2026-11-19T08:06:04.037661300+00:00] [pid=8756] Installed window-proc hide-protection subclass
-[2026-11-19T08:06:04.038413600+00:00] [pid=8756] [startup] setup() completed
-[2026-11-19T08:06:04.053882+00:00] [pid=8756] [webview-diag] page-load Started url=http://tauri.localhost/
-[2026-11-19T08:06:04.289550400+00:00] [pid=8756] [window-diag] main vis=true rect=566x939@78,78 affinity=0x11 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@86,109; Chrome_WidgetWin_0:vis=true:550x900@86,109; Chrome_WidgetWin_1:vis=true:550x900@86,109; Chrome_RenderWidgetHostHWND:vis=true:550x900@86,109; Intermediate D3D Window:vis=true:550x900@86,109]
-[2026-11-19T08:06:04.409894800+00:00] [pid=8756] [webview-diag] page-load Finished url=http://tauri.localhost/
-[2026-11-19T08:06:04.413781800+00:00] [pid=8756] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
-[2026-11-19T08:06:04.433583300+00:00] [pid=8756] [webview-diag] frontend IPC alive: get_session_snapshot called
-[2026-11-19T08:06:04.541762800+00:00] [pid=8756] [window-diag] main vis=true rect=566x939@78,78 affinity=0x0 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@86,109; Chrome_WidgetWin_0:vis=true:550x900@86,109; Chrome_WidgetWin_1:vis=true:550x900@86,109; Chrome_RenderWidgetHostHWND:vis=true:550x900@86,109; Intermediate D3D Window:vis=true:550x900@86,109]
-[2026-11-19T08:06:07.571234700+00:00] [pid=8756] [window-diag] main vis=true rect=566x939@78,78 affinity=0x11 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@86,109; Chrome_WidgetWin_0:vis=true:550x900@86,109; Chrome_WidgetWin_1:vis=true:550x900@86,109; Chrome_RenderWidgetHostHWND:vis=true:550x900@86,109; Intermediate D3D Window:vis=true:550x900@86,109]
-[2026-11-19T08:06:08.800989800+00:00] [pid=8756] [window-diag] WM_ACTIVATE state=0 (0=inactive,1=active,2=click-active)
-[2026-11-19T08:06:08.830300100+00:00] [pid=8756] [window-diag] main vis=true rect=566x939@78,78 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:550x900@86,109; Chrome_WidgetWin_0:vis=true:550x900@86,109; Chrome_WidgetWin_1:vis=true:550x900@86,109; Chrome_RenderWidgetHostHWND:vis=true:550x900@86,109; Intermediate D3D Window:vis=true:550x900@86,109]
-[2026-11-19T08:06:22.005898200+00:00] [pid=1528] Detected Win32 desktop switch -> 'OiIiCIivmkDPQowg'; spawning shadow worker
-[2026-11-19T08:06:22.015397500+00:00] [pid=1528] Spawned desktop worker (PID=11716) on WinSta0\OiIiCIivmkDPQowg
-[2026-11-19T08:06:22.025250100+00:00] [pid=11716] [webview-diag] desktop worker started (WebView2 args via tauri.conf additionalBrowserArgs)
-[2026-11-19T08:06:22.025650800+00:00] [pid=11716] Hardened GUI console (ctrl-handler=true, detached=true); CTRL_CLOSE_EVENT can no longer kill this process
-[2026-11-19T08:06:22.026263900+00:00] [pid=11716] [startup] building Tauri app (desktop_worker=true elevated=false)
-[2026-11-19T08:06:22.703158200+00:00] [pid=11716] [startup] entered setup()
-[2026-11-19T08:06:22.704569500+00:00] [pid=11716] Restored window geometry from session-snapshot.json (saved rect 550x900@78,78)
-[2026-11-19T08:06:22.707086700+00:00] [pid=11716] Installed window-proc hide-protection subclass
-[2026-11-19T08:06:22.707763400+00:00] [pid=11716] [startup] setup() completed
-[2026-11-19T08:06:22.720458200+00:00] [pid=11716] [webview-diag] page-load Started url=http://tauri.localhost/
-[2026-11-19T08:06:22.959333400+00:00] [pid=11716] [window-diag] main vis=true rect=566x939@78,78 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:550x900@86,109; Chrome_WidgetWin_0:vis=true:550x900@86,109; Chrome_WidgetWin_1:vis=true:550x900@86,109; Chrome_RenderWidgetHostHWND:vis=true:550x900@86,109; Intermediate D3D Window:vis=true:550x900@86,109]
-[2026-11-19T08:06:23.068510100+00:00] [pid=11716] [webview-diag] page-load Finished url=http://tauri.localhost/
-[2026-11-19T08:06:23.072809600+00:00] [pid=11716] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
-[2026-11-19T08:06:23.097558700+00:00] [pid=11716] [webview-diag] frontend IPC alive: get_session_snapshot called
-[2026-11-19T08:06:23.211630200+00:00] [pid=11716] [window-diag] main vis=true rect=566x939@78,78 affinity=0x0 foreground=false children=[WRY_WEBVIEW:vis=true:550x900@86,109; Chrome_WidgetWin_0:vis=true:550x900@86,109; Chrome_WidgetWin_1:vis=true:550x900@86,109; Chrome_RenderWidgetHostHWND:vis=true:550x900@86,109; Intermediate D3D Window:vis=true:550x900@86,109]
-[2026-11-19T08:06:25.999703400+00:00] [pid=11716] [window-diag] main vis=true rect=566x939@78,78 affinity=0x0 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@86,109; Chrome_WidgetWin_0:vis=true:550x900@86,109; Chrome_WidgetWin_1:vis=false:550x900@86,109; Intermediate D3D Window:vis=false:550x900@86,109]
-[2026-11-19T08:06:26.005094800+00:00] [pid=11716] Self-healed hidden WebView render child HWND (Chrome_WidgetWin_1) via SW_SHOWNOACTIVATE
-[2026-11-19T08:06:26.005821800+00:00] [pid=11716] Self-healed hidden WebView render child HWND (Intermediate D3D Window) via SW_SHOWNOACTIVATE
-[2026-11-19T08:06:26.257159800+00:00] [pid=11716] [window-diag] main vis=true rect=566x939@78,78 affinity=0x0 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@86,109; Chrome_WidgetWin_0:vis=true:550x900@86,109; Chrome_WidgetWin_1:vis=true:550x900@86,109; Chrome_RenderWidgetHostHWND:vis=true:550x900@86,109; Intermediate D3D Window:vis=true:550x900@86,109]
-[2026-11-19T08:06:27.594440+00:00] [pid=11716] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-19T08:06:27.595247+00:00] [pid=11716] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-19T08:06:29.768725600+00:00] [pid=11716] [window-diag] main vis=true rect=566x939@78,78 affinity=0x11 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@86,109; Chrome_WidgetWin_0:vis=true:550x900@86,109; Chrome_WidgetWin_1:vis=true:550x900@86,109; Chrome_RenderWidgetHostHWND:vis=true:550x900@86,109; Intermediate D3D Window:vis=true:550x900@86,109]
-[2026-11-19T08:06:31.075895200+00:00] [pid=11716] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-19T08:06:31.076490600+00:00] [pid=11716] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-19T08:06:34.137369600+00:00] [pid=11716] [window-diag] WM_ACTIVATE state=0 (0=inactive,1=active,2=click-active)
-[2026-11-19T08:06:34.284125+00:00] [pid=11716] [window-diag] main vis=true rect=566x939@78,78 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:550x900@86,109; Chrome_WidgetWin_0:vis=true:550x900@86,109; Chrome_WidgetWin_1:vis=true:550x900@86,109; Chrome_RenderWidgetHostHWND:vis=true:550x900@86,109; Intermediate D3D Window:vis=true:550x900@86,109]
-[2026-11-19T08:06:34.333947600+00:00] [pid=11716] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-19T08:06:34.334467100+00:00] [pid=11716] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-19T08:06:37.773756900+00:00] [pid=11716] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-19T08:06:37.774300500+00:00] [pid=11716] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-19T08:06:40.966717900+00:00] [pid=11716] Blocked external hide (WM_SHOWWINDOW) via window-proc subclass
-[2026-11-19T08:06:40.967372500+00:00] [pid=11716] Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass
-[2026-11-19T08:06:44.571411400+00:00] [pid=1528] Active input desktop returned to Default; shadow worker cleaned up
+[2026-11-19T08:20:34.691546500+00:00] [pid=19624] Triggered UAC elevation relaunch (run_as_admin=true)
+[2026-11-19T08:20:34.715369800+00:00] [pid=22460] Guardian supervisor started
+[2026-11-19T08:20:34.728899800+00:00] [pid=24048] Hardened GUI console (ctrl-handler=true, detached=true); CTRL_CLOSE_EVENT can no longer kill this process
+[2026-11-19T08:20:34.729577400+00:00] [pid=24048] [startup] building Tauri app (desktop_worker=false elevated=true)
+[2026-11-19T08:20:35.596717500+00:00] [pid=24048] [startup] entered setup()
+[2026-11-19T08:20:35.599427800+00:00] [pid=24048] Installed window-proc hide-protection subclass
+[2026-11-19T08:20:35.600418800+00:00] [pid=24048] [startup] setup() completed
+[2026-11-19T08:20:35.616725200+00:00] [pid=24048] [webview-diag] page-load Started url=http://tauri.localhost/
+[2026-11-19T08:20:35.852316900+00:00] [pid=24048] [window-diag] main vis=true rect=566x939@52,52 affinity=0x11 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@60,83; Chrome_WidgetWin_0:vis=true:550x900@60,83; Chrome_WidgetWin_1:vis=true:550x900@60,83; Chrome_RenderWidgetHostHWND:vis=true:550x900@60,83; Intermediate D3D Window:vis=true:550x900@60,83]
+[2026-11-19T08:20:36.153323300+00:00] [pid=24048] [webview-diag] page-load Finished url=http://tauri.localhost/
+[2026-11-19T08:20:36.157574400+00:00] [pid=24048] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
+[2026-11-19T08:20:36.182876400+00:00] [pid=24048] [webview-diag] frontend IPC alive: get_session_snapshot called
+[2026-11-19T08:20:36.356788600+00:00] [pid=24048] [window-diag] main vis=true rect=566x939@52,52 affinity=0x0 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@60,83; Chrome_WidgetWin_0:vis=true:550x900@60,83; Chrome_WidgetWin_1:vis=true:550x900@60,83; Chrome_RenderWidgetHostHWND:vis=true:550x900@60,83; Intermediate D3D Window:vis=true:550x900@60,83]
+[2026-11-19T08:20:40.767974200+00:00] [pid=24048] [window-diag] main vis=true rect=566x939@52,52 affinity=0x11 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@60,83; Chrome_WidgetWin_0:vis=true:550x900@60,83; Chrome_WidgetWin_1:vis=true:550x900@60,83; Chrome_RenderWidgetHostHWND:vis=true:550x900@60,83; Intermediate D3D Window:vis=true:550x900@60,83]
+[2026-11-19T08:20:44.910652500+00:00] [pid=24048] [window-diag] WM_ACTIVATE state=0 (0=inactive,1=active,2=click-active)
+[2026-11-19T08:20:44.940000300+00:00] [pid=24048] [window-diag] main vis=true rect=566x939@52,52 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:550x900@60,83; Chrome_WidgetWin_0:vis=true:550x900@60,83; Chrome_WidgetWin_1:vis=true:550x900@60,83; Chrome_RenderWidgetHostHWND:vis=true:550x900@60,83; Intermediate D3D Window:vis=true:550x900@60,83]
+[2026-11-19T08:21:09.904806800+00:00] [pid=22460] Detected Win32 desktop switch -> 'QCImCNHOX'; spawning shadow worker
+[2026-11-19T08:21:09.929370400+00:00] [pid=22460] [desktop-diag] spawned desktop worker at Medium integrity (de-elevated)
+[2026-11-19T08:21:09.930012200+00:00] [pid=22460] Spawned desktop worker (PID=24756) on WinSta0\QCImCNHOX
+[2026-11-19T08:21:09.997172300+00:00] [pid=24756] [webview-diag] desktop worker started (WebView2 args via tauri.conf additionalBrowserArgs)
+[2026-11-19T08:21:09.997866300+00:00] [pid=24756] Hardened GUI console (ctrl-handler=true, detached=true); CTRL_CLOSE_EVENT can no longer kill this process
+[2026-11-19T08:21:09.998963100+00:00] [pid=24756] [startup] building Tauri app (desktop_worker=true elevated=true)
+[2026-11-19T08:21:53.168336100+00:00] [pid=22460] Active input desktop returned to Default; shadow worker cleaned up
