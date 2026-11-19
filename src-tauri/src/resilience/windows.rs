@@ -296,6 +296,144 @@ fn query_active_input_desktop_name() -> Option<String> {
     }
 }
 
+/// Spawns `--desktop-worker` at Medium integrity (unelevated) when the guardian is elevated.
+/// On SEB's isolated kiosk desktop, an elevated worker fails WebView2 initialization / gets
+/// killed with -1 (0xFFFFFFFF), while a Medium-integrity worker runs cleanly and is allowed.
+#[cfg(target_os = "windows")]
+fn spawn_worker_unelevated_on_desktop(
+    cmd_line: &mut [u16],
+    desk_wide: &mut [u16],
+) -> Result<WorkerProc, String> {
+    use windows::core::{PCWSTR, PWSTR};
+    use windows::Win32::Foundation::{CloseHandle as WinCloseHandle, HANDLE};
+    use windows::Win32::Security::{
+        AllocateAndInitializeSid, CreateRestrictedToken, FreeSid, GetLengthSid,
+        SetTokenInformation, TokenIntegrityLevel, DISABLE_MAX_PRIVILEGE, PSID,
+        SECURITY_MANDATORY_LABEL_AUTHORITY, SECURITY_NT_AUTHORITY, SID_AND_ATTRIBUTES,
+        TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_MANDATORY_LABEL,
+        TOKEN_QUERY,
+    };
+    use windows::Win32::System::Threading::{
+        CreateProcessAsUserW, GetCurrentProcess, OpenProcessToken, PROCESS_CREATION_FLAGS,
+        PROCESS_INFORMATION as WinProcessInformation, STARTUPINFOW as WinStartupInfoW,
+    };
+
+    const SECURITY_BUILTIN_DOMAIN_RID: u32 = 32;
+    const DOMAIN_ALIAS_RID_ADMINS: u32 = 544;
+    const SECURITY_MANDATORY_MEDIUM_RID: u32 = 0x2000;
+    const SE_GROUP_INTEGRITY: u32 = 0x20;
+
+    unsafe {
+        let mut cur_token = HANDLE::default();
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY | TOKEN_ADJUST_DEFAULT,
+            &mut cur_token,
+        )
+        .map_err(|e| format!("OpenProcessToken: {}", e))?;
+
+        let mut admins_sid = PSID::default();
+        if let Err(e) = AllocateAndInitializeSid(
+            &SECURITY_NT_AUTHORITY,
+            2,
+            SECURITY_BUILTIN_DOMAIN_RID,
+            DOMAIN_ALIAS_RID_ADMINS,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            &mut admins_sid,
+        ) {
+            let _ = WinCloseHandle(cur_token);
+            return Err(format!("AllocateAndInitializeSid(Admins): {}", e));
+        }
+
+        let disable_sids = [SID_AND_ATTRIBUTES {
+            Sid: admins_sid,
+            Attributes: 0,
+        }];
+        let mut restricted_token = HANDLE::default();
+        let restrict_res = CreateRestrictedToken(
+            cur_token,
+            DISABLE_MAX_PRIVILEGE,
+            Some(&disable_sids),
+            None,
+            None,
+            &mut restricted_token,
+        );
+        FreeSid(admins_sid);
+        let _ = WinCloseHandle(cur_token);
+        restrict_res.map_err(|e| format!("CreateRestrictedToken: {}", e))?;
+
+        let mut medium_sid = PSID::default();
+        if let Err(e) = AllocateAndInitializeSid(
+            &SECURITY_MANDATORY_LABEL_AUTHORITY,
+            1,
+            SECURITY_MANDATORY_MEDIUM_RID,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            &mut medium_sid,
+        ) {
+            let _ = WinCloseHandle(restricted_token);
+            return Err(format!("AllocateAndInitializeSid(Medium): {}", e));
+        }
+
+        let tml = TOKEN_MANDATORY_LABEL {
+            Label: SID_AND_ATTRIBUTES {
+                Sid: medium_sid,
+                Attributes: SE_GROUP_INTEGRITY,
+            },
+        };
+        let tml_len =
+            std::mem::size_of::<TOKEN_MANDATORY_LABEL>() as u32 + GetLengthSid(medium_sid);
+        let set_res = SetTokenInformation(
+            restricted_token,
+            TokenIntegrityLevel,
+            &tml as *const TOKEN_MANDATORY_LABEL as *const core::ffi::c_void,
+            tml_len,
+        );
+        FreeSid(medium_sid);
+        if let Err(e) = set_res {
+            let _ = WinCloseHandle(restricted_token);
+            return Err(format!("SetTokenInformation(Medium): {}", e));
+        }
+
+        let mut si = WinStartupInfoW::default();
+        si.cb = std::mem::size_of::<WinStartupInfoW>() as u32;
+        si.lpDesktop = PWSTR(desk_wide.as_mut_ptr());
+
+        let mut pi = WinProcessInformation::default();
+        let spawn_res = CreateProcessAsUserW(
+            restricted_token,
+            PCWSTR::null(),
+            PWSTR(cmd_line.as_mut_ptr()),
+            None,
+            None,
+            false,
+            PROCESS_CREATION_FLAGS(0),
+            None,
+            PCWSTR::null(),
+            &si,
+            &mut pi,
+        );
+        let _ = WinCloseHandle(restricted_token);
+        spawn_res.map_err(|e| format!("CreateProcessAsUserW: {}", e))?;
+
+        let _ = WinCloseHandle(pi.hThread);
+        Ok(WorkerProc {
+            pid: pi.dwProcessId,
+            handle: pi.hProcess.0 as isize,
+        })
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn spawn_worker_on_desktop(
     desktop_name: &str,
@@ -316,6 +454,27 @@ fn spawn_worker_on_desktop(
     let mut desk_wide: Vec<u16> = format!("WinSta0\\{}\0", desktop_name)
         .encode_utf16()
         .collect();
+
+    if is_current_process_elevated() {
+        match spawn_worker_unelevated_on_desktop(&mut cmd_line, &mut desk_wide) {
+            Ok(w) => {
+                super::log_event_in_dir(
+                    config_dir,
+                    "[desktop-diag] spawned desktop worker at Medium integrity (de-elevated)",
+                );
+                return Ok(w);
+            }
+            Err(e) => {
+                super::log_event_in_dir(
+                    config_dir,
+                    &format!(
+                        "[desktop-diag] Medium-integrity worker spawn failed ({}); falling back to CreateProcessW",
+                        e
+                    ),
+                );
+            }
+        }
+    }
 
     unsafe {
         let mut si: STARTUPINFOW = std::mem::zeroed();
