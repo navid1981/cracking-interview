@@ -1,34 +1,27 @@
-[2026-11-17T09:13:36.779971500+00:00] [pid=20572] Guardian supervisor started
-[2026-11-17T09:13:36.802736+00:00] [pid=8472] Hardened GUI console (ctrl-handler=true, detached=true); CTRL_CLOSE_EVENT can no longer kill this process
-[2026-11-17T09:13:37.528527800+00:00] [pid=8472] Installed window-proc hide-protection subclass
-[2026-11-17T09:13:37.542311900+00:00] [pid=8472] [webview-diag] page-load Started url=http://tauri.localhost/
-[2026-11-17T09:13:37.780225300+00:00] [pid=8472] [window-diag] main vis=true rect=566x939@156,141 affinity=0x11 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@164,172; Chrome_WidgetWin_0:vis=true:550x900@164,172; Chrome_WidgetWin_1:vis=true:550x900@164,172; Chrome_RenderWidgetHostHWND:vis=true:550x900@164,172; Intermediate D3D Window:vis=true:550x900@164,172]
-[2026-11-17T09:13:37.893359100+00:00] [pid=8472] [webview-diag] page-load Finished url=http://tauri.localhost/
-[2026-11-17T09:13:37.896826+00:00] [pid=8472] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
-[2026-11-17T09:13:37.917862400+00:00] [pid=8472] [webview-diag] frontend IPC alive: get_session_snapshot called
-[2026-11-17T09:13:38.032022+00:00] [pid=8472] [window-diag] main vis=true rect=566x939@156,141 affinity=0x0 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@164,172; Chrome_WidgetWin_0:vis=true:550x900@164,172; Chrome_WidgetWin_1:vis=true:550x900@164,172; Chrome_RenderWidgetHostHWND:vis=true:550x900@164,172; Intermediate D3D Window:vis=true:550x900@164,172]
-[2026-11-17T09:13:47.295580800+00:00] [pid=8472] [window-diag] WM_ACTIVATE state=0 (0=inactive,1=active,2=click-active)
-[2026-11-17T09:13:47.339710500+00:00] [pid=8472] [window-diag] main vis=true rect=566x939@613,71 affinity=0x0 foreground=false children=[WRY_WEBVIEW:vis=true:550x900@621,102; Chrome_WidgetWin_0:vis=true:550x900@621,102; Chrome_WidgetWin_1:vis=true:550x900@621,102; Chrome_RenderWidgetHostHWND:vis=true:550x900@621,102; Intermediate D3D Window:vis=true:550x900@621,102]
-[2026-11-17T09:13:47.842008700+00:00] [pid=8472] [window-diag] main vis=true rect=566x939@613,71 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:550x900@621,102; Chrome_WidgetWin_0:vis=true:550x900@621,102; Chrome_WidgetWin_1:vis=true:550x900@621,102; Chrome_RenderWidgetHostHWND:vis=true:550x900@621,102; Intermediate D3D Window:vis=true:550x900@621,102]
-[2026-11-17T09:13:57.249877300+00:00] [pid=20572] OpenInputDesktop denied access to active desktop; standing by for return to Default
-[2026-11-17T09:13:58.755907700+00:00] [pid=20572] Active input desktop returned to Default; shadow worker cleaned up
-[2026-11-17T09:14:25.799504400+00:00] [pid=8472] [window-diag] WM_ACTIVATE state=2 (0=inactive,1=active,2=click-active)
-[2026-11-17T09:14:31.793990700+00:00] [pid=8472] [selection] CaptureSelection hotkey dispatched
-[2026-11-17T09:14:31.973027100+00:00] [pid=8472] [selection] UIA empty: fg_exe='LockDownBrowser.exe' fg_class='CEFCLIENT' fg_elev=Some(true) self_elev=Some(false) focused(ctrl=50033,class='Chrome_WidgetWin_1') candidates=5 child_classes=[Button,CefBrowserWindow,Chrome_RenderWidgetHostHWND,Chrome_WidgetWin_1,Intermediate D3D Window,LockDownTabCtrl,ToolbarWindow32] matches=(0,0)
-[2026-11-17T09:14:32.581581500+00:00] [pid=8472] [selection] clipboard fallback returned nothing (cleared_by_target=false)
-[2026-11-17T09:14:32.582111600+00:00] [pid=8472] [selection] Nothing captured (no selection, or source blocked UIA/AX and clipboard)
-[2026-11-17T09:14:38.723993700+00:00] [pid=8472] [window-diag] set_keyboard_input_mode enabled=true stealth=true
-[2026-11-17T09:14:38.819139500+00:00] [pid=8472] [window-diag] main vis=true rect=550x900@1195,90 affinity=0x11 foreground=true children=[WRY_WEBVIEW:vis=true:534x861@1203,121; Chrome_WidgetWin_0:vis=true:534x861@1203,121; Chrome_WidgetWin_1:vis=true:534x861@1203,121; Chrome_RenderWidgetHostHWND:vis=true:534x861@1203,121; Intermediate D3D Window:vis=true:534x861@1203,121]
-[2026-11-17T09:14:40.888016800+00:00] [pid=8472] [selection] PasteSelection hotkey dispatched
-[2026-11-17T09:14:40.888518400+00:00] [pid=8472] [selection] Paste hotkey pressed but nothing has been captured yet
-[2026-11-17T09:14:51.823480200+00:00] [pid=8472] [window-diag] WM_ACTIVATE state=0 (0=inactive,1=active,2=click-active)
-[2026-11-17T09:14:51.830839500+00:00] [pid=8472] [window-diag] set_keyboard_input_mode enabled=false stealth=true
-[2026-11-17T09:14:51.864798100+00:00] [pid=8472] [window-diag] main vis=true rect=550x900@1195,90 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:534x861@1203,121; Chrome_WidgetWin_0:vis=true:534x861@1203,121; Chrome_WidgetWin_1:vis=true:534x861@1203,121; Chrome_RenderWidgetHostHWND:vis=true:534x861@1203,121; Intermediate D3D Window:vis=true:534x861@1203,121]
-[2026-11-17T09:14:58.093167600+00:00] [pid=8472] [window-diag] WM_ACTIVATE state=1 (0=inactive,1=active,2=click-active)
-[2026-11-17T09:14:58.196297400+00:00] [pid=8472] [window-diag] close-path arrival msg=0x0112 enabled=true quit_authorized=false user_hidden=false
-[2026-11-17T09:14:58.220770400+00:00] [pid=8472] User clicked title-bar X (mouse SC_CLOSE); authorizing quit
-[2026-11-17T09:14:58.221295300+00:00] [pid=8472] [window-diag] close-path arrival msg=0x0010 enabled=true quit_authorized=true user_hidden=false
-[2026-11-17T09:14:58.221812400+00:00] [pid=8472] [window-diag] CloseRequested arrival enabled=true quit_authorized=true
-[2026-11-17T09:14:58.223726400+00:00] [pid=8472] [window-diag] close-path arrival msg=0x0002 enabled=true quit_authorized=true user_hidden=false
-[2026-11-17T09:14:58.240949+00:00] [pid=8472] [window-diag] ExitRequested arrival enabled=true quit_authorized=true
-[2026-11-17T09:14:58.274938400+00:00] [pid=20572] Guardian observed authorized quit; exiting cleanly
+[2026-11-19T07:37:15.459694800+00:00] [pid=9252] Triggered UAC elevation relaunch (run_as_admin=true)
+[2026-11-19T07:37:15.480862100+00:00] [pid=23040] Guardian supervisor started
+[2026-11-19T07:37:15.493535400+00:00] [pid=22100] Hardened GUI console (ctrl-handler=true, detached=true); CTRL_CLOSE_EVENT can no longer kill this process
+[2026-11-19T07:37:16.179479700+00:00] [pid=22100] Installed window-proc hide-protection subclass
+[2026-11-19T07:37:16.196687700+00:00] [pid=22100] [webview-diag] page-load Started url=http://tauri.localhost/
+[2026-11-19T07:37:16.431385700+00:00] [pid=22100] [window-diag] main vis=true rect=566x939@156,141 affinity=0x11 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@164,172; Chrome_WidgetWin_0:vis=true:550x900@164,172; Chrome_WidgetWin_1:vis=true:550x900@164,172; Chrome_RenderWidgetHostHWND:vis=true:550x900@164,172; Intermediate D3D Window:vis=true:550x900@164,172]
+[2026-11-19T07:37:16.548418200+00:00] [pid=22100] [webview-diag] page-load Finished url=http://tauri.localhost/
+[2026-11-19T07:37:16.553047800+00:00] [pid=22100] [webview-diag] frontend: main.tsx evaluated: JS bundle loaded and executing
+[2026-11-19T07:37:16.569572800+00:00] [pid=22100] [webview-diag] frontend IPC alive: get_session_snapshot called
+[2026-11-19T07:37:16.682992600+00:00] [pid=22100] [window-diag] main vis=true rect=566x939@156,141 affinity=0x0 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@164,172; Chrome_WidgetWin_0:vis=true:550x900@164,172; Chrome_WidgetWin_1:vis=true:550x900@164,172; Chrome_RenderWidgetHostHWND:vis=true:550x900@164,172; Intermediate D3D Window:vis=true:550x900@164,172]
+[2026-11-19T07:37:21.970122700+00:00] [pid=22100] [window-diag] main vis=true rect=566x939@156,141 affinity=0x11 foreground=true children=[WRY_WEBVIEW:vis=true:550x900@164,172; Chrome_WidgetWin_0:vis=true:550x900@164,172; Chrome_WidgetWin_1:vis=true:550x900@164,172; Chrome_RenderWidgetHostHWND:vis=true:550x900@164,172; Intermediate D3D Window:vis=true:550x900@164,172]
+[2026-11-19T07:37:23.163975+00:00] [pid=22100] [window-diag] WM_ACTIVATE state=0 (0=inactive,1=active,2=click-active)
+[2026-11-19T07:37:23.225572400+00:00] [pid=22100] [window-diag] main vis=true rect=566x939@156,141 affinity=0x11 foreground=false children=[WRY_WEBVIEW:vis=true:550x900@164,172; Chrome_WidgetWin_0:vis=true:550x900@164,172; Chrome_WidgetWin_1:vis=true:550x900@164,172; Chrome_RenderWidgetHostHWND:vis=true:550x900@164,172; Intermediate D3D Window:vis=true:550x900@164,172]
+[2026-11-19T07:37:29.317691500+00:00] [pid=23040] Detected Win32 desktop switch -> 'TyTgrNrFKTHCJR'; spawning shadow worker
+[2026-11-19T07:37:29.325510300+00:00] [pid=23040] Spawned desktop worker (PID=15408) on WinSta0\TyTgrNrFKTHCJR
+[2026-11-19T07:37:29.335924800+00:00] [pid=15408] [webview-diag] desktop worker started (WebView2 args via tauri.conf additionalBrowserArgs)
+[2026-11-19T07:37:29.336394600+00:00] [pid=15408] Hardened GUI console (ctrl-handler=true, detached=true); CTRL_CLOSE_EVENT can no longer kill this process
+[2026-11-19T07:37:36.244201700+00:00] [pid=23040] Desktop worker on 'TyTgrNrFKTHCJR' exited or was denied window creation; standing by for return to Default
+[2026-11-19T07:37:46.467124500+00:00] [pid=23040] Active input desktop returned to Default; shadow worker cleaned up
+[2026-11-19T07:37:50.478101+00:00] [pid=22100] [window-diag] WM_ACTIVATE state=1 (0=inactive,1=active,2=click-active)
+[2026-11-19T07:37:50.559874900+00:00] [pid=22100] [window-diag] close-path arrival msg=0x0112 enabled=true quit_authorized=false user_hidden=false
+[2026-11-19T07:37:50.583162800+00:00] [pid=22100] User clicked title-bar X (mouse SC_CLOSE); authorizing quit
+[2026-11-19T07:37:50.583793400+00:00] [pid=22100] [window-diag] close-path arrival msg=0x0010 enabled=true quit_authorized=true user_hidden=false
+[2026-11-19T07:37:50.584600100+00:00] [pid=22100] [window-diag] CloseRequested arrival enabled=true quit_authorized=true
+[2026-11-19T07:37:50.586768500+00:00] [pid=22100] [window-diag] close-path arrival msg=0x0002 enabled=true quit_authorized=true user_hidden=false
+[2026-11-19T07:37:50.604293300+00:00] [pid=22100] [window-diag] ExitRequested arrival enabled=true quit_authorized=true
+[2026-11-19T07:37:50.635789200+00:00] [pid=23040] Guardian observed authorized quit; exiting cleanly
