@@ -5,6 +5,23 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tauri::Manager;
 
+#[cfg(target_os = "windows")]
+struct WorkerProc {
+    pid: u32,
+    handle: isize,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for WorkerProc {
+    fn drop(&mut self) {
+        if self.handle != 0 {
+            unsafe {
+                win_desktop_ffi::CloseHandle(self.handle);
+            }
+        }
+    }
+}
+
 /// Spawns a windowless background thread inside `--guardian` that polls `OpenInputDesktop`
 /// every 300ms (Scenario A3). When a kiosk app switches to a new Win32 `HDESK`, spawns a
 /// `--desktop-worker <deskName>` instance directly onto `WinSta0\<deskName>` with its own
@@ -14,13 +31,13 @@ pub fn start_desktop_switch_monitor(config_dir: PathBuf) {
     std::thread::spawn(move || {
         use super::{DesktopSwitchAction, DesktopSwitchState};
         let mut state = DesktopSwitchState::default();
-        let mut worker_pid: Option<u32> = None;
+        let mut worker: Option<WorkerProc> = None;
 
         loop {
             std::thread::sleep(Duration::from_millis(300));
             if super::quit_was_authorized_in_dir(&config_dir, super::now_unix_secs()) {
-                if let Some(pid) = worker_pid.take() {
-                    terminate_pid_win32(pid);
+                if let Some(w) = worker.take() {
+                    terminate_pid_win32(w.pid);
                 }
                 break;
             }
@@ -29,9 +46,25 @@ pub fn start_desktop_switch_monitor(config_dir: PathBuf) {
             }
 
             let active_desk = query_active_input_desktop_name();
-            let alive = worker_pid.map(is_pid_alive_win32).unwrap_or(false);
+            let alive = if let Some(ref w) = worker {
+                if is_handle_alive_win32(w.handle) {
+                    true
+                } else {
+                    let exit_code = query_exit_code_win32(w.handle);
+                    super::log_event_in_dir(
+                        &config_dir,
+                        &format!(
+                            "[desktop-diag] desktop worker PID={} exited (exit_code={:?})",
+                            w.pid, exit_code
+                        ),
+                    );
+                    false
+                }
+            } else {
+                false
+            };
             if !alive {
-                worker_pid = None;
+                worker = None;
             }
 
             match state.on_poll(active_desk.as_deref(), alive) {
@@ -45,8 +78,9 @@ pub fn start_desktop_switch_monitor(config_dir: PathBuf) {
                         ),
                     );
                     match spawn_worker_on_desktop(&desktop_name, &config_dir) {
-                        Ok(pid) => {
-                            worker_pid = Some(pid);
+                        Ok(w) => {
+                            let pid = w.pid;
+                            worker = Some(w);
                             super::log_event_in_dir(
                                 &config_dir,
                                 &format!(
@@ -72,8 +106,8 @@ pub fn start_desktop_switch_monitor(config_dir: PathBuf) {
                 }
                 DesktopSwitchAction::ReturnToDefault { terminate_worker } => {
                     if terminate_worker {
-                        if let Some(pid) = worker_pid.take() {
-                            terminate_pid_win32(pid);
+                        if let Some(w) = worker.take() {
+                            terminate_pid_win32(w.pid);
                         }
                     }
                     super::log_event_in_dir(
@@ -222,6 +256,7 @@ mod win_desktop_ffi {
             dwProcessId: DWORD,
         ) -> HANDLE;
         pub fn WaitForSingleObject(hHandle: HANDLE, dwMilliseconds: DWORD) -> DWORD;
+        pub fn GetExitCodeProcess(hProcess: HANDLE, lpExitCode: *mut DWORD) -> BOOL;
         pub fn TerminateProcess(hProcess: HANDLE, uExitCode: u32) -> BOOL;
         pub fn CloseHandle(hObject: HANDLE) -> BOOL;
         pub fn GetLastError() -> DWORD;
@@ -262,7 +297,10 @@ fn query_active_input_desktop_name() -> Option<String> {
 }
 
 #[cfg(target_os = "windows")]
-fn spawn_worker_on_desktop(desktop_name: &str, config_dir: & std::path::Path) -> Result<u32, String> {
+fn spawn_worker_on_desktop(
+    desktop_name: &str,
+    config_dir: &std::path::Path,
+) -> Result<WorkerProc, String> {
     use win_desktop_ffi::*;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let wv2_dir = config_dir.join("WebView2_DeskWorker");
@@ -301,22 +339,35 @@ fn spawn_worker_on_desktop(desktop_name: &str, config_dir: & std::path::Path) ->
             return Err(format!("CreateProcessW failed with err={}", GetLastError()));
         }
         CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-        Ok(pi.dwProcessId)
+        Ok(WorkerProc {
+            pid: pi.dwProcessId,
+            handle: pi.hProcess,
+        })
     }
 }
 
 #[cfg(target_os = "windows")]
-fn is_pid_alive_win32(pid: u32) -> bool {
+fn is_handle_alive_win32(handle: isize) -> bool {
     use win_desktop_ffi::*;
+    if handle == 0 {
+        return false;
+    }
+    unsafe { WaitForSingleObject(handle, 0) != WAIT_OBJECT_0 }
+}
+
+#[cfg(target_os = "windows")]
+fn query_exit_code_win32(handle: isize) -> Option<u32> {
+    use win_desktop_ffi::*;
+    if handle == 0 {
+        return None;
+    }
     unsafe {
-        let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
-        if h == 0 {
-            return false;
+        let mut code: DWORD = 0;
+        if GetExitCodeProcess(handle, &mut code) != 0 {
+            Some(code)
+        } else {
+            None
         }
-        let wait = WaitForSingleObject(h, 0);
-        CloseHandle(h);
-        wait != WAIT_OBJECT_0
     }
 }
 

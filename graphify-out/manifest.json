@@ -126,9 +126,9 @@
     "semantic_hash": "8e734ea5be135a77623dec3091fe2439"
   },
   "src-tauri/src/main.rs": {
-    "mtime": 1794909638.083385,
-    "seen": 1794909750.989759,
-    "ast_hash": "4b7a1746a802d0e9621a3aef65ad474e",
+    "mtime": 1795074610.3876407,
+    "seen": 1795074648.498118,
+    "ast_hash": "a1a5804d54275955294045718ba594ec",
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot.rs": {
@@ -138,8 +138,8 @@
     "semantic_hash": ""
   },
   "src-tauri/src/stealth_hotkey.rs": {
-    "mtime": 1794909595.5449264,
-    "seen": 1794909750.989851,
+    "mtime": 1794910206.5384355,
+    "seen": 1795074648.498216,
     "ast_hash": "3fd5a016ab8cf73deda241bd6d0bcad1",
     "semantic_hash": ""
   },
@@ -156,8 +156,8 @@
     "semantic_hash": ""
   },
   "src/App.tsx": {
-    "mtime": 1794909692.6460392,
-    "seen": 1794909750.98989,
+    "mtime": 1794910206.5393345,
+    "seen": 1795074648.4982688,
     "ast_hash": "968ac4fdebfaab24e220af7844039c17",
     "semantic_hash": ""
   },
@@ -222,8 +222,8 @@
     "semantic_hash": ""
   },
   "src/services/prompts.ts": {
-    "mtime": 1794909659.5413394,
-    "seen": 1794909750.990266,
+    "mtime": 1794910206.5400314,
+    "seen": 1795074648.498647,
     "ast_hash": "88dd99272eba426918d0057989800516",
     "semantic_hash": ""
   },
@@ -414,8 +414,8 @@
     "semantic_hash": "1d3aed177b455eed97e241a67b23debe"
   },
   "readme.txt": {
-    "mtime": 1794909359.867,
-    "seen": 1794909750.991632,
+    "mtime": 1794910206.5374374,
+    "seen": 1795074648.500215,
     "ast_hash": "c8e1f294991db923f79a6e367085a396",
     "semantic_hash": ""
   },
@@ -564,14 +564,14 @@
     "semantic_hash": ""
   },
   "src/components/settings/AppSettingsTab.tsx": {
-    "mtime": 1794909665.1630533,
-    "seen": 1794909750.990141,
+    "mtime": 1794910206.5395668,
+    "seen": 1795074648.498519,
     "ast_hash": "977a39cda4d4c3da90e13ce521bac1d1",
     "semantic_hash": ""
   },
   "src/components/settings/HotkeysSettingsTab.tsx": {
-    "mtime": 1794909654.895957,
-    "seen": 1794909750.9901419,
+    "mtime": 1794910206.5397305,
+    "seen": 1795074648.4985201,
     "ast_hash": "2fb6439bc8494b2f8efa625877bca1b0",
     "semantic_hash": ""
   },
@@ -582,8 +582,8 @@
     "semantic_hash": ""
   },
   "src/services/hotkeys.ts": {
-    "mtime": 1794909653.6645436,
-    "seen": 1794909750.99021,
+    "mtime": 1794910206.5398874,
+    "seen": 1795074648.498591,
     "ast_hash": "7cafad24ee82b80a5f790ac106969a5e",
     "semantic_hash": ""
   },
@@ -744,8 +744,8 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/guardian.rs": {
-    "mtime": 1794909754.8053632,
-    "seen": 1794909798.2002099,
+    "mtime": 1794910206.537788,
+    "seen": 1795074648.4981198,
     "ast_hash": "0136c6d8ae3c9cc20821aaab193c0c54",
     "semantic_hash": ""
   },
@@ -756,8 +756,8 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/mod.rs": {
-    "mtime": 1794909718.407715,
-    "seen": 1794909750.9897861,
+    "mtime": 1794910206.5379283,
+    "seen": 1795074648.498146,
     "ast_hash": "4bd5020e20d56408e59f00c314551330",
     "semantic_hash": ""
   },
@@ -768,9 +768,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/windows.rs": {
-    "mtime": 1794909563.4929962,
-    "seen": 1794909750.989808,
-    "ast_hash": "4ea99df8b811cb2145f927cb03c2635f",
+    "mtime": 1795074607.7154422,
+    "seen": 1795074648.498173,
+    "ast_hash": "826f7fcc46f6320bb9a52e3b09faa9be",
     "semantic_hash": ""
   },
   "src/services/recoveryState.ts": {
@@ -851,12 +851,6 @@
     "ast_hash": "e3319ba0f98ad2d832022637ed6273a5",
     "semantic_hash": ""
   },
-  "docs/superpowers/plans/2026-11-06-anti-kiosk-resilience.md": {
-    "mtime": 1793949536.736,
-    "seen": 1793953209.077926,
-    "ast_hash": "46c8719ee0409c393b94e4a1746a85b3",
-    "semantic_hash": ""
-  },
   "docs/superpowers/plans/EXTRACT_TEXT_ENHANCEMENT_PLAN.md": {
     "mtime": 1793989092.1712303,
     "seen": 1793989483.780431,
@@ -935,12 +929,6 @@
     "ast_hash": "2639731c7ebfbebd94efe4f2244f0f99",
     "semantic_hash": ""
   },
-  "docs/superpowers/plans/test.md": {
-    "mtime": 1793992520.4790027,
-    "seen": 1793992777.499125,
-    "ast_hash": "b4f54ab54ab787c7ecf16b6960f59094",
-    "semantic_hash": ""
-  },
   "src/services/promptStateSync.ts": {
     "mtime": 1794432777.4083357,
     "seen": 1794432957.244092,
@@ -948,9 +936,15 @@
     "semantic_hash": ""
   },
   "src-tauri/src/selection.rs": {
-    "mtime": 1794909593.1546867,
-    "seen": 1794909750.9898298,
+    "mtime": 1794910206.5382473,
+    "seen": 1795074648.498194,
     "ast_hash": "85d77a92018690c2efd27a2445cccfef",
+    "semantic_hash": ""
+  },
+  "supabase/.temp/linked-project.json": {
+    "mtime": 1791339812.6111445,
+    "seen": 1795074648.4986932,
+    "ast_hash": "cc52feef6aa9e322d13be545355b3328",
     "semantic_hash": ""
   }
 }

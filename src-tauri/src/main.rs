@@ -1953,6 +1953,15 @@ fn remove_windows_stealth(win: &tauri::WebviewWindow) {
 fn main() {
     resilience::guardian::handle_early_cli_and_bootstrap();
 
+    std::panic::set_hook(Box::new(|info| {
+        resilience::log_event(&format!("[panic] {}", info));
+    }));
+    resilience::log_event(&format!(
+        "[startup] building Tauri app (desktop_worker={} elevated={})",
+        std::env::args().any(|a| a == "--desktop-worker"),
+        resilience::is_current_process_elevated()
+    ));
+
     #[allow(unused_mut)]
     let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -2069,6 +2078,7 @@ fn main() {
             if let Ok(cfg_dir) = app_config_dir(app.handle()) {
                 resilience::init_config_dir(cfg_dir);
             }
+            resilience::log_event("[startup] entered setup()");
             resilience::session::apply_restored_window_rect(app.handle());
             screenshot::request_screen_recording_permission();
             
@@ -2147,6 +2157,7 @@ fn main() {
                 resilience::macos::start_window_self_healer(app.handle().clone());
             }
 
+            resilience::log_event("[startup] setup() completed");
             Ok(())
         })
         .build(tauri::generate_context!())
