@@ -1831,14 +1831,8 @@ function App() {
 
     // Free user restrictions
     if (!isPro) {
-      // Free users can only use Chrome tabs (no display capture)
-      if (isDisplay(sourceToUse)) {
-        setMessage('⚠️ Display capture requires Pro subscription. Please select a Chrome tab.');
-        return;
-      }
-
-      // Free users can only use allowed domains
-      if (!isAudio(sourceToUse)) {
+      // Free users can only use allowed domains (displays have no URL, so they're allowed)
+      if (!isAudio(sourceToUse) && !isDisplay(sourceToUse)) {
         const tab = sourceToUse as ChromeTab;
         const url = tab.url || '';
         if (!isFreeTierUrlAllowed(models, url)) {
@@ -1900,41 +1894,52 @@ function App() {
       let responseText: string;
       
       if (isDisplay(sourceToUse)) {
-        // Display/Screen capture - always uses screenshot (Pro only)
+        // Display/Screen capture - always uses screenshot
         setSolveFlowType('screenshot');
         setSolvePhase('capture');
         setMessage('📸 Capturing display...');
-        const screenshotPath = await invoke<string>('capture_display_screenshot', { 
-          displayId: sourceToUse.id 
+        const screenshotPath = await invoke<string>('capture_display_screenshot', {
+          displayId: sourceToUse.id
         });
-        
+
         setSolvePhase('asking');
         setMessage('🤖 Analyzing screenshot with AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage);
-        
-        // Display capture is Pro-only, never uses BYO key
-        const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
-          prompt,
-          imagePaths: [screenshotPath],
-          model: modelToUse,
-          accessToken,
-        });
-        
-        if (proxyResponse.error) {
-          throw new Error(proxyResponse.error);
-        }
-        responseText = proxyResponse.response;
-        
-        // Update usage stats if returned
-        if (proxyResponse.usage) {
-          setUsageStats(prev => prev ? {
-            ...prev,
-            requests_used: proxyResponse.usage!.requests_used,
-          } : prev);
-          // Refresh subscription for free users (lifetime_ai_calls updated)
-          if (!proxyResponse.usage.is_paid && authUser?.id) {
-            const updatedSub = await getUserSubscription(authUser.id);
-            if (updatedSub) setSubscription(updatedSub);
+
+        if (useBYOKey) {
+          responseText = await invoke<string>('query_ai_with_image', {
+            prompt,
+            imagePaths: [screenshotPath],
+            config: {
+              selected_model: modelToUse,
+              gemini_api_key: aiConfig.gemini_api_key || '',
+              max_output_tokens: models.max_output_tokens,
+            },
+          });
+        } else {
+          const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
+            prompt,
+            imagePaths: [screenshotPath],
+            model: modelToUse,
+            accessToken,
+          });
+
+          if (proxyResponse.error) {
+            throw new Error(proxyResponse.error);
+          }
+          responseText = proxyResponse.response;
+
+          // Update usage stats if returned
+          if (proxyResponse.usage) {
+            setUsageStats(prev => prev ? {
+              ...prev,
+              requests_used: proxyResponse.usage!.requests_used,
+            } : prev);
+            // Refresh subscription for free users (lifetime_ai_calls updated)
+            if (!proxyResponse.usage.is_paid && authUser?.id) {
+              const updatedSub = await getUserSubscription(authUser.id);
+              if (updatedSub) setSubscription(updatedSub);
+            }
           }
         }
       } else if (mode === 'screenshot' || (mode === 'auto' && useScreenshot)) {
@@ -2092,11 +2097,6 @@ function App() {
     }
 
     const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
-    if (!isPro) {
-      setSolvePhase('idle');
-      setMessage('⚠️ Lockdown Browser capture requires Pro subscription. Upgrade to Pro to use this feature.');
-      return;
-    }
 
     const trimmed = capturedText.trim();
     if (!trimmed) {
@@ -2123,27 +2123,34 @@ function App() {
       return;
     }
 
-    const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
-    const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
-    const storedSession = localStorage.getItem(storageKey);
+    // Free user with exhausted quota but their own Gemini key
+    const useBYOKey = quotaCheck.useBYOKey && aiConfig.gemini_api_key;
+
     let accessToken = '';
-    if (storedSession) {
-      try {
-        const session = JSON.parse(storedSession);
-        accessToken = session.access_token || '';
-      } catch {
+    if (!useBYOKey) {
+      const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
+      const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+      const storedSession = localStorage.getItem(storageKey);
+      if (storedSession) {
+        try {
+          const session = JSON.parse(storedSession);
+          accessToken = session.access_token || '';
+        } catch {
+          setSolvePhase('idle');
+          setMessage('❌ Session error. Please sign in again.');
+          return;
+        }
+      }
+      if (!accessToken) {
         setSolvePhase('idle');
-        setMessage('❌ Session error. Please sign in again.');
+        setMessage('❌ Please sign in to use AI features.');
         return;
       }
     }
-    if (!accessToken) {
-      setSolvePhase('idle');
-      setMessage('❌ Please sign in to use AI features.');
-      return;
-    }
 
-    const modelToUse = aiConfig.selected_model || models.default_pro_model;
+    const modelToUse = useBYOKey
+      ? models.byo_model.id
+      : (isPro ? (aiConfig.selected_model || models.default_pro_model) : models.free_model.id);
     setIsLoading(true);
     setAiResponse('');
     setSolveFlowType('text');
@@ -2152,6 +2159,21 @@ function App() {
 
     try {
       const prompt = buildPrompt(selectedTemplate, selectedLanguage, trimmed);
+      if (useBYOKey) {
+        const responseText = await invoke<string>('query_ai', {
+          prompt,
+          config: {
+            selected_model: modelToUse,
+            gemini_api_key: aiConfig.gemini_api_key || '',
+            max_output_tokens: models.max_output_tokens,
+          },
+        });
+        setAiResponse(responseText);
+        setSolvePhase('idle');
+        setMessage('');
+        return;
+      }
+
       type ProxyResponse = { response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string };
       const proxyResponse = await invoke<ProxyResponse>('query_ai_via_proxy', {
         prompt,
@@ -2171,6 +2193,11 @@ function App() {
           ...prev,
           requests_used: proxyResponse.usage!.requests_used,
         } : prev);
+        // Refresh subscription for free users (lifetime_ai_calls updated)
+        if (!proxyResponse.usage.is_paid && authUser?.id) {
+          const updatedSub = await getUserSubscription(authUser.id);
+          if (updatedSub) setSubscription(updatedSub);
+        }
       }
     } catch (error) {
       setSolvePhase('error');
@@ -2818,7 +2845,6 @@ function App() {
                         <li>✓ {proRequestLimitLabel} AI requests per month</li>
                         <li>✓ {proAudioHoursLabel} hours audio recording per month</li>
                         {proModelNames && <li>✓ {proModelNames}</li>}
-                        <li>✓ Screen capture for display</li>
                         <li>✓ Audio input with transcription</li>
                       </ul>
                       <button 

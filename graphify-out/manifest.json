@@ -156,9 +156,9 @@
     "semantic_hash": ""
   },
   "src/App.tsx": {
-    "mtime": 1794910206.5393345,
-    "seen": 1795074648.4982688,
-    "ast_hash": "968ac4fdebfaab24e220af7844039c17",
+    "mtime": 1795580936.7331305,
+    "seen": 1795580953.032224,
+    "ast_hash": "9b4dda5d7660f093f1541d544922ba08",
     "semantic_hash": ""
   },
   "src/components/AIResponseDisplay.tsx": {
@@ -204,9 +204,9 @@
     "semantic_hash": "eff3fdc7f5fadcf0842a19a9bfe5662d"
   },
   "src/components/SignUpForm.tsx": {
-    "mtime": 1793943764.4425063,
-    "seen": 1793953209.077562,
-    "ast_hash": "00dc2a9d6639c79a2e5c181ab735362f",
+    "mtime": 1795580936.7802172,
+    "seen": 1795580953.032397,
+    "ast_hash": "23d3307c261ff3dd6c8815037a0d3c9e",
     "semantic_hash": ""
   },
   "src/components/TabDropdown.tsx": {
@@ -558,9 +558,9 @@
     "semantic_hash": ""
   },
   "src/components/SetupChecklist.tsx": {
-    "mtime": 1793943764.441945,
-    "seen": 1793953209.077538,
-    "ast_hash": "70b31776383d8b2a015edfdd6bde0dc4",
+    "mtime": 1795580936.7595422,
+    "seen": 1795580953.032375,
+    "ast_hash": "1e0e738c609be5119f2c173a2308a5af",
     "semantic_hash": ""
   },
   "src/components/settings/AppSettingsTab.tsx": {

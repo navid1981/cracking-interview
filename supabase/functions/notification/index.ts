@@ -39,7 +39,7 @@ const ANNOUNCEMENTS = {
       <ul>
         <li>Open a problem in Chrome, pick the tab and press Solve</li>
         <li>You have ${FREE_LIFETIME_CALL_LIMIT} free AI calls to get started</li>
-        <li>Upgrade to Pro for stealth mode, display capture and audio input</li>
+        <li>Upgrade to Pro for stealth mode and audio input</li>
       </ul>
       <p><strong>Need help?</strong> Check our <a href="https://crackinginterview.org" target="_blank">documentation</a>.</p>
     `,

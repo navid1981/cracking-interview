@@ -74502,7 +74502,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L1844",
+      "source_location": "L1838",
       "weight": 1.0
     },
     {
@@ -74514,7 +74514,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L1913",
+      "source_location": "L1907",
       "weight": 1.0
     },
     {
@@ -74526,7 +74526,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2013",
+      "source_location": "L2018",
       "weight": 1.0
     },
     {
@@ -74538,7 +74538,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2024",
+      "source_location": "L2029",
       "weight": 1.0
     },
     {
@@ -74562,7 +74562,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2228",
+      "source_location": "L2255",
       "weight": 1.0
     },
     {
@@ -74574,7 +74574,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2238",
+      "source_location": "L2265",
       "weight": 1.0
     },
     {
@@ -74586,7 +74586,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2249",
+      "source_location": "L2276",
       "weight": 1.0
     },
     {
@@ -74610,7 +74610,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2352",
+      "source_location": "L2379",
       "weight": 1.0
     },
     {
@@ -74622,7 +74622,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2471",
+      "source_location": "L2498",
       "weight": 1.0
     },
     {
@@ -74634,19 +74634,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2499",
-      "weight": 1.0
-    },
-    {
-      "source": "src_app_app",
-      "target": "src_services_prompts_gettemplatelabel",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "call",
-      "source_file": "src/App.tsx",
-      "source_location": "L2588",
+      "source_location": "L2526",
       "weight": 1.0
     },
     {
@@ -74663,6 +74651,18 @@
     },
     {
       "source": "src_app_app",
+      "target": "src_services_prompts_gettemplatelabel",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/App.tsx",
+      "source_location": "L2615",
+      "weight": 1.0
+    },
+    {
+      "source": "src_app_app",
       "target": "src_components_airesponsedisplay_airesponsedisplay",
       "relation": "calls",
       "_origin": "ast",
@@ -74670,7 +74670,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2666",
+      "source_location": "L2693",
       "weight": 1.0
     },
     {
@@ -74694,7 +74694,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L3049",
+      "source_location": "L3076",
       "weight": 1.0
     },
     {
@@ -74706,7 +74706,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L3075",
+      "source_location": "L3102",
       "weight": 1.0
     },
     {
@@ -74718,7 +74718,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L3089",
+      "source_location": "L3116",
       "weight": 1.0
     },
     {
@@ -74730,7 +74730,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L3100",
+      "source_location": "L3127",
       "weight": 1.0
     },
     {
@@ -74742,7 +74742,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L3128",
+      "source_location": "L3155",
       "weight": 1.0
     },
     {
@@ -283345,5 +283345,5 @@
       "source_file": "docs/AI_PROJECT_GUIDE.md"
     }
   ],
-  "built_at_commit": "e821615f04ec5ed8a57d12bffad0b65c18f70401"
+  "built_at_commit": "2167f08147221f99396aab868cecd04d714bec62"
 }
