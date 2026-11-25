@@ -81,6 +81,13 @@ pub enum HotkeyAction {
 }
 
 impl HotkeyAction {
+    /// Hotkeys whose keystroke must never reach the foreground app, even without stealth mode.
+    /// Capture Selection reads the selection in the foreground app; letting Cmd/Alt+4 through
+    /// makes Chrome/Lockdown Browser switch tabs first, so the selection is gone.
+    pub fn always_swallow(&self) -> bool {
+        matches!(self, HotkeyAction::CaptureSelection)
+    }
+
     #[allow(dead_code)]
     pub fn event_name(&self) -> Option<&'static str> {
         match self {
@@ -806,7 +813,7 @@ unsafe extern "C" fn macos_event_tap_callback(
         };
 
         if let Some(action) = matched_action {
-            let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed);
+            let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed) || action.always_swallow();
             if is_stealth {
                 println!("🕵️ [stealth-hotkey-macOS] Swallowed key event for {}", action.label());
             } else {
@@ -974,7 +981,7 @@ unsafe extern "system" fn windows_keyboard_proc(
                 };
 
                 if let Some((action, h_ctrl, h_alt, h_shift, h_cmd)) = matched {
-                    let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed);
+                    let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed) || action.always_swallow();
                     if is_stealth {
                         println!("🕵️ [stealth-hotkey-windows] Swallowed key event for {}", action.label());
                         if h_ctrl { WIN_CTRL_COMBO_FIRED.store(true, Ordering::Relaxed); }
