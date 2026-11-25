@@ -546,7 +546,7 @@ The backend registers global hotkeys on startup (customizable in Settings → Ho
 
 | Action | macOS Default | Windows Default | Linux Default |
 |--------|---------------|-----------------|---------------|
-| Extract text → Solve | `Cmd+1` | `Alt+1` | `Ctrl+1` |
+| Chrome content → Solve | `Cmd+1` | `Alt+1` | `Ctrl+1` |
 | Screenshot → Solve | `Cmd+2` | `Alt+2` | `Ctrl+2` |
 | Audio Start/Stop → Solve | `Cmd+3` | `Alt+3` | `Ctrl+3` |
 | Scroll Up | `Cmd+Up` | `Ctrl+Up` | `Ctrl+Up` |
@@ -1675,7 +1675,7 @@ When the AI returns Mermaid diagram syntax in the SOLUTION block (triggered by t
 
 #### Solve Button Mode Indicator
 
-The "Solve" button dynamically shows the current input mode:
+The "Solve" button dynamically shows the current capture mode:
 
 - **Audio source selected**: `🎙️ Record` (or `⏹️ Stop (Xs)` while recording)
 - **Display source selected**: `📸 Solve` (always screenshot)

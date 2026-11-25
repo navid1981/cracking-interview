@@ -3036,7 +3036,7 @@ function App() {
 
                   {/* Input Mode (merged from old tab) */}
                   <div className="form-group" style={{ marginTop: '20px', paddingTop: '16px', borderTop: `1px solid var(--border)` }}>
-                    <label>Input Mode:</label>
+                    <label>Capture Mode:</label>
                     <div className="toggle-group">
                       <button
                         onClick={() => setUseScreenshot(false)}
