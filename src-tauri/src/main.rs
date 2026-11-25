@@ -2019,6 +2019,7 @@ fn main() {
             get_window_inner_size,
             get_os,
             get_hotkeys,
+            get_default_hotkeys,
             set_hotkeys,
             reset_hotkeys_to_default,
             get_stealth_status,
@@ -2513,6 +2514,12 @@ fn get_hotkeys(state: tauri::State<'_, HotkeysState>) -> Result<HotkeysConfig, S
         .lock()
         .map(|cfg| cfg.clone())
         .map_err(|_| "Hotkeys state lock poisoned".to_string())
+}
+
+/// Platform default hotkeys, so the UI never hardcodes its own copy.
+#[tauri::command]
+fn get_default_hotkeys() -> HotkeysConfig {
+    default_hotkeys()
 }
 
 #[tauri::command]

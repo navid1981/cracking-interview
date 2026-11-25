@@ -40,6 +40,31 @@ where
 /// Capture the current selection and send it to the frontend to solve with AI (or display a
 /// notice if nothing was captured). Runs on a background thread because it may query UIA/AX
 /// or wait for hotkey modifiers to be released.
+/// Sent with `hotkey-solve-selection`. `reason` explains an empty `text` so the UI can
+/// tell the user what to fix: "no_accessibility", "needs_admin", or "no_selection".
+#[derive(Clone, serde::Serialize)]
+struct SelectionPayload {
+    text: String,
+    reason: Option<&'static str>,
+}
+
+/// Best guess at why nothing was captured, checked right after the attempt.
+fn capture_failure_reason() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        if !crate::stealth_hotkey::is_accessibility_granted() {
+            return "no_accessibility";
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if windows_impl::foreground_blocked_by_elevation() {
+            return "needs_admin";
+        }
+    }
+    "no_selection"
+}
+
 pub fn capture(app: &tauri::AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
@@ -49,14 +74,16 @@ pub fn capture(app: &tauri::AppHandle) {
                 let count = t.chars().count();
                 println!("📋 [selection] Captured {} chars", count);
                 crate::resilience::log_event(&format!("[selection] Captured {} chars for solve", count));
-                t
+                SelectionPayload { text: t, reason: None }
             }
             None => {
-                println!("⚠️ [selection] Nothing captured (no selection, or the source blocked it)");
-                crate::resilience::log_event(
-                    "[selection] Nothing captured (no selection, or source blocked UIA/AX and clipboard)",
-                );
-                String::new()
+                let reason = capture_failure_reason();
+                println!("⚠️ [selection] Nothing captured (reason: {})", reason);
+                crate::resilience::log_event(&format!(
+                    "[selection] Nothing captured (reason: {})",
+                    reason
+                ));
+                SelectionPayload { text: String::new(), reason: Some(reason) }
             }
         };
 
@@ -699,6 +726,25 @@ mod windows_impl {
             }
         }
         (None, total_matches)
+    }
+
+    /// True when the foreground window belongs to an elevated process and we are not elevated,
+    /// so Windows blocks UI Automation from reading it (UIPI).
+    pub fn foreground_blocked_by_elevation() -> bool {
+        unsafe {
+            let fg = GetForegroundWindow();
+            if fg.0.is_null() {
+                return false;
+            }
+            let mut fg_pid = 0u32;
+            GetWindowThreadProcessId(fg, Some(&mut fg_pid));
+            if fg_pid == 0 || fg_pid == GetCurrentProcessId() {
+                return false;
+            }
+            let (_, fg_elev) = process_exe_and_elevation(fg_pid);
+            let self_elev = query_process_elevation(GetCurrentProcess());
+            fg_elev == Some(true) && self_elev != Some(true)
+        }
     }
 
     /// Read selected text from the foreground app via Windows UI Automation (`TextPattern`).

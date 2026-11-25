@@ -308,6 +308,12 @@ span.status-indicator.chrome-user-mode {
   cursor: not-allowed;
 }
 
+/* Hotkey hint inside the Solve button */
+.solve-button-hotkey {
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+
 /* Solve button with the Text/Screenshot input-mode segmented control inline to its left */
 .solve-group {
   flex-shrink: 0;
@@ -969,9 +975,18 @@ span.status-indicator.chrome-user-mode {
 }
 
 .hotkey-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   font-size: 11px;
   color: var(--text-secondary);
   margin-bottom: 3px;
+}
+
+.hotkey-label .hotkey-keys kbd {
+  padding: 1px 4px;
+  font-size: 10px;
 }
 
 .hotkey-input {
@@ -1057,61 +1072,11 @@ span.status-indicator.chrome-user-mode {
 }
 
 /* Mode buttons with icon + label + description */
-.toggle-btn.mode-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 10px;
-}
 
-.mode-icon {
-  font-size: 22px;
-  line-height: 1;
-}
 
-.mode-label {
-  font-size: 13px;
-  font-weight: 600;
-}
 
-.mode-desc {
-  font-size: 11px;
-  opacity: 0.7;
-}
 
-.toggle-btn.mode-btn.active .mode-desc {
-  opacity: 0.85;
-}
 
-.mode-hotkey {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 2px;
-  font-size: 11px;
-  opacity: 0.85;
-}
-
-.mode-hotkey kbd {
-  min-width: 18px;
-  padding: 1px 6px;
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  text-align: center;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-}
-
-.mode-hotkey-plus {
-  opacity: 0.7;
-}
-
-.mode-hotkey-label {
-  margin-right: 2px;
-  opacity: 0.8;
-}
 
 .alert-badge {
   margin-left: 8px;

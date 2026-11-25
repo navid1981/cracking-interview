@@ -27,7 +27,10 @@ export function hotkeyKeys(hotkey: string, isMac: boolean): string[] {
   return parts.map(p => (/^(cmd|command|commandorcontrol|cmdorctrl)$/i.test(p) ? 'Ctrl' : p));
 }
 
-/** "Cmd+Shift+1" → "⌘⇧1" on macOS, "Ctrl+Shift+1" elsewhere. */
+/**
+ * Text form for places that can't show key boxes (tooltips, messages). Matches <HotkeyKeys>:
+ * "Cmd+Shift+1" → "⌘ + ⇧ + 1" on macOS, "Ctrl + Shift + 1" elsewhere.
+ */
 export function formatHotkey(hotkey: string, isMac: boolean): string {
-  return hotkeyKeys(hotkey, isMac).join(isMac ? '' : '+');
+  return hotkeyKeys(hotkey, isMac).join(' + ');
 }

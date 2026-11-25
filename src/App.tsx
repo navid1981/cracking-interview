@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import AIResponseDisplay from './components/AIResponseDisplay';
@@ -15,8 +15,10 @@ import { scheduleSessionSnapshot, fetchRestoredSessionSnapshot } from './service
 import { startPromptStateSync } from './services/promptStateSync';
 import AppSettingsTab from './components/settings/AppSettingsTab';
 import HotkeysSettingsTab from './components/settings/HotkeysSettingsTab';
+import HotkeyKeys from './components/HotkeyKeys';
+import ModeHelp from './components/ModeHelp';
 import { getMessageActions, MESSAGE_ACTION_LABELS, MessageActionKind } from './services/messageActions';
-import { HotkeysConfig, formatHotkey, hotkeyKeys } from './services/hotkeys';
+import { HotkeysConfig, formatHotkey } from './services/hotkeys';
 import { TabExtraction, MAX_QUESTION_IMAGES, needsTabScreenshot, isWhiteboard } from './services/tabExtraction';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts, StoredDocPlaceholder } from './services/prompts';
 import { 
@@ -79,6 +81,15 @@ function decodeHtmlEntities(text: string): string {
 function isAudio(source: InputSource): source is AudioSource {
   return (source as any).source_type === 'audio';
 }
+
+/** Default input source: the main display, then any display, then whatever is first. */
+function pickDefaultSource(sources: InputSource[]): InputSource | null {
+  const displays = sources.filter(isDisplay);
+  return displays.find(d => d.is_main) ?? displays[0] ?? sources[0] ?? null;
+}
+
+// Matches the "requires pro subscription" rule in messageActions, which adds the Upgrade button.
+const AUDIO_PRO_MESSAGE = '⚠️ Audio input requires Pro subscription.';
 
 interface AIConfig {
   selected_model: string;
@@ -338,6 +349,7 @@ function App() {
   const [hotkeysDraft, setHotkeysDraft] = useState<HotkeysConfig>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '', capture_selection: '' });
   // Saved hotkeys (the draft above may hold unsaved edits from the HotKeys tab).
   const [activeHotkeys, setActiveHotkeys] = useState<HotkeysConfig | null>(null);
+  const [defaultHotkeys, setDefaultHotkeys] = useState<HotkeysConfig | null>(null); // Platform defaults from Rust
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
   const [stealthStatus, setStealthStatus] = useState<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean } | null>(null);
   const [adminStatus, setAdminStatus] = useState<{ run_as_admin: boolean; is_elevated: boolean }>({ run_as_admin: false, is_elevated: false });
@@ -350,9 +362,11 @@ function App() {
   // (main GUI <-> desktop worker) so the prompt list remounts with fresh data.
   const [promptSyncVersion, setPromptSyncVersion] = useState(0);
   const solveWithAIRef = useRef<((mode?: 'auto' | 'text' | 'screenshot') => Promise<void>) | null>(null);
-  const solveSelectionWithAIRef = useRef<((capturedText: string) => Promise<void>) | null>(null);
+  const solveSelectionWithAIRef = useRef<((capturedText: string, reason?: string | null) => Promise<void>) | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const previousTemplateRef = useRef<string | null>(null); // Stores template before auto-switching to Audio
+  const selectedTemplateRef = useRef(selectedTemplate); // Current prompt for hotkey listeners (avoids stale closures)
+  selectedTemplateRef.current = selectedTemplate;
 
   // ========== AUTH INITIALIZATION ==========
   useEffect(() => {
@@ -489,8 +503,8 @@ function App() {
             setMessage(prev => prev.startsWith('Selected: ') ? `Selected: ${title}` : prev);
           }
         } else if (combined.length > 0) {
-          setSelectedTab(combined[0]);
-          setMessage('Selected tab was closed, auto-selected first source');
+          setSelectedTab(pickDefaultSource(combined));
+          setMessage('Selected tab was closed, switched to the default source');
         }
       }
     } catch {
@@ -581,7 +595,7 @@ function App() {
     if (isLiveTranscribing && audioSeconds >= sessionMaxSecondsRef.current && !sessionStopTriggeredRef.current) {
       sessionStopTriggeredRef.current = true;
       const minutes = Math.round(sessionMaxSecondsRef.current / 60);
-      setMessage(`⏱️ Session limit reached (${minutes} min). Stopping recording…`);
+      setMessage(`⏱️ Session limit reached (${minutes} min). Stopping listening…`);
       stopLiveTranscription();
     }
   }, [audioSeconds, isLiveTranscribing]);
@@ -596,13 +610,19 @@ function App() {
 
     const isPro = subscriptionRef.current?.subscription_status === 'active' || subscriptionRef.current?.subscription_status === 'cancelling';
     if (!isPro) {
-      setMessage('⚠️ Audio input requires Pro subscription.');
+      setMessage(AUDIO_PRO_MESSAGE);
       audioToggleInFlightRef.current = false;
       return;
     }
 
     // Start live transcription
     if (!isRecordingAudioRef.current && !isLiveTranscribingRef.current) {
+      // Pro only: switch to the Audio prompt when listening actually starts (not on source select)
+      if (selectedTemplateRef.current !== PromptTemplate.VerbalInterviewAudio) {
+        previousTemplateRef.current = selectedTemplateRef.current;
+        setSelectedTemplate(PromptTemplate.VerbalInterviewAudio);
+        localStorage.setItem('prompt_template', PromptTemplate.VerbalInterviewAudio);
+      }
       try {
         await startLiveTranscription();
         setTimeout(() => { audioToggleInFlightRef.current = false; }, 500);
@@ -734,7 +754,7 @@ function App() {
       return;
     }
 
-    setMessage('🎙️ Starting live transcription…');
+    setMessage('🎧 Starting to listen…');
     const models = await ensureModelConfig();
     if (!models) {
       setMessage('❌ Could not load limits from the server. Check your connection and try again.');
@@ -1134,12 +1154,7 @@ function App() {
           setShowAnnouncement(false);
           const audio = (allSourcesRef.current || []).find((s) => isAudio(s) && s.id === 'audio') as any;
           setSelectedTab(audio || ({ id: 'audio', name: 'Audio (System)', source_type: 'audio' } as any));
-          // Auto-select Audio prompt when triggered via hotkey
-          if (selectedTemplate !== PromptTemplate.VerbalInterviewAudio) {
-            previousTemplateRef.current = selectedTemplate;
-            setSelectedTemplate(PromptTemplate.VerbalInterviewAudio);
-            localStorage.setItem('prompt_template', PromptTemplate.VerbalInterviewAudio);
-          }
+          // toggleAudioRecording switches to the Audio prompt, for Pro users only
           await toggleAudioRecording();
         });
         if (cancelled) { uAudio(); return; }
@@ -1183,9 +1198,9 @@ function App() {
         if (cancelled) { uMoveRight(); return; }
         unsubs.push(uMoveRight);
 
-        const uSolveSelection = await listen<string>('hotkey-solve-selection', async (event) => {
+        const uSolveSelection = await listen<{ text: string; reason: string | null }>('hotkey-solve-selection', async (event) => {
           if (solveSelectionWithAIRef.current) {
-            await solveSelectionWithAIRef.current(event.payload ?? '');
+            await solveSelectionWithAIRef.current(event.payload?.text ?? '', event.payload?.reason);
           }
         });
         if (cancelled) { uSolveSelection(); return; }
@@ -1248,6 +1263,7 @@ function App() {
 
   useEffect(() => {
     invoke<HotkeysConfig>('get_hotkeys').then(setActiveHotkeys).catch(() => {});
+    invoke<HotkeysConfig>('get_default_hotkeys').then(setDefaultHotkeys).catch(() => {});
     invoke<{ run_as_admin: boolean; is_elevated: boolean }>('get_admin_status')
       .then(setAdminStatus)
       .catch(() => {});
@@ -1628,19 +1644,16 @@ function App() {
       fetchTabs();
     } else {
       // CDP closed - remove Chrome tabs from sources and reselect if needed
+      // Displays and Audio don't depend on Chrome, so keep them.
       setAllSources(prev => {
-        const displaysOnly = prev.filter(s => isDisplay(s));
-        
-        // If current selection was a Chrome tab, switch to first display
-        if (selectedTab && !isDisplay(selectedTab)) {
-          if (displaysOnly.length > 0) {
-            setSelectedTab(displaysOnly[0]);
-          } else {
-            setSelectedTab(null);
-          }
+        const nonChrome = prev.filter(s => !isChromeTab(s));
+
+        // If current selection was a Chrome tab, switch to first display (or Audio)
+        if (selectedTab && isChromeTab(selectedTab)) {
+          setSelectedTab(pickDefaultSource(nonChrome));
         }
-        
-        return displaysOnly;
+
+        return nonChrome;
       });
       
       // Clear any "CDP opened" message when CDP closes
@@ -1755,8 +1768,8 @@ function App() {
       // If selected tab is no longer in the list, select first available source
       else if (selectedTab) {
         if (combined.length > 0) {
-          setSelectedTab(combined[0]);
-          setMessage('Previous selection unavailable, auto-selected first source');
+          setSelectedTab(pickDefaultSource(combined));
+          setMessage('Previous selection unavailable, switched to the default source');
         } else {
           setSelectedTab(null);
           setMessage('No sources available');
@@ -1765,7 +1778,7 @@ function App() {
       
       // Auto-select first source if none selected
       else if (combined.length > 0 && !selectedTab) {
-        setSelectedTab(combined[0]);
+        setSelectedTab(pickDefaultSource(combined));
       }
     } catch (error) {
       console.error('Failed to fetch sources:', error);
@@ -1779,7 +1792,7 @@ function App() {
     announcementDismissedRef.current = true;
     setShowAnnouncement(false);
     
-    let sourceToUse = selectedTab ?? (allSources.length > 0 ? allSources[0] : null);
+    let sourceToUse = selectedTab ?? pickDefaultSource(allSources);
 
     // The tab may have navigated since the list was last refreshed; use its current URL/title.
     if (sourceToUse && isChromeTab(sourceToUse) && cdpReady) {
@@ -2086,7 +2099,7 @@ function App() {
     }
   };
 
-  const solveSelectionWithAI = async (capturedText: string) => {
+  const solveSelectionWithAI = async (capturedText: string, reason?: string | null) => {
     announcementDismissedRef.current = true;
     setShowAnnouncement(false);
 
@@ -2101,11 +2114,17 @@ function App() {
     const trimmed = capturedText.trim();
     if (!trimmed) {
       const hk = formatHotkey(
-        activeHotkeys?.capture_selection || (runtimePlatform === 'macos' ? 'Cmd+4' : 'Alt+4'),
+        activeHotkeys?.capture_selection || defaultHotkeys?.capture_selection || '',
         runtimePlatform === 'macos',
-      );
+      ) || 'the Capture Selected Text hotkey';
       setSolvePhase('idle');
-      setMessage(`⚠️ No selected text captured. Highlight text in Lockdown Browser first, then press ${hk}.`);
+      if (reason === 'no_accessibility') {
+        setMessage(`⚠️ Couldn't read the selection: Accessibility permission is off. Turn it on for this app, then press ${hk} again.`);
+      } else if (reason === 'needs_admin') {
+        setMessage(`⚠️ Couldn't read the selection: that window runs with administrator rights. Turn on Run as Administrator in Settings → App, restart, then press ${hk} again.`);
+      } else {
+        setMessage(`⚠️ No selected text captured. Highlight text in Lockdown Browser first, then press ${hk}.`);
+      }
       return;
     }
 
@@ -2235,6 +2254,12 @@ function App() {
       case 'screen_permission':
         setup.grant('screen_recording');
         break;
+      case 'accessibility_permission':
+        setup.grant('accessibility');
+        break;
+      case 'run_as_admin_settings':
+        openSettingsAt('app');
+        break;
     }
   };
 
@@ -2258,6 +2283,7 @@ function App() {
   // ========== MAIN APP (LOGGED IN) ==========
   // Pro users include 'active' and 'cancelling' (still have access until period end)
   const isPaidUser = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+  const audioLockedForFree = !!selectedTab && isAudio(selectedTab) && !isPaidUser;
   const freeCallLimit = modelConfig?.free_call_limit;
   const freeCallLimitLabel = freeCallLimit ?? '…';
   const freeCallsUsed = subscription?.lifetime_ai_calls || 0;
@@ -2268,27 +2294,14 @@ function App() {
   const proAudioHoursLabel = modelConfig ? +(modelConfig.pro_audio_seconds_limit / 3600).toFixed(1) : '…';
   const proModelNames = modelConfig?.pro_models.map(m => m.name).join(', ') ?? '';
   const solveKind = !selectedTab ? null : isAudio(selectedTab) ? 'audio' : (isDisplay(selectedTab) || useScreenshot) ? 'screenshot' : 'text';
-  const solveHotkeyRaw = !activeHotkeys || !solveKind ? '' : solveKind === 'audio' ? activeHotkeys.audio_toggle : activeHotkeys[solveKind];
-  const solveHotkey = formatHotkey(solveHotkeyRaw, runtimePlatform === 'macos');
-  // OS-specific default (matches the Rust defaults) until the saved hotkeys load.
+  // Saved hotkeys, or the platform defaults from Rust until they load.
+  const hotkeys = activeHotkeys ?? defaultHotkeys;
   const isMacPlatform = runtimePlatform === 'macos';
-  const hotkeyMod = isMacPlatform ? 'Cmd' : runtimePlatform === 'windows' ? 'Alt' : 'Ctrl';
-  const renderHotkeyKeys = (hotkey: string) => (
-    <span className="mode-hotkey">
-      <span className="mode-hotkey-label">Hotkey:</span>
-      {hotkeyKeys(hotkey, isMacPlatform).map((k, i) => (
-        <Fragment key={i}>
-          {i > 0 && <span className="mode-hotkey-plus">+</span>}
-          <kbd>{k}</kbd>
-        </Fragment>
-      ))}
-    </span>
-  );
-  const contentCaptureHotkey = renderHotkeyKeys(activeHotkeys?.text || `${hotkeyMod}+1`);
-  const screenshotCaptureHotkey = renderHotkeyKeys(activeHotkeys?.screenshot || `${hotkeyMod}+2`);
+  const solveHotkeyRaw = !hotkeys || !solveKind ? '' : solveKind === 'audio' ? hotkeys.audio_toggle : hotkeys[solveKind];
+  const solveHotkey = formatHotkey(solveHotkeyRaw, isMacPlatform);
   const withHotkey = (label: string, hotkey?: string) =>
     hotkey ? `${label} · solve now with ${formatHotkey(hotkey, runtimePlatform === 'macos')}` : label;
-  const solveActionLabel = solveKind === 'audio' ? 'Start / stop recording' : solveKind === 'screenshot' ? 'Solve from screenshot' : 'Solve from text';
+  const solveActionLabel = solveKind === 'audio' ? 'Start listening / stop & solve' : solveKind === 'screenshot' ? 'Solve from screenshot' : 'Solve from text';
   const messageActions = getMessageActions(message, { isPro: isPaidUser, isMac: runtimePlatform === 'macos', cdpReady });
 
   return (
@@ -2333,7 +2346,7 @@ function App() {
           )}
           {isPaidUser && usageStats && (
             <span className="quota-badge" title={`${(usageStats.audio_seconds_used / 3600).toFixed(1)} of ${usageStats.audio_seconds_limit / 3600} audio hours used this month`}>
-              🎙️ {(usageStats.audio_seconds_used / 3600).toFixed(1)}/{usageStats.audio_seconds_limit / 3600}h
+              🎧 {(usageStats.audio_seconds_used / 3600).toFixed(1)}/{usageStats.audio_seconds_limit / 3600}h
             </span>
           )}
           {setup.oneTimeMissing > 0 && (
@@ -2404,16 +2417,15 @@ function App() {
                 const titleDiv = document.createElement('div');
                 titleDiv.innerHTML = rawTitle;
                 const title = titleDiv.textContent || titleDiv.innerText || rawTitle;
-                setMessage(`Selected: ${title}`);
-                
-                // Auto-select Verbal Interview (Audio) prompt when switching to Audio source
+                // Free users: tell them up front instead of waiting for them to press Record
+                setMessage(nowAudio && !isPaidUser ? AUDIO_PRO_MESSAGE : `Selected: ${title}`);
+
+                // The Audio prompt is applied when a Pro user starts listening (toggleAudioRecording),
+                // not on select. Pro users get audio capture warmed up so the start is instant.
                 if (nowAudio && !wasAudio) {
-                  previousTemplateRef.current = selectedTemplate;
-                  setSelectedTemplate(PromptTemplate.VerbalInterviewAudio);
-                  localStorage.setItem('prompt_template', PromptTemplate.VerbalInterviewAudio);
-                  invoke('warm_audio_capture')
-                    .then(() => {})
-                    .catch(() => {});
+                  if (isPaidUser) {
+                    invoke('warm_audio_capture').catch(() => {});
+                  }
                 }
                 // Restore previous prompt when switching away from Audio
                 else if (wasAudio && !nowAudio) {
@@ -2431,6 +2443,9 @@ function App() {
               }}
               disabled={false}
               onOpen={refreshChromeTabsQuietly}
+              chromeConnected={cdpReady}
+              isPro={isPaidUser}
+              onOpenChrome={openChromeCdp}
             />
             <button
               onClick={fetchTabs}
@@ -2448,8 +2463,8 @@ function App() {
             const displayLocked = isDisplay(selectedTab);
             const screenshotActive = displayLocked || useScreenshot;
             const lockedHint = 'Displays always use Screenshot Capture';
-            // Same `useScreenshot` setting as Settings → AI Models → Input Mode, so both stay in sync.
             return (
+              <>
               <div
                 className={`mode-segment ${screenshotActive ? 'is-screenshot' : ''} ${displayLocked ? 'is-locked' : ''}`}
                 role="radiogroup"
@@ -2464,7 +2479,7 @@ function App() {
                   className={`mode-segment-btn ${!screenshotActive ? 'active' : ''}`}
                   onClick={() => setUseScreenshot(false)}
                   disabled={isLoading || displayLocked}
-                  title={displayLocked ? lockedHint : withHotkey('Content Capture', activeHotkeys?.text)}
+                  title={displayLocked ? lockedHint : withHotkey('Content Capture', hotkeys?.text)}
                 >
                   <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
@@ -2479,7 +2494,7 @@ function App() {
                   className={`mode-segment-btn ${screenshotActive ? 'active' : ''}`}
                   onClick={() => setUseScreenshot(true)}
                   disabled={isLoading || displayLocked}
-                  title={displayLocked ? lockedHint : withHotkey('Screenshot Capture', activeHotkeys?.screenshot)}
+                  title={displayLocked ? lockedHint : withHotkey('Screenshot Capture', hotkeys?.screenshot)}
                 >
                   <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M4 8a2 2 0 0 1 2-2h1.5l1.5-2h6l1.5 2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
@@ -2487,25 +2502,48 @@ function App() {
                   </svg>
                 </button>
               </div>
+              <ModeHelp
+                isMac={isMacPlatform}
+                textHotkey={hotkeys?.text}
+                screenshotHotkey={hotkeys?.screenshot}
+                selectionHotkey={hotkeys?.capture_selection}
+                audioHotkey={hotkeys?.audio_toggle}
+                isPro={isPaidUser}
+              />
+              </>
             );
           })()}
+          {/* Audio hides the capture toggle, but the help stays one click away */}
+          {selectedTab && isAudio(selectedTab) && (
+            <ModeHelp
+              isMac={isMacPlatform}
+              textHotkey={hotkeys?.text}
+              screenshotHotkey={hotkeys?.screenshot}
+              selectionHotkey={hotkeys?.capture_selection}
+              audioHotkey={hotkeys?.audio_toggle}
+              isPro={isPaidUser}
+            />
+          )}
           <button 
             onClick={() => solveWithAI('auto')}
-            disabled={isLoading || !selectedTab}
+            disabled={isLoading || !selectedTab || audioLockedForFree}
             className="solve-button"
-            title={solveHotkey ? `${solveActionLabel} (${solveHotkey})` : undefined}
+            title={audioLockedForFree ? 'Audio input requires Pro subscription' : solveHotkey ? `${solveActionLabel} (${solveHotkey})` : undefined}
             aria-keyshortcuts={solveHotkeyRaw || undefined}
           >
             {selectedTab && isAudio(selectedTab)
-              ? (isRecordingAudio ? `⏹️ Stop (${audioSeconds}s)` : '🎙️ Record')
+              ? (isRecordingAudio ? `⏹️ Stop & Solve (${audioSeconds}s)` : '🎧 Start Listening')
               : `${selectedTab && (isDisplay(selectedTab) || useScreenshot) ? '📸' : '📝'} Solve`}
+            {solveHotkey && !audioLockedForFree && (
+              <HotkeyKeys hotkey={solveHotkeyRaw} isMac={isMacPlatform} size="compact" className="solve-button-hotkey" />
+            )}
           </button>
         </div>
       </div>
 
       {isRecordingAudio && !isLiveTranscribing && (
         <div className="message-box" style={{ margin: '0 20px 12px 20px' }}>
-          🎙️ Recording system audio… <strong>{audioSeconds}s</strong> (press Stop / Audio hotkey to send)
+          🎧 Listening to system audio… <strong>{audioSeconds}s</strong> (press Stop & Solve / Audio hotkey to send)
         </div>
       )}
 
@@ -2602,7 +2640,7 @@ function App() {
                 let steps: Step[];
                 if (solveFlowType === 'audio') {
                   steps = [
-                    { label: 'Record', icon: '🎙️', key: 'audio' },
+                    { label: 'Listen', icon: '🎧', key: 'audio' },
                     { label: 'Asking AI', icon: '🤖', key: 'asking' },
                   ];
                 } else if (solveFlowType === 'screenshot') {
@@ -2829,7 +2867,7 @@ function App() {
 
                   {isPaidUser && usageStats && (
                     <div className="form-group">
-                      <label>Audio Recording This Month:</label>
+                      <label>Live Audio Listening This Month:</label>
                       <div className="usage-bar-container">
                         {(() => {
                           const pct = Math.min(100, (usageStats.audio_seconds_used / usageStats.audio_seconds_limit) * 100);
@@ -2859,7 +2897,7 @@ function App() {
                       <ul className="upgrade-benefits">
                         <li>✓ Stealth mode: hidden hotkeys and hidden window</li>
                         <li>✓ {proRequestLimitLabel} AI requests per month</li>
-                        <li>✓ {proAudioHoursLabel} hours audio recording per month</li>
+                        <li>✓ {proAudioHoursLabel} hours live audio listening per month</li>
                         {proModelNames && <li>✓ {proModelNames}</li>}
                         <li>✓ Audio input with transcription</li>
                       </ul>
@@ -3044,46 +3082,11 @@ function App() {
                         <li>Stealth Mode (hidden hotkeys and window)</li>
                         <li>{modelConfig ? `All ${modelConfig.pro_models.length} premium AI models` : 'All premium AI models'}</li>
                         <li>{proRequestLimitLabel} requests per month</li>
-                        <li>Display/screen capture</li>
                         <li>Audio input with transcription</li>
                       </ul>
                     </div>
                   )}
 
-                  {/* Input Mode (merged from old tab) */}
-                  <div className="form-group" style={{ marginTop: '20px', paddingTop: '16px', borderTop: `1px solid var(--border)` }}>
-                    <label>Capture Mode:</label>
-                    <div className="toggle-group">
-                      <button
-                        onClick={() => setUseScreenshot(false)}
-                        className={`toggle-btn mode-btn ${!useScreenshot ? 'active' : ''}`}
-                      >
-                        <span className="mode-icon">📝</span>
-                        <span className="mode-label">Content Capture</span>
-                        <span className="mode-desc">Chrome full page, frames & images</span>
-                        {runtimePlatform !== 'unknown' && contentCaptureHotkey}
-                      </button>
-                      <button
-                        onClick={() => setUseScreenshot(true)}
-                        className={`toggle-btn mode-btn ${useScreenshot ? 'active' : ''}`}
-                      >
-                        <span className="mode-icon">📸</span>
-                        <span className="mode-label">Screenshot Capture</span>
-                        <span className="mode-desc">Visual · Images & diagrams</span>
-                        {runtimePlatform !== 'unknown' && screenshotCaptureHotkey}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="info-note">
-                    <h4 style={{marginBottom: '8px'}}>Mode Comparison:</h4>
-                    <p className="small" style={{marginBottom: '12px'}}>
-                      <strong>📝 Content Capture:</strong> Reads the entire Chrome tab, including embedded frames and images, even when the question is too long to fit in one screenshot. Exact text, fast and low cost.
-                    </p>
-                    <p className="small">
-                      <strong>📸 Screenshot:</strong> Captures only the visible area, including diagrams, charts, and formatting. Works with any source. Display source always uses screenshot mode.
-                    </p>
-                  </div>
                 </>
               )}
 
@@ -3134,6 +3137,7 @@ function App() {
                   draft={hotkeysDraft}
                   onDraftChange={setHotkeysDraft}
                   platform={runtimePlatform}
+                  defaults={defaultHotkeys}
                   status={hotkeysStatus}
                   onSave={saveHotkeys}
                   onReset={resetHotkeys}

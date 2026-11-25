@@ -849,7 +849,7 @@ The app supports a **real-time live transcription mode** that streams system aud
 │                   Real-time Transcription Flow                          │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  User clicks Record / Cmd+3  →  fetchDeepgramKey()                      │
+│  User clicks Start Listening / Cmd+3 →  fetchDeepgramKey()              │
 │                                  ├── POST /functions/v1/deepgram-key    │
 │                                  ├── Headers: Authorization (JWT),      │
 │                                  │   apikey (anon)                      │
@@ -1028,11 +1028,11 @@ supabase functions deploy deepgram-key
 | `live_transcript_error` | Sets error message, clears `isLiveTranscribing` |
 
 **`toggleAudioRecording` integration:**
-- When audio source is selected and user clicks Record / presses Cmd+3:
+- When audio source is selected and user clicks Start Listening / presses Cmd+3:
   - If not recording → calls `startLiveTranscription()` (streams to Deepgram)
   - If recording → calls `stopLiveTranscription()` (closes WebSocket, sends any remaining transcript to AI)
 - Debounced with a 1-second cooldown to prevent rapid toggling
-- During recording, silence auto-sends transcript to AI without stopping — the user only needs to click Record once and Stop once for the entire interview
+- During recording, silence auto-sends transcript to AI without stopping — the user only needs to click Start Listening once and Stop & Solve once for the entire interview
 
 #### `LiveTranscript` Component
 
@@ -1642,7 +1642,7 @@ During the solve flow, a 2-step progress stepper replaces separate status messag
 |-----------|--------|--------|
 | Text | 📝 Extract | 🤖 Asking AI |
 | Screenshot | 📸 Screenshot | 🤖 Asking AI |
-| Audio | 🎙️ Record | 🤖 Asking AI |
+| Audio | 🎧 Listen | 🤖 Asking AI |
 
 Implementation in `src/App.tsx`:
 - `solvePhase` state: `'idle' | 'extract' | 'screenshot' | 'capture' | 'audio' | 'asking' | 'error'`
@@ -1677,7 +1677,7 @@ When the AI returns Mermaid diagram syntax in the SOLUTION block (triggered by t
 
 The "Solve" button dynamically shows the current capture mode:
 
-- **Audio source selected**: `🎙️ Record` (or `⏹️ Stop (Xs)` while recording)
+- **Audio source selected**: `🎧 Start Listening` (or `⏹️ Stop & Solve (Xs)` while listening)
 - **Display source selected**: `📸 Solve` (always screenshot)
 - **Chrome tab selected**: `📝 Solve` (text mode) or `📸 Solve` (screenshot mode, based on `useScreenshot` setting)
 

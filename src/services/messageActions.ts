@@ -8,7 +8,9 @@ export type MessageActionKind =
   | 'open_chrome'
   | 'download_chrome'
   | 'sign_in'
-  | 'screen_permission';
+  | 'screen_permission'
+  | 'accessibility_permission'
+  | 'run_as_admin_settings';
 
 export const MESSAGE_ACTION_LABELS: Record<MessageActionKind, string> = {
   add_api_key: 'Add your API key',
@@ -19,6 +21,8 @@ export const MESSAGE_ACTION_LABELS: Record<MessageActionKind, string> = {
   download_chrome: 'Download Chrome',
   sign_in: 'Sign in again',
   screen_permission: 'Open Screen Recording settings',
+  accessibility_permission: 'Open Accessibility settings',
+  run_as_admin_settings: 'Open Run as Administrator setting',
 };
 
 interface Context {
@@ -39,6 +43,8 @@ const RULES: Array<{ test: RegExp; actions: (ctx: Context) => MessageActionKind[
     actions: ({ cdpReady }) => (cdpReady ? [] : ['open_chrome']),
   },
   { test: /screen recording/i, actions: ({ isMac }) => (isMac ? ['screen_permission'] : []) },
+  { test: /accessibility permission/i, actions: ({ isMac }) => (isMac ? ['accessibility_permission'] : []) },
+  { test: /run as administrator/i, actions: ({ isMac }) => (isMac ? [] : ['run_as_admin_settings']) },
 ];
 
 export function getMessageActions(message: string, ctx: Context): MessageActionKind[] {
