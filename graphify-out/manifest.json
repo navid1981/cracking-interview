@@ -126,9 +126,9 @@
     "semantic_hash": "8e734ea5be135a77623dec3091fe2439"
   },
   "src-tauri/src/main.rs": {
-    "mtime": 1795074610.3876407,
-    "seen": 1795074648.498118,
-    "ast_hash": "a1a5804d54275955294045718ba594ec",
+    "mtime": 1795579121.7429123,
+    "seen": 1795579747.365717,
+    "ast_hash": "79322c3f8e741bc82523d0f6437b850c",
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot.rs": {
@@ -150,9 +150,9 @@
     "semantic_hash": ""
   },
   "src-tauri/tauri.conf.json": {
-    "mtime": 1793989092.1889966,
-    "seen": 1793989483.7794602,
-    "ast_hash": "48717f246715f6e1419095dcb4f56466",
+    "mtime": 1795579117.7696774,
+    "seen": 1795579747.365847,
+    "ast_hash": "d995b15a2b9fe5e073b457b00bba18a5",
     "semantic_hash": ""
   },
   "src/App.tsx": {
@@ -738,9 +738,9 @@
     "semantic_hash": ""
   },
   "src/hooks/useKeyboardInputMode.ts": {
-    "mtime": 1793943764.444146,
-    "seen": 1793953209.077565,
-    "ast_hash": "720e1b83799dd746f88ce4d7f383e5f4",
+    "mtime": 1795579119.6326578,
+    "seen": 1795579747.366045,
+    "ast_hash": "58a2860a3a103a9b8402b331fabe1648",
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/guardian.rs": {
@@ -750,9 +750,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/macos.rs": {
-    "mtime": 1794433561.8039603,
-    "seen": 1794433629.144599,
-    "ast_hash": "cbfc1a58da4f7199b5f51f286f27ed3e",
+    "mtime": 1795579185.2262044,
+    "seen": 1795579747.3657339,
+    "ast_hash": "b97a71486988e5fd8c3bb997299dbd18",
     "semantic_hash": ""
   },
   "src-tauri/src/resilience/mod.rs": {

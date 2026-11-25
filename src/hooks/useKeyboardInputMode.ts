@@ -10,10 +10,11 @@ const isTextField = (el: EventTarget | null): el is HTMLElement => {
 };
 
 /**
- * On Windows stealth mode the window never activates (so clicks don't take focus from the exam
- * tab), which also blocks typing. While a text field is in use, ask the backend to let the window
- * take keyboard focus; restore non-activating when focus leaves text fields (including when the
- * user clicks back into another app). The backend ignores this on macOS and outside stealth mode.
+ * In stealth mode (Windows `WS_EX_NOACTIVATE` and macOS non-activating `NSPanel`), the window
+ * never activates so clicks don't steal focus from the exam/LockDown window, which also blocks
+ * typing. While a text field is in use, ask the backend to let the window take keyboard focus;
+ * restore non-activating/non-key when focus leaves text fields (including when the user clicks
+ * back into another app). Outside stealth mode the backend ignores this.
  */
 export function useKeyboardInputMode() {
   useEffect(() => {

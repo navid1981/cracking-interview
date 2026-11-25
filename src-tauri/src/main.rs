@@ -1641,7 +1641,19 @@ async fn set_keyboard_input_mode(app: tauri::AppHandle, enabled: bool) -> Result
             win.set_focus().map_err(|e| format!("Focus error: {}", e))?;
         }
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        if !STEALTH_ENABLED.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(win) = handle.get_webview_window("main") {
+                resilience::macos::set_panel_keyboard_focus(&win, enabled);
+            }
+        });
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let _ = (&app, enabled);
     Ok(())
 }
@@ -2107,6 +2119,7 @@ fn main() {
                 if let Some(win) = app.get_webview_window("main") {
                     #[cfg(target_os = "macos")]
                     {
+                        resilience::macos::apply_nonactivating_panel(&win);
                         apply_macos_screen_capture_protection(&win);
                     }
 

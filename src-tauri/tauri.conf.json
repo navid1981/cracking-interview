@@ -47,6 +47,7 @@
         "resizable": true,
         "fullscreen": false,
         "alwaysOnTop": true,
+        "acceptFirstMouse": true,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu --disable-gpu-compositing --disable-d3d11"
       }
     ],

@@ -2,6 +2,7 @@
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::Manager;
 
@@ -14,12 +15,350 @@ pub const IGNORES_CYCLE: u64 = 1 << 6;
 pub const FULL_SCREEN_PRIMARY: u64 = 1 << 7;
 pub const FULL_SCREEN_AUXILIARY: u64 = 1 << 8;
 
+/// `NSWindowStyleMaskNonactivatingPanel` (`1 << 7`): allows an `NSPanel` to receive mouse clicks
+/// (and, when `canBecomeKeyWindow` is `YES`, keyboard input) without activating `NSApplication`
+/// or stealing focus from foreground apps such as LockDown Browser.
+pub const NS_WINDOW_STYLE_MASK_NONACTIVATING_PANEL: u64 = 1 << 7;
+
 /// Minimum `NSWindow.level` (`NSFloatingWindowLevel = 3`; Tauri's `alwaysOnTop: true` uses `5`).
 /// Note: setting `level = 1001` or `NSWindowCollectionBehaviorStationary` breaks macOS
 /// `FullScreenAuxiliary` Space joining over full-screen apps (like maximized Chrome).
 pub const MIN_FLOATING_WINDOW_LEVEL: i64 = 3;
 
 pub static SIGTERM_INTERCEPTED: AtomicBool = AtomicBool::new(false);
+static NONACTIVATING_PANEL_ACTIVE: AtomicBool = AtomicBool::new(false);
+static PANEL_CLASS_PTR: OnceLock<usize> = OnceLock::new();
+static NSPANEL_PERFORM_KEY_EQUIV_IMP: OnceLock<usize> = OnceLock::new();
+
+extern "C" fn panel_can_become_main(_this: *mut c_void, _sel: *mut c_void) -> bool {
+    false
+}
+
+extern "C" fn panel_can_become_key(_this: *mut c_void, _sel: *mut c_void) -> bool {
+    super::KEYBOARD_INPUT_ACTIVE.load(Ordering::Relaxed)
+}
+
+extern "C" fn panel_perform_key_equivalent(
+    this: *mut c_void,
+    sel: *mut c_void,
+    event: *mut c_void,
+) -> bool {
+    extern "C" {
+        fn objc_getClass(name: *const std::ffi::c_char) -> *mut c_void;
+        fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
+        fn objc_msgSend();
+    }
+    type GetU64 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> u64;
+    type GetPtr = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+    type GetCStr = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *const std::ffi::c_char;
+    type SendAction =
+        unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void, *mut c_void) -> bool;
+    type SuperPerformKeyEquiv =
+        unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> bool;
+
+    unsafe {
+        if super::KEYBOARD_INPUT_ACTIVE.load(Ordering::Relaxed) && !event.is_null() {
+            const SHIFT: u64 = 1 << 17;
+            const CONTROL: u64 = 1 << 18;
+            const OPTION: u64 = 1 << 19;
+            const COMMAND: u64 = 1 << 20;
+
+            let get_u64: GetU64 = std::mem::transmute(objc_msgSend as *const ());
+            let get_ptr: GetPtr = std::mem::transmute(objc_msgSend as *const ());
+            let get_cstr: GetCStr = std::mem::transmute(objc_msgSend as *const ());
+
+            let mods = get_u64(
+                event,
+                sel_registerName(b"modifierFlags\0".as_ptr() as *const _),
+            );
+            if (mods & COMMAND) != 0 && (mods & (CONTROL | OPTION)) == 0 {
+                let chars = get_ptr(
+                    event,
+                    sel_registerName(b"charactersIgnoringModifiers\0".as_ptr() as *const _),
+                );
+                if !chars.is_null() {
+                    let utf8 = get_cstr(
+                        chars,
+                        sel_registerName(b"UTF8String\0".as_ptr() as *const _),
+                    );
+                    if !utf8.is_null() {
+                        let first = (*utf8 as u8).to_ascii_lowercase();
+                        let second = *utf8.add(1);
+                        if second == 0 {
+                            let shift = (mods & SHIFT) != 0;
+                            let action_name: Option<&[u8]> = match (first, shift) {
+                                (b'v', false) => Some(b"paste:\0"),
+                                (b'c', false) => Some(b"copy:\0"),
+                                (b'x', false) => Some(b"cut:\0"),
+                                (b'a', false) => Some(b"selectAll:\0"),
+                                (b'z', false) => Some(b"undo:\0"),
+                                (b'z', true) => Some(b"redo:\0"),
+                                _ => None,
+                            };
+                            if let Some(name) = action_name {
+                                let ns_app_cls =
+                                    objc_getClass(b"NSApplication\0".as_ptr() as *const _);
+                                let ns_app = get_ptr(
+                                    ns_app_cls,
+                                    sel_registerName(b"sharedApplication\0".as_ptr() as *const _),
+                                );
+                                let responder = get_ptr(
+                                    this,
+                                    sel_registerName(b"firstResponder\0".as_ptr() as *const _),
+                                );
+                                if !ns_app.is_null() && !responder.is_null() {
+                                    let send_action: SendAction =
+                                        std::mem::transmute(objc_msgSend as *const ());
+                                    let handled = send_action(
+                                        ns_app,
+                                        sel_registerName(b"sendAction:to:from:\0".as_ptr() as *const _),
+                                        sel_registerName(name.as_ptr() as *const _),
+                                        responder,
+                                        this,
+                                    );
+                                    if handled {
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(&imp_addr) = NSPANEL_PERFORM_KEY_EQUIV_IMP.get() {
+            if imp_addr != 0 {
+                let super_fn: SuperPerformKeyEquiv = std::mem::transmute(imp_addr);
+                return super_fn(this, sel, event);
+            }
+        }
+        false
+    }
+}
+
+/// Registers (once) a dynamic `NSPanel` subclass (`CrackingInterviewPanel`) matching `TaoWindow`'s
+/// `focusable` ivar layout so we can safely convert Tauri's `NSWindow` into a non-activating panel.
+fn get_or_register_nonactivating_panel_class() -> Option<*mut c_void> {
+    let ptr = *PANEL_CLASS_PTR.get_or_init(|| unsafe {
+        extern "C" {
+            fn objc_getClass(name: *const std::ffi::c_char) -> *mut c_void;
+            fn objc_allocateClassPair(
+                superclass: *mut c_void,
+                name: *const std::ffi::c_char,
+                extra_bytes: usize,
+            ) -> *mut c_void;
+            fn objc_registerClassPair(cls: *mut c_void);
+            fn class_getInstanceSize(cls: *mut c_void) -> usize;
+            fn class_addIvar(
+                cls: *mut c_void,
+                name: *const std::ffi::c_char,
+                size: usize,
+                alignment: u8,
+                types: *const std::ffi::c_char,
+            ) -> bool;
+            fn class_addMethod(
+                cls: *mut c_void,
+                name: *mut c_void,
+                imp: *const c_void,
+                types: *const std::ffi::c_char,
+            ) -> bool;
+            fn class_getMethodImplementation(cls: *mut c_void, name: *mut c_void) -> *const c_void;
+            fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
+        }
+
+        let existing = objc_getClass(b"CrackingInterviewPanel\0".as_ptr() as *const _);
+        if !existing.is_null() {
+            return existing as usize;
+        }
+
+        let ns_panel = objc_getClass(b"NSPanel\0".as_ptr() as *const _);
+        let ns_window = objc_getClass(b"NSWindow\0".as_ptr() as *const _);
+        if ns_panel.is_null() || ns_window.is_null() {
+            return 0;
+        }
+        if class_getInstanceSize(ns_panel) != class_getInstanceSize(ns_window) {
+            super::log_event(&format!(
+                "Skipping non-activating NSPanel conversion: NSPanel size {} != NSWindow size {}",
+                class_getInstanceSize(ns_panel),
+                class_getInstanceSize(ns_window)
+            ));
+            return 0;
+        }
+
+        let perform_key_equiv_sel =
+            sel_registerName(b"performKeyEquivalent:\0".as_ptr() as *const _);
+        let super_imp = class_getMethodImplementation(ns_panel, perform_key_equiv_sel);
+        let _ = NSPANEL_PERFORM_KEY_EQUIV_IMP.set(super_imp as usize);
+
+        let cls = objc_allocateClassPair(
+            ns_panel,
+            b"CrackingInterviewPanel\0".as_ptr() as *const _,
+            0,
+        );
+        if cls.is_null() {
+            return 0;
+        }
+
+        // Preserve TaoWindow's `focusable` ivar so any tao call reading it remains valid.
+        let _ = class_addIvar(
+            cls,
+            b"focusable\0".as_ptr() as *const _,
+            1,
+            0,
+            b"B\0".as_ptr() as *const _,
+        );
+        let _ = class_addMethod(
+            cls,
+            sel_registerName(b"canBecomeMainWindow\0".as_ptr() as *const _),
+            panel_can_become_main as *const c_void,
+            b"B@:\0".as_ptr() as *const _,
+        );
+        let _ = class_addMethod(
+            cls,
+            sel_registerName(b"canBecomeKeyWindow\0".as_ptr() as *const _),
+            panel_can_become_key as *const c_void,
+            b"B@:\0".as_ptr() as *const _,
+        );
+        let _ = class_addMethod(
+            cls,
+            perform_key_equiv_sel,
+            panel_perform_key_equivalent as *const c_void,
+            b"B@:@\0".as_ptr() as *const _,
+        );
+
+        objc_registerClassPair(cls);
+        cls as usize
+    });
+
+    if ptr == 0 {
+        None
+    } else {
+        Some(ptr as *mut c_void)
+    }
+}
+
+/// Converts the main `NSWindow` into a non-activating `NSPanel` (`NSWindowStyleMaskNonactivatingPanel`)
+/// so clicks inside CrackingInterview work on the first click without activating `NSApplication` or
+/// stealing focus from foreground apps (such as LockDown Browser). Must be called on the main thread.
+pub fn apply_nonactivating_panel(win: &tauri::WebviewWindow) {
+    extern "C" {
+        fn object_getClass(obj: *mut c_void) -> *mut c_void;
+        fn object_setClass(obj: *mut c_void, cls: *mut c_void) -> *mut c_void;
+        fn class_getInstanceSize(cls: *mut c_void) -> usize;
+        fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
+        fn objc_msgSend();
+    }
+    type GetU64 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> u64;
+    type SetU64 = unsafe extern "C" fn(*mut c_void, *mut c_void, u64);
+    type GetI64 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> i64;
+    type SetI64 = unsafe extern "C" fn(*mut c_void, *mut c_void, i64);
+    type SetBool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
+
+    let Some(panel_cls) = get_or_register_nonactivating_panel_class() else {
+        println!("⚠️ [stealth-macOS] Could not register CrackingInterviewPanel class");
+        return;
+    };
+
+    unsafe {
+        let ns_window = match win.ns_window() {
+            Ok(ptr) if !ptr.is_null() => ptr as *mut c_void,
+            _ => {
+                println!("⚠️ [stealth-macOS] Could not get NSWindow for non-activating panel");
+                return;
+            }
+        };
+
+        let orig_cls = object_getClass(ns_window);
+        if orig_cls.is_null() {
+            return;
+        }
+        let panel_size = class_getInstanceSize(panel_cls);
+        let orig_size = class_getInstanceSize(orig_cls);
+        if panel_size > orig_size {
+            super::log_event(&format!(
+                "Skipping non-activating NSPanel conversion: panel size {} > window size {}",
+                panel_size, orig_size
+            ));
+            return;
+        }
+
+        let get_u64: GetU64 = std::mem::transmute(objc_msgSend as *const ());
+        let set_u64: SetU64 = std::mem::transmute(objc_msgSend as *const ());
+        let get_i64: GetI64 = std::mem::transmute(objc_msgSend as *const ());
+        let set_i64: SetI64 = std::mem::transmute(objc_msgSend as *const ());
+        let set_bool: SetBool = std::mem::transmute(objc_msgSend as *const ());
+
+        let style_sel = sel_registerName(b"styleMask\0".as_ptr() as *const _);
+        let set_style_sel = sel_registerName(b"setStyleMask:\0".as_ptr() as *const _);
+        let level_sel = sel_registerName(b"level\0".as_ptr() as *const _);
+        let set_level_sel = sel_registerName(b"setLevel:\0".as_ptr() as *const _);
+        let set_hides_sel = sel_registerName(b"setHidesOnDeactivate:\0".as_ptr() as *const _);
+        let set_modal_sel = sel_registerName(b"setWorksWhenModal:\0".as_ptr() as *const _);
+
+        let orig_style = get_u64(ns_window, style_sel);
+        let orig_level = get_i64(ns_window, level_sel);
+
+        if orig_cls != panel_cls {
+            object_setClass(ns_window, panel_cls);
+        }
+
+        let new_style = orig_style | NS_WINDOW_STYLE_MASK_NONACTIVATING_PANEL;
+        set_u64(ns_window, set_style_sel, new_style);
+        set_bool(ns_window, set_hides_sel, false);
+        set_bool(ns_window, set_modal_sel, true);
+
+        // Preserve floating window level & fullscreen Space collectionBehavior in case setStyleMask reset them.
+        if get_i64(ns_window, level_sel) < orig_level {
+            set_i64(ns_window, set_level_sel, orig_level);
+        }
+        crate::apply_macos_fullscreen_overlay(win);
+
+        NONACTIVATING_PANEL_ACTIVE.store(true, Ordering::SeqCst);
+        println!(
+            "🕵️ [stealth-macOS] ✅ Converted NSWindow to non-activating NSPanel (styleMask {:#x} → {:#x})",
+            orig_style, new_style
+        );
+        super::log_event(&format!(
+            "Converted macOS NSWindow to non-activating NSPanel (styleMask={:#x}, level={})",
+            new_style, orig_level
+        ));
+    }
+}
+
+/// Grants or releases key-window status on the non-activating `NSPanel` without activating `NSApp`.
+/// Must be called on the main thread after `KEYBOARD_INPUT_ACTIVE` has been updated.
+pub fn set_panel_keyboard_focus(win: &tauri::WebviewWindow, enabled: bool) {
+    if !NONACTIVATING_PANEL_ACTIVE.load(Ordering::Relaxed) {
+        return;
+    }
+    extern "C" {
+        fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
+        fn objc_msgSend();
+    }
+    type SendNoArg = unsafe extern "C" fn(*mut c_void, *mut c_void);
+
+    unsafe {
+        let Ok(ptr) = win.ns_window() else {
+            return;
+        };
+        if ptr.is_null() {
+            return;
+        }
+        let send: SendNoArg = std::mem::transmute(objc_msgSend as *const ());
+        if enabled {
+            send(
+                ptr as *mut c_void,
+                sel_registerName(b"makeKeyWindow\0".as_ptr() as *const _),
+            );
+        } else {
+            send(
+                ptr as *mut c_void,
+                sel_registerName(b"resignKeyWindow\0".as_ptr() as *const _),
+            );
+        }
+    }
+}
 
 pub fn compute_kiosk_collection_behavior(current: u64) -> u64 {
     (current | CAN_JOIN_ALL_SPACES | FULL_SCREEN_AUXILIARY)
@@ -205,6 +544,22 @@ pub fn start_window_self_healer(app: tauri::AppHandle) {
                                 "Self-healed NSWindow sharingType -> 0 (NSWindowSharingNone)",
                             );
                         }
+
+                        if NONACTIVATING_PANEL_ACTIVE.load(Ordering::Relaxed) {
+                            let style_sel =
+                                sel_registerName(b"styleMask\0".as_ptr() as *const _);
+                            let hides_sel =
+                                sel_registerName(b"hidesOnDeactivate\0".as_ptr() as *const _);
+                            let style = get_u64(ns_window, style_sel);
+                            let hides = get_bool(ns_window, hides_sel);
+                            if (style & NS_WINDOW_STYLE_MASK_NONACTIVATING_PANEL) == 0 || hides {
+                                apply_nonactivating_panel(&win);
+                                super::log_event(&format!(
+                                    "Self-healed non-activating NSPanel (style={:#x}, hides={})",
+                                    style, hides
+                                ));
+                            }
+                        }
                     }
                 }
             });
@@ -336,5 +691,29 @@ mod tests {
         assert!(!plist_path.exists());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_nonactivating_panel_class_registration() {
+        extern "C" {
+            fn objc_getClass(name: *const std::ffi::c_char) -> *mut c_void;
+            fn class_getInstanceSize(cls: *mut c_void) -> usize;
+        }
+        let cls = get_or_register_nonactivating_panel_class()
+            .expect("CrackingInterviewPanel class should register on macOS");
+        assert!(!cls.is_null());
+        unsafe {
+            let ns_window = objc_getClass(b"NSWindow\0".as_ptr() as *const _);
+            let ns_panel = objc_getClass(b"NSPanel\0".as_ptr() as *const _);
+            assert_eq!(class_getInstanceSize(ns_panel), class_getInstanceSize(ns_window));
+            assert!(class_getInstanceSize(cls) >= class_getInstanceSize(ns_panel));
+        }
+        // canBecomeKeyWindow follows KEYBOARD_INPUT_ACTIVE; canBecomeMainWindow is always false.
+        assert!(!panel_can_become_main(std::ptr::null_mut(), std::ptr::null_mut()));
+        super::super::KEYBOARD_INPUT_ACTIVE.store(false, Ordering::SeqCst);
+        assert!(!panel_can_become_key(std::ptr::null_mut(), std::ptr::null_mut()));
+        super::super::KEYBOARD_INPUT_ACTIVE.store(true, Ordering::SeqCst);
+        assert!(panel_can_become_key(std::ptr::null_mut(), std::ptr::null_mut()));
+        super::super::KEYBOARD_INPUT_ACTIVE.store(false, Ordering::SeqCst);
     }
 }
