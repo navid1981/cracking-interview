@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { Fragment, useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import AIResponseDisplay from './components/AIResponseDisplay';
@@ -16,7 +16,7 @@ import { startPromptStateSync } from './services/promptStateSync';
 import AppSettingsTab from './components/settings/AppSettingsTab';
 import HotkeysSettingsTab from './components/settings/HotkeysSettingsTab';
 import { getMessageActions, MESSAGE_ACTION_LABELS, MessageActionKind } from './services/messageActions';
-import { HotkeysConfig, formatHotkey } from './services/hotkeys';
+import { HotkeysConfig, formatHotkey, hotkeyKeys } from './services/hotkeys';
 import { TabExtraction, MAX_QUESTION_IMAGES, needsTabScreenshot, isWhiteboard } from './services/tabExtraction';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts, StoredDocPlaceholder } from './services/prompts';
 import { 
@@ -2270,6 +2270,22 @@ function App() {
   const solveKind = !selectedTab ? null : isAudio(selectedTab) ? 'audio' : (isDisplay(selectedTab) || useScreenshot) ? 'screenshot' : 'text';
   const solveHotkeyRaw = !activeHotkeys || !solveKind ? '' : solveKind === 'audio' ? activeHotkeys.audio_toggle : activeHotkeys[solveKind];
   const solveHotkey = formatHotkey(solveHotkeyRaw, runtimePlatform === 'macos');
+  // OS-specific default (matches the Rust defaults) until the saved hotkeys load.
+  const isMacPlatform = runtimePlatform === 'macos';
+  const hotkeyMod = isMacPlatform ? 'Cmd' : runtimePlatform === 'windows' ? 'Alt' : 'Ctrl';
+  const renderHotkeyKeys = (hotkey: string) => (
+    <span className="mode-hotkey">
+      <span className="mode-hotkey-label">Hotkey:</span>
+      {hotkeyKeys(hotkey, isMacPlatform).map((k, i) => (
+        <Fragment key={i}>
+          {i > 0 && <span className="mode-hotkey-plus">+</span>}
+          <kbd>{k}</kbd>
+        </Fragment>
+      ))}
+    </span>
+  );
+  const contentCaptureHotkey = renderHotkeyKeys(activeHotkeys?.text || `${hotkeyMod}+1`);
+  const screenshotCaptureHotkey = renderHotkeyKeys(activeHotkeys?.screenshot || `${hotkeyMod}+2`);
   const withHotkey = (label: string, hotkey?: string) =>
     hotkey ? `${label} · solve now with ${formatHotkey(hotkey, runtimePlatform === 'macos')}` : label;
   const solveActionLabel = solveKind === 'audio' ? 'Start / stop recording' : solveKind === 'screenshot' ? 'Solve from screenshot' : 'Solve from text';
@@ -3002,10 +3018,10 @@ function App() {
                         )}
                         {freeCallLimit !== undefined && (
                           <li>{freeCallsExhausted
-                            ? (aiConfig.gemini_api_key ? 'Unlimited with your API key' : `${freeCallLimit} lifetime AI requests (used)`)
+                            ? (aiConfig.gemini_api_key ? 'Unlimited with your API key' : `${freeCallLimit} lifetime AI requests + Your own Gemini API key`)
                             : `${freeCallLimit - freeCallsUsed} of ${freeCallLimit} free requests remaining`}</li>
                         )}
-                        <li>Chrome tabs only (no display screen capture)</li>
+                        <li>No live audio capture for verbal interview</li>
                         {modelConfig && !allowsAllDomains(modelConfig) && (
                           <li>Only works on: {modelConfig.free_allowed_domains.join(', ')}</li>
                         )}
@@ -3044,7 +3060,8 @@ function App() {
                       >
                         <span className="mode-icon">📝</span>
                         <span className="mode-label">Content Capture</span>
-                        <span className="mode-desc">Chrome tabs · Full page, frames & images</span>
+                        <span className="mode-desc">Chrome full page, frames & images</span>
+                        {runtimePlatform !== 'unknown' && contentCaptureHotkey}
                       </button>
                       <button
                         onClick={() => setUseScreenshot(true)}
@@ -3053,6 +3070,7 @@ function App() {
                         <span className="mode-icon">📸</span>
                         <span className="mode-label">Screenshot Capture</span>
                         <span className="mode-desc">Visual · Images & diagrams</span>
+                        {runtimePlatform !== 'unknown' && screenshotCaptureHotkey}
                       </button>
                     </div>
                   </div>
