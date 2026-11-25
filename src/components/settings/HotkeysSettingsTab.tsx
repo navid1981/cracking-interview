@@ -16,10 +16,10 @@ const SECTIONS: Array<{ title: string; fields: Field[] }> = [
   {
     title: '🎯 Solve',
     fields: [
-      { key: 'text', label: 'Chrome content → Solve', keys: '1' },
+      { key: 'text', label: 'Chrome Content → Solve', keys: '1' },
       { key: 'screenshot', label: 'Screenshot → Solve', keys: '2' },
       { key: 'audio_toggle', label: 'Audio Start/Stop → Solve', keys: '3' },
-      { key: 'capture_selection', label: 'Capture Lockdown Browser text → Solve', keys: '4' },
+      { key: 'capture_selection', label: 'Capture Selected Text → Solve', keys: '4' },
     ],
   },
   {
