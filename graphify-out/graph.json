@@ -62725,7 +62725,7 @@
       "file_type": "code",
       "norm_label": "request_screen_recording_permission()",
       "source_file": "src-tauri/src/screenshot.rs",
-      "source_location": "L161"
+      "source_location": "L158"
     },
     {
       "id": "aiconfig",
@@ -74789,14 +74789,14 @@
     },
     {
       "source": "src_app_app",
-      "target": "src_components_tabdropdown_tabdropdown",
+      "target": "src_components_modehelp_modehelp",
       "relation": "calls",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2408",
+      "source_location": "L2356",
       "weight": 1.0
     },
     {
@@ -74813,14 +74813,14 @@
     },
     {
       "source": "src_app_app",
-      "target": "src_components_modehelp_modehelp",
+      "target": "src_components_tabdropdown_tabdropdown",
       "relation": "calls",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2505",
+      "source_location": "L2460",
       "weight": 1.0
     },
     {
@@ -74832,7 +74832,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2538",
+      "source_location": "L2531",
       "weight": 1.0
     },
     {
@@ -74844,7 +74844,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2552",
+      "source_location": "L2551",
       "weight": 1.0
     },
     {
@@ -74856,7 +74856,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2580",
+      "source_location": "L2579",
       "weight": 1.0
     },
     {
@@ -74868,7 +74868,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2669",
+      "source_location": "L2668",
       "weight": 1.0
     },
     {
@@ -74892,7 +74892,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L2747",
+      "source_location": "L2746",
       "weight": 1.0
     },
     {
@@ -74916,7 +74916,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L3096",
+      "source_location": "L3095",
       "weight": 1.0
     },
     {
@@ -74928,7 +74928,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L3122",
+      "source_location": "L3121",
       "weight": 1.0
     },
     {
@@ -74940,7 +74940,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L3136",
+      "source_location": "L3135",
       "weight": 1.0
     },
     {
@@ -74952,7 +74952,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L3148",
+      "source_location": "L3147",
       "weight": 1.0
     },
     {
@@ -74964,7 +74964,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/App.tsx",
-      "source_location": "L3176",
+      "source_location": "L3175",
       "weight": 1.0
     },
     {
@@ -223068,7 +223068,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src-tauri/src/screenshot.rs",
-      "source_location": "L214",
+      "source_location": "L211",
       "weight": 1.0
     },
     {
@@ -284081,5 +284081,5 @@
       "source_file": "docs/AI_PROJECT_GUIDE.md"
     }
   ],
-  "built_at_commit": "7e492b4bba71161abf350c4d0cbb0ff031bd1766"
+  "built_at_commit": "49c244c9c1c167763e8213a2464c2e2e794f8d7a"
 }

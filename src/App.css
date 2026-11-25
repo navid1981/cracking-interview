@@ -182,6 +182,57 @@ span.status-indicator.chrome-user-mode {
   padding: 2px 8px;
 }
 
+/* Icon-only Chrome status in the header */
+.chrome-status {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+}
+
+button.chrome-status {
+  cursor: pointer;
+}
+
+button.chrome-status:hover:not(:disabled) {
+  background: var(--background-light);
+}
+
+.chrome-status.is-off .chrome-logo {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+
+.chrome-status-dot {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--surface);
+  background: #9ca3af;
+}
+
+.chrome-status.is-ready .chrome-status-dot {
+  background: #22c55e;
+}
+
+.chrome-status.is-opening .chrome-status-dot {
+  background: #f59e0b;
+  animation: chrome-status-pulse 1s ease-in-out infinite;
+}
+
+@keyframes chrome-status-pulse {
+  50% { opacity: 0.3; }
+}
+
 .settings-btn {
   background: transparent;
   border: none;
@@ -214,7 +265,8 @@ span.status-indicator.chrome-user-mode {
   margin-bottom: 20px;
   box-shadow: 0 1px 3px var(--shadow);
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: stretch;
   gap: 12px;
 }
 
@@ -287,12 +339,13 @@ span.status-indicator.chrome-user-mode {
 
 .solve-button {
   flex-shrink: 0;
+  white-space: nowrap;
   background: linear-gradient(135deg, var(--primary-blue), var(--accent-green));
   color: white;
   border: none;
-  padding: 12px 24px;
+  padding: 6px 12px;
   border-radius: 8px;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(51, 128, 230, 0.2);
@@ -308,18 +361,31 @@ span.status-indicator.chrome-user-mode {
   cursor: not-allowed;
 }
 
+/* All labels share one grid cell, so the button keeps the widest label's size */
+.solve-button-labels {
+  display: inline-grid;
+}
+
+.solve-button-label {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.solve-button-label.is-hidden {
+  visibility: hidden;
+}
+
 /* Hotkey hint inside the Solve button */
 .solve-button-hotkey {
-  margin-left: 8px;
+  margin-left: 6px;
   vertical-align: 1px;
 }
 
-/* Solve button with the Text/Screenshot input-mode segmented control inline to its left */
-.solve-group {
-  flex-shrink: 0;
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
+/* Content / Screenshot toggle, shown in the header next to the app icon */
+.header-left .mode-segment {
+  height: 32px;
 }
 
 .mode-segment {
@@ -384,10 +450,6 @@ span.status-indicator.chrome-user-mode {
 
 .mode-segment-btn:disabled {
   cursor: not-allowed;
-}
-
-.mode-segment.is-locked {
-  opacity: 0.65;
 }
 
 

@@ -11,6 +11,7 @@ CrackingInterview is a **Tauri (Rust) + React** desktop app that helps a softwar
   - **Text** (run `src-tauri/src/chrome/extract.js` in the tab: a structure-aware page reader that returns the question text, code-editor contents, and question images; images/charts are sent to the AI along with the text), or
   - **Screenshot** (CDP tab screenshot or OS display capture)
   - **Audio** (system audio recording sent directly to AI models that support audio input)
+  - **Selected text** (`Cmd+4` / `Alt+4`: reads the text highlighted in the frontmost app via macOS Accessibility / Windows UI Automation, clipboard fallback; no Input Source needed — see "Selected-text capture")
 - Sending that content into an **LLM** (via OpenRouter proxy or user's own API key)
 - Showing the **AI response** inside the app UI
 
@@ -58,7 +59,7 @@ The primary source code is:
   - `audio.rs`: macOS Swift audio helper lookup/compile + warm/cooldown (used by live transcription)
   - `transcription.rs`: Real-time audio capture → Deepgram WebSocket streaming → live transcript events
   - `documents.rs`: Document text extraction (PDF, DOCX, DOC, TXT) and placeholder persistence
-  - `screenshot.rs`: OS display capture (screenshots crate), thumbnails, asynchronous Lanczos downscaling & JPEG compression
+  - `screenshot.rs`: OS display capture (screenshots crate), thumbnails (`DynamicImage::thumbnail`, fast), Lanczos3 downscaling for full screenshots & JPEG compression
 - **Resources**: `src-tauri/resources/`
   - `audio_recorder.swift`: Swift helper for macOS audio recording + live PCM streaming (compiled at runtime)
 - **Supabase Edge Functions**: `supabase/functions/`
@@ -74,7 +75,7 @@ The primary source code is:
   - `get-models/index.ts`: Returns LLM model configuration (pro models, free model, BYO model, default) from shared constants; `?v=2` gets the current shape, no version gets the frozen legacy shape for older releases
   - `log-audio-usage/index.ts`: Logs audio recording duration for usage tracking
   - `_shared/models.ts`: Shared LLM model constants (IDs, names, providers, OpenRouter mapping) used by `ai-proxy` and `get-models`, plus the Deepgram `TRANSCRIPTION_MODEL` (`nova-3`) used by `deepgram-key`
-  - `_shared/limits.ts`: Subscription limits — `FREE_LIFETIME_CALL_LIMIT` (3), `PRO_MONTHLY_REQUEST_LIMIT` (150), `PRO_MONTHLY_AUDIO_SECONDS` (36000 = 10h), `PRO_AUDIO_SESSION_MAX_SECONDS` (5400 = 90 min), `FREE_TIER_ALLOWED_DOMAINS` (free/BYO site allow-list; `['all']` removes the site restriction, an empty list is treated as "config not loaded" and blocks), `MAX_OUTPUT_TOKENS` (16384). Used by `ai-proxy`, `deepgram-key`, `log-audio-usage`, `get-models`, and `notification`
+  - `_shared/limits.ts`: Subscription limits — `FREE_LIFETIME_CALL_LIMIT` (4), `PRO_MONTHLY_REQUEST_LIMIT` (150), `PRO_MONTHLY_AUDIO_SECONDS` (36000 = 10h), `PRO_AUDIO_SESSION_MAX_SECONDS` (5400 = 90 min), `FREE_TIER_ALLOWED_DOMAINS` (free/BYO site allow-list; `['all']` removes the site restriction, an empty list is treated as "config not loaded" and blocks), `MAX_OUTPUT_TOKENS` (16384). Used by `ai-proxy`, `deepgram-key`, `log-audio-usage`, `get-models`, and `notification`
 - **Supabase migrations**: `supabase/migrations/`
   - `002_cleanup_old_api_usage.sql`: pg_cron job deleting `api_usage` rows older than 3 months
   - `003_audio_usage.sql`: `audio_usage` table, `sum_audio_seconds` RPC, and its pg_cron cleanup job
@@ -273,10 +274,21 @@ DevToolsActivePort file found?
 
 The frontend's `InputSource` is a union of:
 
-- a **Chrome tab** (from CDP), or
-- an OS **display** (from `screenshots::Screen::all()`)
+- a **Chrome tab** (from CDP),
+- an OS **display** (from `screenshots::Screen::all()`), or
+- the **Audio (System)** source (`{ id: 'audio', source_type: 'audio' }`, always present)
 
 This is why the UI shows "Input Source" rather than only tabs.
+
+**Dropdown (`src/components/TabDropdown.tsx`):**
+- Sections in fixed order **Displays → Audio → Chrome tabs**, each with a sticky header (icon, uppercase label, count when >1). The Chrome header uses an inline SVG Chrome logo (`ChromeIcon`); Audio uses 🎧. Sorting happens only in the dropdown — `allSources` in `App.tsx` keeps its own order (Chrome tabs, displays, audio).
+- When Chrome is not connected, the Chrome section shows a "Chrome not connected · Open Chrome" row (`chromeConnected` / `onOpenChrome` props) instead of disappearing.
+- Free users see a `PRO` badge (`.source-pro-badge`) on the Audio item (`isPro` prop).
+- Thumbnails are 64×40; Audio gets a same-size 🎧 tile (`.item-audio-icon`). All colours use theme variables, so it follows dark mode.
+
+**Default selection:** `pickDefaultSource()` in `App.tsx` picks the display with `is_main`, then any display, then the first source. Used at startup, when the selected source disappears, when Chrome disconnects, and when Solve runs with nothing selected. (Before this helper, Display 1 only won by startup timing: the first `fetchTabs()` runs before CDP is detected.)
+
+**Chrome disconnect:** the `cdpReady === false` effect removes only Chrome tabs (`!isChromeTab`) — Displays and Audio stay. The selection only changes if a Chrome tab was selected.
 
 ### 3) Extraction modes
 
@@ -287,6 +299,7 @@ Frontend setting: `useScreenshot` (stored in `localStorage`)
   - Chrome tab: `capture_tab_screenshot` (CDP `Page.captureScreenshot` as JPEG bytes; decoded, compressed, and written to a temp file via `spawn_blocking`)
   - Display: `capture_display_screenshot` (OS display capture via `screenshots` crate → Lanczos3 downscaled and encoded as JPEG bytes via `spawn_blocking`, written to a temp file)
   - All thumbnail generation (`get_tab_thumbnail`, `get_display_thumbnail`) is similarly offloaded to background thread pools to ensure sub-millisecond hotkey latency on high-DPI (4K/5K Retina) screens.
+  - Display thumbnails use `DynamicImage::thumbnail(160, 120)`, not a Lanczos3 `resize`. Measured on a 4K frame in a debug build: Lanczos3 3.6s vs `thumbnail()` 0.5s. The frontend drops a display thumbnail after **5s**, and two `fetchTabs()` run at startup, so Lanczos3 made display thumbnails silently disappear on 4K screens.
 - **Audio mode** (system audio, Pro only): live transcription via Deepgram — see flow D below
   - macOS: ScreenCaptureKit via compiled Swift helper (warm mode pre-initializes it)
   - Windows: WASAPI loopback capture
@@ -519,6 +532,7 @@ App Settings & Stealth:
 Hotkeys:
 
 - `get_hotkeys() -> HotkeysConfig`
+- `get_default_hotkeys() -> HotkeysConfig` — this platform's defaults (`default_hotkeys()`); the UI uses it for every fallback/placeholder instead of hardcoding its own copy
 - `set_hotkeys(...) -> HotkeysConfig`
 - `reset_hotkeys_to_default() -> HotkeysConfig`
 
@@ -538,7 +552,7 @@ The backend registers global hotkeys on startup (customizable in Settings → Ho
      - macOS: Uses `CGEventTapCreate` at `kCGHeadInsertEventTap` (`kCGSessionEventTap`). When a shortcut matches, the tap callback dispatches the action and returns `NULL` (`std::ptr::null_mut()`), deleting the event before Chrome's event queue receives it. Chrome DOM never fires `keydown` and never switches tabs.
      - Windows: Uses `SetWindowsHookExW(WH_KEYBOARD_LL, ...)`. The hook callback returns `LRESULT(1)` to halt message dispatch. Modifier keyups are never swallowed to prevent desynchronizing the OS keyboard buffer (which causes stuck keys like Alt+Enter maximizing windows). Instead, when an Alt/Win combination is swallowed, a neutral keyup (mask key `VK_NONAME`/`VK_CONTROL`) is synthesized via `SendInput` so Windows clears its menu candidate state without activating the active window's menu bar or firing `window.blur`.
    - CoreGraphics modifier bits are isolated (`CG_FLAG_COMMAND`, `CG_FLAG_SHIFT`, `CG_FLAG_CONTROL`, `CG_FLAG_ALT`), filtering out Caps Lock (`AlphaShift`) and arrow-key NumPad bits.
-   - When Stealth Mode is disabled, hotkeys pass through normally.
+   - When Stealth Mode is disabled, hotkeys pass through normally — **except** actions where `HotkeyAction::always_swallow()` is true (currently only `CaptureSelection`). Letting `Cmd/Alt+4` through made Chrome/the foreground app switch to tab 4 before the selection was read, so it is always swallowed (both the macOS event tap and the Windows hook check `STEALTH_ENABLED || action.always_swallow()`).
    - **Threading rule:** hook callbacks run on a background/OS hook thread. Matched actions are always dispatched with `app.run_on_main_thread(|| dispatch_action(...))` (both macOS and Windows). Never call window APIs (`NSWindow`, `show`/`hide`, positioning) directly from the hook callback — on macOS this triggers AppKit main-thread assertion crashes.
 
 3. **Lifecycle Cleanup:**
@@ -548,7 +562,8 @@ The backend registers global hotkeys on startup (customizable in Settings → Ho
 |--------|---------------|-----------------|---------------|
 | Chrome content → Solve | `Cmd+1` | `Alt+1` | `Ctrl+1` |
 | Screenshot → Solve | `Cmd+2` | `Alt+2` | `Ctrl+2` |
-| Audio Start/Stop → Solve | `Cmd+3` | `Alt+3` | `Ctrl+3` |
+| Start Listening / Stop & Solve | `Cmd+3` | `Alt+3` | `Ctrl+3` |
+| Capture Selected Text → Solve | `Cmd+4` | `Alt+4` | `Ctrl+4` |
 | Scroll Up | `Cmd+Up` | `Ctrl+Up` | `Ctrl+Up` |
 | Scroll Down | `Cmd+Down` | `Ctrl+Down` | `Ctrl+Down` |
 | Move Up | `Cmd+Shift+Up` | `Alt+Shift+Up` | `Ctrl+Shift+Up` |
@@ -563,6 +578,7 @@ When pressed, Rust emits events that the frontend listens for:
 - `hotkey-solve-text`
 - `hotkey-solve-screenshot`
 - `hotkey-audio-toggle`
+- `hotkey-solve-selection` — payload `{ text: string, reason: "no_accessibility" | "needs_admin" | "no_selection" | null }` (see "Selected-text capture")
 - `hotkey-scroll-up` / `hotkey-scroll-down`
 - `hotkey-move-up` / `hotkey-move-down` / `hotkey-move-left` / `hotkey-move-right`
 
@@ -694,9 +710,11 @@ The app includes a full authentication and subscription system using Supabase an
 
 | Tier | Cost | AI Quota | Input Source | Domain Restriction |
 |------|------|----------|--------------|-------------------|
-| Free | $0 | `FREE_LIFETIME_CALL_LIMIT` lifetime calls (currently 3) | Chrome tabs only | leetcode.com, codewars.com, codeforces.com, neetcode.io |
-| Free + BYO Key | $0 | Unlimited (own key) | Chrome tabs only | Same domain restriction |
-| Pro | $10/month | `PRO_MONTHLY_REQUEST_LIMIT` requests/billing period (currently 150) | All sources | No restriction |
+| Free | $0 | `FREE_LIFETIME_CALL_LIMIT` lifetime calls (currently 4) | Chrome tabs, Displays, Selected text (`Cmd+4`) — no Audio | `FREE_TIER_ALLOWED_DOMAINS` (currently `['all']` = none) |
+| Free + BYO Key | $0 | Unlimited (own key) | Same as Free | Same as Free |
+| Pro | $10/month | `PRO_MONTHLY_REQUEST_LIMIT` requests/billing period (currently 150) | All sources incl. Audio | No restriction |
+
+Still Pro-only: Stealth Mode, premium models, Audio/live transcription. **Not** Pro-only anymore (opened to free users): Display screenshot capture, Selected-text capture, and Windows **Run as Administrator** (Settings → App). Displays have no URL, so the site check skips them. Free users who used up their calls and added a Gemini key get BYO-key paths for display screenshots (`query_ai_with_image`) and selected text (`query_ai`). Pro feature lists (Account tab, sign-up form, `notification` welcome text) no longer mention screen/display capture — the `notification` change needs `supabase functions deploy notification`.
 
 ### AI Models
 
@@ -1160,18 +1178,17 @@ Audio input **always** uses `gemini-3-flash` regardless of user's model selectio
 
 #### Audio Prompt Auto-Selection
 
-When the user selects an audio input source or uses the audio recording hotkey (`Cmd+3` / `Alt+3`):
+The "Verbal Interview (Audio)" prompt is applied **only when a Pro user actually starts listening** (Listen button or `Cmd+3` / `Alt+3`) — **not** when Audio is selected in the dropdown, and never for free users.
 
-1. **Auto-select audio prompt**: The app automatically switches to "Verbal Interview (Audio)" prompt
-2. **Store previous prompt**: The previously selected prompt is saved in `previousTemplateRef`
-3. **Restore on switch**: When user switches away from audio input, the previous prompt is restored
-4. **Warning dialog**: If user manually selects a non-audio source while "Verbal Interview (Audio)" is active, a warning popup appears suggesting to change the prompt. This also triggers when the user clicks "Solve" or uses `Cmd+1`/`Cmd+2` hotkeys with the audio prompt active on a non-audio source — prevents sending mismatched requests.
+1. **Auto-select audio prompt**: in `toggleAudioRecording()`, after the Pro check, on the start branch: if the current prompt isn't the audio prompt, save it in `previousTemplateRef` and switch.
+2. **Restore on switch**: when the user switches away from the Audio source, the saved prompt is restored (only if one was saved).
+3. **Warning dialog**: if the audio prompt is active on a non-audio source (manual select, Solve, or `Cmd+1`/`Cmd+2`), a warning popup appears — prevents mismatched requests.
 
 Implementation in `src/App.tsx`:
-- `previousTemplateRef` (useRef) stores the last non-audio prompt
-- `onSelect` handler in `TabDropdown` triggers auto-selection
-- `hotkey-audio-toggle` listener also triggers auto-selection
-- `showAudioPromptWarning` state controls warning dialog visibility
+- `previousTemplateRef` stores the prompt before the auto-switch.
+- `selectedTemplateRef` mirrors `selectedTemplate` every render. The `hotkey-audio-toggle` listener is registered once, so reading `selectedTemplate` there was stale — that caused "sometimes switches" bugs.
+- Selecting Audio only warms audio capture (`warm_audio_capture`) for Pro users; free users get no permission prompt.
+- `showAudioPromptWarning` controls the warning dialog.
 
 ### Stealth Mode & Anti-Detection Architecture
 
@@ -1354,11 +1371,7 @@ In `src/App.tsx`:
 
 ### Domain Restrictions (Security)
 
-Free tier users are restricted to specific coding practice sites:
-- `leetcode.com`
-- `codewars.com`
-- `codeforces.com`
-- `neetcode.io`
+Free tier users are restricted to the sites in `FREE_TIER_ALLOWED_DOMAINS` (`_shared/limits.ts`). **Currently `['all']`, i.e. no restriction.** The previous list (`leetcode.com`, `codewars.com`, `codeforces.com`, `neetcode.io`) is kept commented out.
 
 This is enforced at:
 1. **Frontend** (`src/App.tsx`): URL validation before AI call
@@ -1500,11 +1513,13 @@ supabase secrets list
 
 ### Chrome CDP Status (Header)
 
-The app no longer shows a yellow "Chrome CDP not running" banner in the main content area. Instead, Chrome status is shown compactly in the **header bar**:
+Chrome status is an **icon-only** control in the header (`.chrome-status`, Chrome logo + `.chrome-status-dot`), to keep the header on one row:
 
-- **Chrome not running**: `Open Chrome` button with inline Chrome logo SVG (styled with `.chrome-open-btn` — blue border, Google Blue `#4285F4` accent, pill shape)
-- **Opening/detecting**: `⏳ Detecting Chrome… (if Chrome asks for permission, click Allow)` (button disabled, grayed out)
-- **Ready**: `🟢 Chrome Ready` status text
+- **Ready**: coloured logo, green dot; tooltip "Chrome Ready · Connected to your existing Chrome / a Chrome window opened by this app" (`<span role="img">`)
+- **Not connected**: greyscale logo, grey dot; it's a button that calls `openChromeCdp()`
+- **Opening**: pulsing amber dot (`.is-opening`); the "click Allow" guidance is shown as the status message by `openChromeCdp()`
+
+`cdpStatus` text is still fetched (setter only) but no longer rendered.
 
 The Rust backend always returns just "🟢 Chrome Ready" or "🔴 Chrome Not Running" — no port or mode details are surfaced in the string.
 
@@ -1522,6 +1537,9 @@ Free users cannot use audio recording (it's a Pro feature). The "Verbal Intervie
 - `PromptListView.tsx` receives `isPro` prop from `App.tsx`
 - When `!isPro`: prompt item gets `.disabled` class (dimmed, no pointer events) and a purple "PRO" badge
 - Audio recording in `toggleAudioRecording()` checks `subscriptionRef.current` for active/cancelling status
+- **On select** (dropdown `onSelect`): free users immediately get `AUDIO_PRO_MESSAGE` ("⚠️ Audio input requires Pro subscription.", which `messageActions` maps to an **Upgrade to Pro** button) instead of "Selected: …"
+- `audioLockedForFree` disables the Listen button (tooltip explains why) and hides its hotkey badge
+- The Audio item in the Input Source dropdown and the Live audio row in the ⓘ panel show a `PRO` badge for free users
 - **Important**: Uses `useRef` (`subscriptionRef`) instead of direct state to avoid stale closures in the global hotkey listener. A `useEffect` keeps `subscriptionRef.current` in sync with the `subscription` state.
 
 ### Prompt System
@@ -1677,16 +1695,17 @@ When the AI returns Mermaid diagram syntax in the SOLUTION block (triggered by t
 
 The "Solve" button dynamically shows the current capture mode:
 
-- **Audio source selected**: `🎧 Start Listening` (or `⏹️ Stop & Solve (Xs)` while listening)
+- **Audio source selected**: `🎧 Listen` (or `⏹️ Stop & Solve` while listening — seconds and hotkey are shown in the status bar, not the button). Tooltips, stepper and Hotkeys tab keep the long names "Start Listening / Stop & Solve".
 - **Display source selected**: `📸 Solve` (always screenshot)
 - **Chrome tab selected**: `📝 Solve` (text mode) or `📸 Solve` (screenshot mode, based on `useScreenshot` setting)
+- Shows the current hotkey as compact key boxes (`<HotkeyKeys size="compact">`).
 
-No separate label — the icon is part of the button text itself.
+**Constant width:** all three labels are rendered stacked in one grid cell (`.solve-button-labels` / `.solve-button-label`, non-current ones `visibility: hidden`), so the button is always as wide as its widest label and never resizes when switching sources or starting/stopping. Size: `padding 6px 12px`, `13px` text.
 
 #### Usage Badge (Header)
 
 The header shows a usage badge (`quota-badge`) with units:
-- **Pro**: `📊 94/150 calls` (limit from `pro_request_limit` / usage response) — tooltip shows detailed period info + reset date
+- **Pro**: one merged chip `📊 94/150 · 🎧 1.2/10h` (calls + audio hours) — tooltip shows calls, audio hours and reset date. (Previously two chips; merged so the header fits one row.)
 - **Free**: `🎁 2/3 calls` (limit from `free_call_limit`) — tooltip shows "lifetime free calls used"
 - **BYO Key**: `🔑 BYO Key` — tooltip shows "Using your own Gemini API key"
 
@@ -1697,18 +1716,22 @@ The usage bar in the Account settings tab uses a dynamic gradient:
 - 51–80%: Yellow (`#FFEB3B` → `#FFC107`)
 - >80%: Orange to Red (`#FF9800` → `#F44336`)
 
-#### Input Mode (Merged into AI Models Tab)
+#### Capture Mode Toggle & "Ways to solve" Panel
 
-The Input Mode controls (text extraction vs screenshot) have been merged into the "AI Models" tab, below the model selector. This removes the standalone "Input Mode" tab.
+The Capture Mode section was **removed from Settings → AI Models** (it duplicated the main toggle). The only toggle is in the **header**:
 
-- 📝 Text Extraction — "Chrome tabs only"
-- 📸 Screenshot Capture — "Visual · Images & diagrams"
-- Note: Text extraction only works with Chrome tabs. Display source always uses screenshot mode.
-- Text mode still attaches pictures when the question needs them (question images, charts, whiteboards, near-empty pages); see "Text extraction details". Screenshot mode sends only the screenshot, as before.
+- Icon segmented control (document = Content, camera = Screenshot; `.mode-segment`, `.mode-segment-thumb`, `.mode-segment-btn`; `.header-left .mode-segment` sets 32px height), next to the app icon. Reads/writes `useScreenshot` (`localStorage('use_screenshot')`).
+- **Shown only for Chrome tabs** (`isChromeTab(selectedTab)`). Hidden for Displays (always Screenshot) and Audio (no capture mode).
+- Text/Content mode still attaches pictures when the question needs them (question images, charts, whiteboards, near-empty pages); see "Text extraction details".
 
-Styled via `.toggle-btn .mode-icon`, `.mode-label`, `.mode-description` in `App.css`.
+**ⓘ button → "Ways to solve" panel** (`src/components/ModeHelp.tsx` + `.css`): always visible in the header. Opens a centred, fixed-position dialog (closes on ✕, Esc, backdrop) with four rows, each with its hotkey (`<HotkeyKeys>`), "Works with:" and a description:
 
-**Main-screen switch:** an icon segmented control (document = Text, camera = Screenshot; `.solve-group`, `.mode-segment`, `.mode-segment-thumb` sliding highlight, `.mode-segment-btn`) sits inline to the left of the Solve button, matching its height; the Solve button keeps its original size. It reads and writes the same `useScreenshot` state (persisted as `localStorage('use_screenshot')`) as the AI Models tab, so changing either updates both. Hidden for the Audio source; locked to Screenshot for Display sources.
+| Row | Works with |
+|---|---|
+| 📝 Content `⌘1` | Chrome tabs only |
+| 📸 Screenshot `⌘2` | Any display or Chrome tab, including apps Chrome can't open |
+| 🎧 Live audio `⌘3` | System audio from calls (Zoom, Teams, Meet) — `PRO` badge for free users |
+| ✂️ Selected text `⌘4` | Any app where you can highlight text, even if it hides its window from screen capture |
 
 #### Verbal Interview Badge (Prompts Tab)
 
@@ -1753,7 +1776,41 @@ The Settings → HotKeys tab uses a grouped, compact layout:
 - **3 sections**: Solve, Navigation, App — each with a section title and bordered card
 - **Two-column grid** within each section for compact display
 - **Compact inputs**: Smaller padding/font (`hotkey-input` class) so all hotkeys fit on one page without scrolling
+- **Live preview**: each label row shows the typed (or default) hotkey as `<HotkeyKeys>` boxes, so typos are visible
+- **Placeholders** come from `get_default_hotkeys` (`defaults` prop) in the typeable form (`Cmd+1`), not symbols
 - Styled via `.hotkeys-panel`, `.hotkeys-section`, `.hotkeys-section-title`, `.hotkeys-two-col`, `.hotkey-field`, `.hotkey-label`, `.hotkey-input` in `App.css`
+
+#### Hotkey Display (one format everywhere)
+
+- `src/components/HotkeyKeys.tsx` (+ `.css`): renders a hotkey as separate key boxes joined by `+` — `[⌘] + [1]` on macOS, `[Alt] + [1]` on Windows. Props: `hotkey`, `isMac`, `size` (`normal` | `compact` for coloured buttons), optional `label` (e.g. "Hotkey:"). Used by the Solve button, ⓘ panel and Hotkeys tab preview.
+- `src/services/hotkeys.ts`: `hotkeyKeys()` splits a hotkey into display keys (Mac symbols ⌘⇧⌥⌃, `Cmd`→`Ctrl` elsewhere); `formatHotkey()` is the text form for tooltips/messages and joins with `" + "` on every OS (`⌘ + 1`).
+- Effective hotkeys in `App.tsx`: `hotkeys = activeHotkeys ?? defaultHotkeys` (`defaultHotkeys` from `get_default_hotkeys`). Never hardcode `Cmd+N` / `Alt+N` fallbacks in the UI.
+
+#### Main Window Layout
+
+Goal: maximise vertical space for the AI response.
+
+```
+[icon] [📝|📸] ⓘ           📊 42/150 · 🎧 1.2/10h  [Chrome●]  ⚙
+INPUT SOURCE
+[🖼 Source                       ▼] [🔄] [📝 Solve ⌘+1]
+```
+
+- Header: icon, capture toggle (Chrome tabs only), ⓘ; right side: merged usage chip, setup badge (when needed), icon-only Chrome status, settings.
+- Controls card (`.top-bar`): one row — dropdown (flex), refresh, Solve (standard size).
+
+#### Selected-text capture (`Cmd+4` / `Alt+4`)
+
+- Rust `selection::capture()` (`src-tauri/src/selection.rs`): macOS `selected_text_via_accessibility()`, Windows `selected_text_via_uia()`, then clipboard fallback. Emits `hotkey-solve-selection` with `SelectionPayload { text, reason }`.
+- On empty text, `capture_failure_reason()` picks: `no_accessibility` (macOS, `is_accessibility_granted()` false), `needs_admin` (Windows, `foreground_blocked_by_elevation()`: foreground process elevated and we aren't — UIPI blocks UIA), else `no_selection`.
+- Frontend `solveSelectionWithAI(text, reason)` shows a matching message; `messageActions` adds **Open Accessibility settings** (`accessibility_permission` → `setup.grant('accessibility')`) or **Open Run as Administrator setting** (`run_as_admin_settings` → `openSettingsAt('app')`).
+- Available to free users (free model, BYO-key fallback via `query_ai`); refreshes the subscription after a free call.
+- The hotkey is always swallowed (see "Global hotkeys") so the keystroke never reaches the foreground app.
+
+#### Theme / CSS notes
+
+- `TabDropdown.css`, `PromptListView.css`, `PromptEditor.css` use theme variables (`--surface`, `--border`, `--text-primary`, `--text-secondary`, `--surface-alt`, `--stepper-active-bg`, …) — no hardcoded light colours except solid buttons/badges. Prompt Delete button has a `[data-theme="dark"]` override.
+- **Global class collisions** (Vite CSS is global): `PromptListView.css` had an unused global `.dropdown-item` that could restyle the Input Source dropdown — now scoped to `.dropdown-popup .dropdown-item`. The dropdown's PRO badge is `.source-pro-badge` because `.pro-badge` belongs to the prompt list.
 
 #### App Settings Tab (Settings → App)
 
@@ -1785,6 +1842,10 @@ The "App" tab in the Settings modal provides three app-level preferences that pe
   - **When Free Tier**: Blue upgrade card detailing the benefits of Stealth Mode.
 - **Blur Prevention**: Always active across all tiers and states (the window never pulls active OS focus, preventing `window.blur` in online tests).
 - Persisted in both `localStorage('stealth_mode')` (for UI state) and `stealth.json` (for Rust startup).
+
+**Run as Administrator (Windows only):**
+- Available to **all users** (no longer Pro-gated). Toggle calls `set_run_as_admin`; status from `get_admin_status` (`run_as_admin`, `is_elevated`); "Restart Now" when saved but not elevated.
+- Needed when the window being read for Selected-text capture runs elevated (UIPI blocks UI Automation) — the `needs_admin` failure message links here.
 
 **Tauri Commands:**
 

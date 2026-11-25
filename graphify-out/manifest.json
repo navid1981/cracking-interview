@@ -132,9 +132,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot.rs": {
-    "mtime": 1794429647.361064,
-    "seen": 1794432578.4208589,
-    "ast_hash": "29dceaddcbf4ed9931ceb920c306e6b1",
+    "mtime": 1795600426.3429523,
+    "seen": 1795600588.863905,
+    "ast_hash": "925cb58a6bcacdc24afcf3f1fed82971",
     "semantic_hash": ""
   },
   "src-tauri/src/stealth_hotkey.rs": {
@@ -156,9 +156,9 @@
     "semantic_hash": ""
   },
   "src/App.tsx": {
-    "mtime": 1795596805.1968231,
-    "seen": 1795597674.953513,
-    "ast_hash": "9f6a3fad2c4ed350559fa53ae793b421",
+    "mtime": 1795600216.882489,
+    "seen": 1795600588.8639948,
+    "ast_hash": "605c6507d6e94a63cbf7d070498e69bf",
     "semantic_hash": ""
   },
   "src/components/AIResponseDisplay.tsx": {

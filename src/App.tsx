@@ -122,7 +122,7 @@ function App() {
   useEffect(() => { modelConfigRef.current = modelConfig; }, [modelConfig]);
 
   // ========== APP STATE ==========
-  const [cdpStatus, setCdpStatus] = useState('🔴 Chrome Not Running');
+  const [, setCdpStatus] = useState('🔴 Chrome Not Running');
   const [cdpReady, setCdpReady] = useState(false);
   // "user" | "app" | "none"
   const [chromeConnectionMode, setChromeConnectionMode] = useState<'user' | 'app' | 'none'>('none');
@@ -2309,6 +2309,58 @@ function App() {
       <header className="app-header">
         <div className="header-left">
           <img src="/icon.png" alt="CrackingInterview" className="app-icon-img" />
+          {/* Only Chrome tabs have a choice; displays are always Screenshot, Audio has no capture mode */}
+          {selectedTab && isChromeTab(selectedTab) && (() => {
+            const screenshotActive = useScreenshot;
+            return (
+              <div
+                className={`mode-segment ${screenshotActive ? 'is-screenshot' : ''}`}
+                role="radiogroup"
+                aria-label="Input mode"
+              >
+                <span className="mode-segment-thumb" aria-hidden="true" />
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!screenshotActive}
+                  aria-label="Content Capture"
+                  className={`mode-segment-btn ${!screenshotActive ? 'active' : ''}`}
+                  onClick={() => setUseScreenshot(false)}
+                  disabled={isLoading}
+                  title={withHotkey('Content Capture', hotkeys?.text)}
+                >
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 3v5h5M9 13h6M9 17h4" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={screenshotActive}
+                  aria-label="Screenshot Capture"
+                  className={`mode-segment-btn ${screenshotActive ? 'active' : ''}`}
+                  onClick={() => setUseScreenshot(true)}
+                  disabled={isLoading}
+                  title={withHotkey('Screenshot Capture', hotkeys?.screenshot)}
+                >
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 8a2 2 0 0 1 2-2h1.5l1.5-2h6l1.5 2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+                    <circle cx="12" cy="12.5" r="3.5" />
+                  </svg>
+                </button>
+              </div>
+            );
+          })()}
+          {/* Always available: compares Content, Screenshot, Live audio and Selected text */}
+          <ModeHelp
+            isMac={isMacPlatform}
+            textHotkey={hotkeys?.text}
+            screenshotHotkey={hotkeys?.screenshot}
+            selectionHotkey={hotkeys?.capture_selection}
+            audioHotkey={hotkeys?.audio_toggle}
+            isPro={isPaidUser}
+          />
         </div>
         <div className="header-right">
           {/* Quota Display */}
@@ -2317,7 +2369,7 @@ function App() {
               className="quota-badge"
               title={
                 isPaidUser
-                  ? `${usageStats?.requests_used ?? '?'} of ${proRequestLimitLabel} AI calls used this month${usageStats?.period_end ? ` · Resets ${usageStats.period_end.toLocaleDateString()}` : ''}`
+                  ? `${usageStats?.requests_used ?? '?'} of ${proRequestLimitLabel} AI calls used this month${usageStats ? ` · ${(usageStats.audio_seconds_used / 3600).toFixed(1)} of ${usageStats.audio_seconds_limit / 3600} audio hours` : ''}${usageStats?.period_end ? ` · Resets ${usageStats.period_end.toLocaleDateString()}` : ''}`
                   : usingByoKey
                     ? 'Using your own Gemini API key (unlimited) · Click to manage it in AI Models'
                     : `${freeCallsUsed} of ${freeCallLimitLabel} lifetime free calls used`
@@ -2336,17 +2388,12 @@ function App() {
               })}
             >
               {isPaidUser ? (
-                <>📊 {usageStats ? `${usageStats.requests_used}/${usageStats.requests_limit} calls` : '...'}</>
+                <>📊 {usageStats ? <>{usageStats.requests_used}/{usageStats.requests_limit} · 🎧 {(usageStats.audio_seconds_used / 3600).toFixed(1)}/{usageStats.audio_seconds_limit / 3600}h</> : '...'}</>
               ) : usingByoKey ? (
                 <>🔑 BYO Key</>
               ) : (
                 <>🎁 {freeCallsUsed}/{freeCallLimitLabel} calls</>
               )}
-            </span>
-          )}
-          {isPaidUser && usageStats && (
-            <span className="quota-badge" title={`${(usageStats.audio_seconds_used / 3600).toFixed(1)} of ${usageStats.audio_seconds_limit / 3600} audio hours used this month`}>
-              🎧 {(usageStats.audio_seconds_used / 3600).toFixed(1)}/{usageStats.audio_seconds_limit / 3600}h
             </span>
           )}
           {setup.oneTimeMissing > 0 && (
@@ -2358,38 +2405,43 @@ function App() {
               ⚠ Setup {setup.steps.filter(s => s.done).length}/{setup.steps.length}
             </button>
           )}
+          {/* Chrome status as an icon: green dot = connected, grey = click to open */}
           {cdpReady ? (
             <span
-              className={`status-indicator${chromeConnectionMode === 'user' ? ' chrome-user-mode' : ''}`}
+              className="chrome-status is-ready"
+              role="img"
+              aria-label="Chrome Ready"
               title={
                 chromeConnectionMode === 'user'
-                  ? 'Connected to your existing Chrome browser'
-                  : 'Connected to a Chrome window opened by this app'
+                  ? 'Chrome Ready · Connected to your existing Chrome browser'
+                  : 'Chrome Ready · Connected to a Chrome window opened by this app'
               }
             >
-              {cdpStatus}
+              <svg className="chrome-logo" viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
+                <circle cx="24" cy="24" r="12" fill="#fff"/>
+                <path d="M24,12H44.78a24,24,0,0,0-41.56.003L13.61,30l.01-.002A12,12,0,0,1,24,12Z" fill="#EA4335"/>
+                <circle cx="24" cy="24" r="9.5" fill="#1a73e8"/>
+                <path d="M34.39,30L24,48A24,24,0,0,0,44.78,12H24l-.003.009A12,12,0,0,1,34.39,30Z" fill="#FBBC04"/>
+                <path d="M13.61,30L3.22,12.01A24,24,0,0,0,24,48L34.39,30l-.007-.007A12,12,0,0,1,13.61,30Z" fill="#34A853"/>
+              </svg>
+              <span className="chrome-status-dot" />
             </span>
           ) : (
             <button
-              className="status-indicator chrome-open-btn"
+              className={`chrome-status is-off${isOpeningChrome ? ' is-opening' : ''}`}
               onClick={openChromeCdp}
               disabled={isOpeningChrome}
-              title="Open or connect to Chrome"
+              aria-label="Open Chrome"
+              title={isOpeningChrome ? 'Opening Chrome… check Chrome for a permission dialog' : 'Chrome not connected · Click to open Chrome'}
             >
-              {isOpeningChrome ? (
-                <>🔍 Check Chrome for a dialog…</>
-              ) : (
-                <>
-                  <svg className="chrome-logo" viewBox="0 0 48 48" width="14" height="14">
-                    <circle cx="24" cy="24" r="12" fill="#fff"/>
-                    <path d="M24,12H44.78a24,24,0,0,0-41.56.003L13.61,30l.01-.002A12,12,0,0,1,24,12Z" fill="#EA4335"/>
-                    <circle cx="24" cy="24" r="9.5" fill="#1a73e8"/>
-                    <path d="M34.39,30L24,48A24,24,0,0,0,44.78,12H24l-.003.009A12,12,0,0,1,34.39,30Z" fill="#FBBC04"/>
-                    <path d="M13.61,30L3.22,12.01A24,24,0,0,0,24,48L34.39,30l-.007-.007A12,12,0,0,1,13.61,30Z" fill="#34A853"/>
-                  </svg>
-                  {' '}Open Chrome
-                </>
-              )}
+              <svg className="chrome-logo" viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
+                <circle cx="24" cy="24" r="12" fill="#fff"/>
+                <path d="M24,12H44.78a24,24,0,0,0-41.56.003L13.61,30l.01-.002A12,12,0,0,1,24,12Z" fill="#EA4335"/>
+                <circle cx="24" cy="24" r="9.5" fill="#1a73e8"/>
+                <path d="M34.39,30L24,48A24,24,0,0,0,44.78,12H24l-.003.009A12,12,0,0,1,34.39,30Z" fill="#FBBC04"/>
+                <path d="M13.61,30L3.22,12.01A24,24,0,0,0,24,48L34.39,30l-.007-.007A12,12,0,0,1,13.61,30Z" fill="#34A853"/>
+              </svg>
+              <span className="chrome-status-dot" />
             </button>
           )}
           <button 
@@ -2455,90 +2507,37 @@ function App() {
             >
               🔄
             </button>
+            <button 
+              onClick={() => solveWithAI('auto')}
+              disabled={isLoading || !selectedTab || audioLockedForFree}
+              className="solve-button"
+              title={audioLockedForFree ? 'Audio input requires Pro subscription' : solveHotkey ? `${solveActionLabel} (${solveHotkey})` : undefined}
+              aria-keyshortcuts={solveHotkeyRaw || undefined}
+            >
+              {/* Every label is stacked in one grid cell; only the current one is visible.
+                  The button is as wide as the widest label, so its size never changes. */}
+              <span className="solve-button-labels">
+                {([
+                  { key: 'solve', text: `${selectedTab && (isDisplay(selectedTab) || useScreenshot) ? '📸' : '📝'} Solve`, hotkey: hotkeys?.[selectedTab && (isDisplay(selectedTab) || useScreenshot) ? 'screenshot' : 'text'] },
+                  { key: 'listen', text: '🎧 Listen', hotkey: hotkeys?.audio_toggle },
+                  { key: 'stop', text: '⏹️ Stop & Solve', hotkey: undefined },
+                ] as const).map(v => {
+                  const current = selectedTab && isAudio(selectedTab) ? (isRecordingAudio ? 'stop' : 'listen') : 'solve';
+                  const showHotkey = !!v.hotkey && !(v.key === 'listen' && audioLockedForFree);
+                  return (
+                    <span key={v.key} className={`solve-button-label ${v.key === current ? '' : 'is-hidden'}`} aria-hidden={v.key !== current}>
+                      {v.text}
+                      {showHotkey && (
+                        <HotkeyKeys hotkey={v.hotkey!} isMac={isMacPlatform} size="compact" className="solve-button-hotkey" />
+                      )}
+                    </span>
+                  );
+                })}
+              </span>
+            </button>
           </div>
         </div>
 
-        <div className="solve-group">
-          {selectedTab && !isAudio(selectedTab) && (() => {
-            const displayLocked = isDisplay(selectedTab);
-            const screenshotActive = displayLocked || useScreenshot;
-            const lockedHint = 'Displays always use Screenshot Capture';
-            return (
-              <>
-              <div
-                className={`mode-segment ${screenshotActive ? 'is-screenshot' : ''} ${displayLocked ? 'is-locked' : ''}`}
-                role="radiogroup"
-                aria-label="Input mode"
-              >
-                <span className="mode-segment-thumb" aria-hidden="true" />
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={!screenshotActive}
-                  aria-label="Content Capture"
-                  className={`mode-segment-btn ${!screenshotActive ? 'active' : ''}`}
-                  onClick={() => setUseScreenshot(false)}
-                  disabled={isLoading || displayLocked}
-                  title={displayLocked ? lockedHint : withHotkey('Content Capture', hotkeys?.text)}
-                >
-                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-                    <path d="M14 3v5h5M9 13h6M9 17h4" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={screenshotActive}
-                  aria-label="Screenshot Capture"
-                  className={`mode-segment-btn ${screenshotActive ? 'active' : ''}`}
-                  onClick={() => setUseScreenshot(true)}
-                  disabled={isLoading || displayLocked}
-                  title={displayLocked ? lockedHint : withHotkey('Screenshot Capture', hotkeys?.screenshot)}
-                >
-                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M4 8a2 2 0 0 1 2-2h1.5l1.5-2h6l1.5 2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
-                    <circle cx="12" cy="12.5" r="3.5" />
-                  </svg>
-                </button>
-              </div>
-              <ModeHelp
-                isMac={isMacPlatform}
-                textHotkey={hotkeys?.text}
-                screenshotHotkey={hotkeys?.screenshot}
-                selectionHotkey={hotkeys?.capture_selection}
-                audioHotkey={hotkeys?.audio_toggle}
-                isPro={isPaidUser}
-              />
-              </>
-            );
-          })()}
-          {/* Audio hides the capture toggle, but the help stays one click away */}
-          {selectedTab && isAudio(selectedTab) && (
-            <ModeHelp
-              isMac={isMacPlatform}
-              textHotkey={hotkeys?.text}
-              screenshotHotkey={hotkeys?.screenshot}
-              selectionHotkey={hotkeys?.capture_selection}
-              audioHotkey={hotkeys?.audio_toggle}
-              isPro={isPaidUser}
-            />
-          )}
-          <button 
-            onClick={() => solveWithAI('auto')}
-            disabled={isLoading || !selectedTab || audioLockedForFree}
-            className="solve-button"
-            title={audioLockedForFree ? 'Audio input requires Pro subscription' : solveHotkey ? `${solveActionLabel} (${solveHotkey})` : undefined}
-            aria-keyshortcuts={solveHotkeyRaw || undefined}
-          >
-            {selectedTab && isAudio(selectedTab)
-              ? (isRecordingAudio ? `⏹️ Stop & Solve (${audioSeconds}s)` : '🎧 Start Listening')
-              : `${selectedTab && (isDisplay(selectedTab) || useScreenshot) ? '📸' : '📝'} Solve`}
-            {solveHotkey && !audioLockedForFree && (
-              <HotkeyKeys hotkey={solveHotkeyRaw} isMac={isMacPlatform} size="compact" className="solve-button-hotkey" />
-            )}
-          </button>
-        </div>
       </div>
 
       {isRecordingAudio && !isLiveTranscribing && (

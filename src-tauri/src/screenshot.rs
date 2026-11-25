@@ -136,12 +136,9 @@ pub fn capture_display_thumbnail(display_id: &str) -> Result<Vec<u8>, String> {
     
     let dynamic_image = DynamicImage::ImageRgba8(rgba);
     
-    // Resize to thumbnail (160x120)
-    let thumbnail = dynamic_image.resize(
-        160,
-        120,
-        image::imageops::FilterType::Lanczos3
-    );
+    // Resize to thumbnail (160x120). `thumbnail()` is ~7x faster than a Lanczos3 resize on a
+    // 4K frame (0.5s vs 3.6s in a debug build), which kept it under the UI's 5s timeout.
+    let thumbnail = dynamic_image.thumbnail(160, 120);
     
     println!("✅ Thumbnail resized to 160x120");
     
