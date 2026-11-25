@@ -8,7 +8,9 @@ pub(crate) mod audio;
 mod transcription;
 mod documents;
 mod stealth_hotkey;
+mod selection;
 mod setup;
+pub(crate) mod resilience;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -77,6 +79,7 @@ pub(crate) struct HotkeysConfig {
     pub(crate) move_right: String,
     pub(crate) toggle_visibility: String,
     pub(crate) quit_app: String,
+    pub(crate) capture_selection: String,
 }
 
 struct HotkeysState(Mutex<HotkeysConfig>);
@@ -94,8 +97,17 @@ fn default_hotkeys() -> HotkeysConfig {
         move_right: DEFAULT_MOVE_RIGHT_HOTKEY.to_string(),
         toggle_visibility: DEFAULT_TOGGLE_VISIBILITY_HOTKEY.to_string(),
         quit_app: DEFAULT_QUIT_APP_HOTKEY.to_string(),
+        capture_selection: DEFAULT_CAPTURE_SELECTION_HOTKEY.to_string(),
     }
 }
+
+// Capture selected text from Lockdown Browser / frontmost app -> solve with AI (configurable).
+#[cfg(target_os = "macos")]
+const DEFAULT_CAPTURE_SELECTION_HOTKEY: &str = "Cmd+4";
+#[cfg(target_os = "windows")]
+const DEFAULT_CAPTURE_SELECTION_HOTKEY: &str = "Alt+4";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const DEFAULT_CAPTURE_SELECTION_HOTKEY: &str = "Ctrl+4";
 
 // Scroll hotkeys defaults (configurable).
 #[cfg(target_os = "macos")]
@@ -193,6 +205,7 @@ struct HotkeysConfigFile {
     move_right: Option<String>,
     toggle_visibility: Option<String>,
     quit_app: Option<String>,
+    capture_selection: Option<String>,
 }
 
 fn load_hotkeys_from_disk(app: &tauri::AppHandle) -> HotkeysConfig {
@@ -223,6 +236,7 @@ fn load_hotkeys_from_disk(app: &tauri::AppHandle) -> HotkeysConfig {
                 if let Some(v) = cfg_file.move_right { if !v.trim().is_empty() { cfg.move_right = v; } }
                 if let Some(v) = cfg_file.toggle_visibility { if !v.trim().is_empty() { cfg.toggle_visibility = v; } }
                 if let Some(v) = cfg_file.quit_app { if !v.trim().is_empty() { cfg.quit_app = v; } }
+                if let Some(v) = cfg_file.capture_selection { if !v.trim().is_empty() { cfg.capture_selection = v; } }
 
                 // Migrate legacy default hotkeys to new defaults (Cmd+1, Cmd+2, Cmd+3) so existing users
                 // pick up the change automatically unless they had customized it.
@@ -360,6 +374,7 @@ pub(crate) fn unregister_all_fallback_hotkeys(app: &tauri::AppHandle, cfg: &Hotk
     unregister_hotkey_best_effort(app, &cfg.move_right);
     unregister_hotkey_best_effort(app, &cfg.toggle_visibility);
     unregister_hotkey_best_effort(app, &cfg.quit_app);
+    unregister_hotkey_best_effort(app, &cfg.capture_selection);
 }
 
 /// Reapply screen-capture exclusion after win.show() on Windows.
@@ -393,40 +408,38 @@ pub(crate) fn reapply_stealth_after_show(win: &tauri::WebviewWindow) {
 /// The window stays "visible" to Windows at all times so the display affinity is preserved.
 #[cfg(target_os = "windows")]
 pub(crate) fn toggle_window_offscreen_win32(win: &tauri::WebviewWindow) {
-    use std::sync::atomic::AtomicBool;
+    let (cur_x, cur_y) = win
+        .outer_position()
+        .map(|p| (p.x, p.y))
+        .unwrap_or((-30000, -30000));
 
-    static WINDOW_HIDDEN: AtomicBool = AtomicBool::new(false);
-    static SAVED_X: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-    static SAVED_Y: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-
-    if WINDOW_HIDDEN.load(Ordering::Relaxed) {
-        // Restore: move window back to saved position without stealing focus
-        let x = SAVED_X.load(Ordering::Relaxed);
-        let y = SAVED_Y.load(Ordering::Relaxed);
-        use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::*;
-        if let Ok(h) = win.hwnd() {
-            unsafe {
-                let hwnd = HWND(h.0 as *mut _);
-                let _ = SetWindowPos(
-                    hwnd,
-                    HWND_TOPMOST,
-                    x, y, 0, 0,
-                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                );
+    match resilience::compute_offscreen_toggle(cur_x, cur_y) {
+        resilience::OffscreenToggleAction::RestoreTo { x, y } => {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::*;
+            if let Ok(h) = win.hwnd() {
+                unsafe {
+                    let hwnd = HWND(h.0 as *mut _);
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND_TOPMOST,
+                        x,
+                        y,
+                        0,
+                        0,
+                        SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    );
+                }
             }
+            println!(
+                "🕵️ [toggle-win32] Window restored to ({}, {}) without focus",
+                x, y
+            );
         }
-        WINDOW_HIDDEN.store(false, Ordering::Relaxed);
-        println!("🕵️ [toggle-win32] Window restored to ({}, {}) without focus", x, y);
-    } else {
-        // Hide: save current position, move far off-screen
-        if let Ok(pos) = win.outer_position() {
-            SAVED_X.store(pos.x, Ordering::Relaxed);
-            SAVED_Y.store(pos.y, Ordering::Relaxed);
+        resilience::OffscreenToggleAction::HideAt { x, y } => {
+            let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+            println!("🕵️ [toggle-win32] Window moved off-screen (hidden)");
         }
-        let _ = win.set_position(tauri::PhysicalPosition::new(-30000, -30000));
-        WINDOW_HIDDEN.store(true, Ordering::Relaxed);
-        println!("🕵️ [toggle-win32] Window moved off-screen (hidden)");
     }
 }
 
@@ -477,7 +490,28 @@ fn register_hotkeys(app: &tauri::AppHandle, cfg: &HotkeysConfig) -> Result<(), S
     register_hotkey(app, &cfg.move_right, "hotkey-move-right", "move-right")?;
     register_toggle_visibility_hotkey(app, &cfg.toggle_visibility)?;
     register_quit_app_hotkey(app, &cfg.quit_app)?;
+    register_selection_hotkey(app, &cfg.capture_selection, stealth_hotkey::HotkeyAction::CaptureSelection)?;
     Ok(())
+}
+
+/// Fallback (global-shortcut) registration for the capture/paste selection hotkeys.
+/// Unlike `register_hotkey`, these must not bring the window to the front.
+fn register_selection_hotkey(
+    app: &tauri::AppHandle,
+    hotkey: &str,
+    action: stealth_hotkey::HotkeyAction,
+) -> Result<(), String> {
+    let handle = app.clone();
+    app.global_shortcut()
+        .on_shortcut(hotkey, move |_app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                let h = handle.clone();
+                let _ = handle.run_on_main_thread(move || {
+                    stealth_hotkey::dispatch_action(&h, action);
+                });
+            }
+        })
+        .map_err(|e| e.to_string())
 }
 
 fn register_toggle_visibility_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Result<(), String> {
@@ -503,6 +537,8 @@ fn register_quit_app_hotkey(app: &tauri::AppHandle, hotkey: &str) -> Result<(), 
         .on_shortcut(hotkey, move |_app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 println!("⌨️ Hotkey pressed (quit): {}", hk);
+                resilience::authorize_quit(&handle);
+                stealth_hotkey::teardown_stealth_hotkeys();
                 handle.exit(0);
             }
         })
@@ -854,28 +890,26 @@ fn url_host_for_log(url: &str) -> &str {
 /// Open a URL in the default system browser
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
-    println!("[OpenURL] Opening: {}", url_host_for_log(&url));
+    let validated = resilience::validate_external_http_url(&url)?;
+    println!("[OpenURL] Opening: {}", url_host_for_log(&validated));
     
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .arg(&url)
+            .arg(&validated)
             .spawn()
             .map_err(|e| format!("Failed to open URL: {}", e))?;
     }
     
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &url])
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
+        resilience::windows::open_url_shell_independent(&validated)?;
     }
     
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
-            .arg(&url)
+            .arg(&validated)
             .spawn()
             .map_err(|e| format!("Failed to open URL: {}", e))?;
     }
@@ -998,33 +1032,7 @@ async fn create_billing_portal_session(
 /// Open a URL in the system's default browser
 #[tauri::command]
 async fn open_url(url: String) -> Result<(), String> {
-    println!("[Open URL] Opening: {}", url_host_for_log(&url));
-    
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
-    }
-    
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &url])
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
-    }
-    
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
-    }
-    
-    Ok(())
+    open_external_url(url)
 }
 
 /// Sign up a new user via Supabase Auth (bypasses SSL inspection on corporate VPN)
@@ -1604,6 +1612,15 @@ async fn set_window_opacity(app: tauri::AppHandle, opacity: f64) -> Result<(), S
 /// and takes keyboard focus; leaving the field restores non-activating. No-op elsewhere.
 #[tauri::command]
 async fn set_keyboard_input_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    // [window-diag] Clicking a text field flips the window from NOACTIVATE to
+    // focusable + set_focus(); log it so a white-on-click can be correlated.
+    resilience::log_event(&format!(
+        "[window-diag] set_keyboard_input_mode enabled={} stealth={}",
+        enabled,
+        STEALTH_ENABLED.load(Ordering::Relaxed)
+    ));
+    resilience::KEYBOARD_INPUT_ACTIVE.store(enabled, Ordering::Relaxed);
+    resilience::record_user_interaction();
     #[cfg(target_os = "windows")]
     {
         if !STEALTH_ENABLED.load(Ordering::Relaxed) {
@@ -1624,7 +1641,19 @@ async fn set_keyboard_input_mode(app: tauri::AppHandle, enabled: bool) -> Result
             win.set_focus().map_err(|e| format!("Focus error: {}", e))?;
         }
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        if !STEALTH_ENABLED.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(win) = handle.get_webview_window("main") {
+                resilience::macos::set_panel_keyboard_focus(&win, enabled);
+            }
+        });
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let _ = (&app, enabled);
     Ok(())
 }
@@ -1684,7 +1713,7 @@ fn apply_macos_dock_hiding() {
 }
 
 #[cfg(target_os = "macos")]
-fn set_macos_activation_policy(policy: i64) {
+pub(crate) fn set_macos_activation_policy(policy: i64) {
     use std::ffi::c_void;
 
     extern "C" {
@@ -1731,13 +1760,8 @@ fn set_macos_activation_policy(policy: i64) {
 /// (CanJoinAllSpaces) including full-screen ones (FullScreenAuxiliary). Since macOS 10.14 this
 /// only works when the app has no Dock icon (accessory policy), which stealth mode sets.
 #[cfg(target_os = "macos")]
-fn apply_macos_fullscreen_overlay(win: &tauri::WebviewWindow) {
+pub(crate) fn apply_macos_fullscreen_overlay(win: &tauri::WebviewWindow) {
     use std::ffi::c_void;
-
-    const CAN_JOIN_ALL_SPACES: u64 = 1 << 0;
-    const MOVE_TO_ACTIVE_SPACE: u64 = 1 << 1;
-    const FULL_SCREEN_PRIMARY: u64 = 1 << 7;
-    const FULL_SCREEN_AUXILIARY: u64 = 1 << 8;
 
     extern "C" {
         fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
@@ -1762,11 +1786,12 @@ fn apply_macos_fullscreen_overlay(win: &tauri::WebviewWindow) {
         // MoveToActiveSpace conflicts with CanJoinAllSpaces, and FullScreenPrimary with
         // FullScreenAuxiliary, so those bits are cleared.
         let current = get(ns_window, get_sel);
-        let updated = (current | CAN_JOIN_ALL_SPACES | FULL_SCREEN_AUXILIARY)
-            & !MOVE_TO_ACTIVE_SPACE
-            & !FULL_SCREEN_PRIMARY;
+        let updated = resilience::macos::compute_kiosk_collection_behavior(current);
         set(ns_window, set_sel, updated);
-        println!("🪟 [macOS] collectionBehavior {:#x} → {:#x} (visible over full-screen apps)", current, updated);
+        println!(
+            "🪟 [macOS] collectionBehavior {:#x} → {:#x} (visible over full-screen apps)",
+            current, updated
+        );
     }
 }
 
@@ -1774,7 +1799,7 @@ fn apply_macos_fullscreen_overlay(win: &tauri::WebviewWindow) {
 /// by setting NSWindow.sharingType = NSWindowSharingNone (0).
 /// This is the ONLY reliable way to hide window content on macOS.
 #[cfg(target_os = "macos")]
-fn apply_macos_screen_capture_protection(win: &tauri::WebviewWindow) {
+pub(crate) fn apply_macos_screen_capture_protection(win: &tauri::WebviewWindow) {
     use std::ffi::c_void;
 
     extern "C" {
@@ -1938,6 +1963,17 @@ fn remove_windows_stealth(win: &tauri::WebviewWindow) {
 // ============================================================================
 
 fn main() {
+    resilience::guardian::handle_early_cli_and_bootstrap();
+
+    std::panic::set_hook(Box::new(|info| {
+        resilience::log_event(&format!("[panic] {}", info));
+    }));
+    resilience::log_event(&format!(
+        "[startup] building Tauri app (desktop_worker={} elevated={})",
+        std::env::args().any(|a| a == "--desktop-worker"),
+        resilience::is_current_process_elevated()
+    ));
+
     #[allow(unused_mut)]
     let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -1992,10 +2028,70 @@ fn main() {
             request_screen_recording,
             open_privacy_settings,
             restart_app,
+            get_admin_status,
+            set_run_as_admin,
             move_window_by,
+            save_session_snapshot,
+            get_session_snapshot,
+            get_prompt_state,
+            save_prompt_state,
+            report_frontend_diagnostic,
+            frontend_heartbeat,
         ])
+        .on_page_load(|webview_window, payload| {
+            // [webview-diag] Boundary probe 1: did WebView2 finish loading the
+            // embedded UI at all? Absence of "Finished" under SEB while the
+            // window frame is visible means the renderer/navigation layer died,
+            // not React and not the Rust backend.
+            if webview_window.label() == "main" {
+                resilience::log_event(&format!(
+                    "[webview-diag] page-load {:?} url={}",
+                    payload.event(),
+                    payload.url()
+                ));
+            }
+        })
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // [window-diag] Log arrival unconditionally: the prevent-path
+                // logs below, but an authorized close falls through silently,
+                // which made an external WM_CLOSE death indistinguishable
+                // from a user quit in the log.
+                resilience::log_event(&format!(
+                    "[window-diag] CloseRequested arrival enabled={} quit_authorized={}",
+                    resilience::enabled(),
+                    resilience::quit_was_authorized()
+                ));
+                // macOS: the red X / Cmd+W is a user quit. External tools
+                // terminate via quit AppleEvent / SIGTERM (handled on their
+                // own paths), not by synthesizing a window close, so it is
+                // safe to authorize here. (Windows discriminates the X click
+                // inside the window-proc subclass instead.)
+                #[cfg(target_os = "macos")]
+                if resilience::enabled() && !resilience::quit_was_authorized() {
+                    resilience::authorize_quit(_window.app_handle());
+                    resilience::log_event("User closed window (macOS red X); authorizing quit");
+                }
+                if resilience::enabled() && !resilience::quit_was_authorized() {
+                    resilience::log_event("Blocked external CloseRequested / WM_CLOSE");
+                    api.prevent_close();
+                    #[cfg(target_os = "windows")]
+                    if !resilience::USER_HIDDEN.load(Ordering::Relaxed) {
+                        if let Some(win) = _window.app_handle().get_webview_window("main") {
+                            stealth_hotkey::bring_to_front_without_focus(&win);
+                            reapply_stealth_after_show(&win);
+                        }
+                    }
+                }
+            }
+        })
         .setup(|app| {
             println!("🚀 CrackingInterview starting...");
+            if let Ok(cfg_dir) = app_config_dir(app.handle()) {
+                resilience::init_config_dir(cfg_dir);
+            }
+            resilience::log_event("[startup] entered setup()");
+            resilience::session::apply_restored_window_rect(app.handle());
             screenshot::request_screen_recording_permission();
             
             // Pre-compile audio recorder helper in background (eliminates first-recording delay)
@@ -2023,6 +2119,7 @@ fn main() {
                 if let Some(win) = app.get_webview_window("main") {
                     #[cfg(target_os = "macos")]
                     {
+                        resilience::macos::apply_nonactivating_panel(&win);
                         apply_macos_screen_capture_protection(&win);
                     }
 
@@ -2064,6 +2161,16 @@ fn main() {
                 }
             }
 
+            #[cfg(target_os = "windows")]
+            resilience::windows::start_window_self_healer(app.handle().clone());
+
+            #[cfg(target_os = "macos")]
+            {
+                resilience::macos::install_sigterm_guard();
+                resilience::macos::start_window_self_healer(app.handle().clone());
+            }
+
+            resilience::log_event("[startup] setup() completed");
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -2077,9 +2184,31 @@ fn main() {
         app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     }
 
-    app.run(|_app_handle, event| {
-        if let tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } = event {
-            stealth_hotkey::teardown_stealth_hotkeys();
+    app.run(|app_handle, event| {
+        match event {
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                // [window-diag] Log arrival unconditionally (see CloseRequested).
+                resilience::log_event(&format!(
+                    "[window-diag] ExitRequested arrival enabled={} quit_authorized={}",
+                    resilience::enabled(),
+                    resilience::quit_was_authorized()
+                ));
+                if resilience::enabled() && !resilience::quit_was_authorized() {
+                    if resilience::should_yield_to_assessment(app_handle) {
+                        resilience::mark_killed_by_os(app_handle);
+                        stealth_hotkey::teardown_stealth_hotkeys();
+                        return;
+                    }
+                    resilience::log_event("Blocked unauthorized ExitRequested");
+                    api.prevent_exit();
+                    return;
+                }
+                stealth_hotkey::teardown_stealth_hotkeys();
+            }
+            tauri::RunEvent::Exit => {
+                stealth_hotkey::teardown_stealth_hotkeys();
+            }
+            _ => {}
         }
     });
 }
@@ -2134,6 +2263,7 @@ async fn move_window_by(window: tauri::Window, dx: i32, dy: i32) -> Result<(), S
         sleep(Duration::from_millis(10)).await;
     }
 
+    resilience::session::update_window_state_in_snapshot(window.app_handle());
     Ok(())
 }
 
@@ -2187,6 +2317,7 @@ async fn resize_window(window: tauri::Window, width: f64, height: f64) -> Result
             physical.height
         );
     }
+    resilience::session::update_window_state_in_snapshot(window.app_handle());
     Ok(())
 }
 
@@ -2263,9 +2394,105 @@ fn open_privacy_settings(pane: String) -> Result<(), String> {
     setup::open_privacy_settings(&pane)
 }
 
+#[derive(Serialize)]
+struct AdminStatus {
+    run_as_admin: bool,
+    is_elevated: bool,
+}
+
 #[tauri::command]
-fn restart_app(app: tauri::AppHandle) {
-    app.restart();
+fn get_admin_status() -> AdminStatus {
+    AdminStatus {
+        run_as_admin: resilience::get_run_as_admin(),
+        is_elevated: resilience::is_current_process_elevated(),
+    }
+}
+
+#[tauri::command]
+fn set_run_as_admin(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    resilience::set_run_as_admin(&app, enabled)
+}
+
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    if resilience::get_run_as_admin() && !resilience::is_current_process_elevated() {
+        resilience::session::update_window_state_in_snapshot(&app);
+        resilience::authorize_quit(&app);
+        let args = vec![
+            "--wait-for-restart".to_string(),
+            "--elevate-attempted".to_string(),
+        ];
+        if let Err(e) = resilience::windows::relaunch_as_admin(&args) {
+            if let Some(dir) = resilience::get_config_dir() {
+                resilience::clear_authorized_quit_in_dir(&dir);
+            }
+            resilience::AUTHORIZED_QUIT.store(false, Ordering::SeqCst);
+            return Err(format!("Elevation was cancelled or failed ({})", e));
+        }
+        stealth_hotkey::teardown_stealth_hotkeys();
+        resilience::guardian::release_held_gui_lock();
+        app.exit(0);
+        return Ok(());
+    }
+
+    let under_guardian = std::env::args().any(|a| a == "--gui");
+    if under_guardian && resilience::enabled() {
+        // Set only the in-memory flag so our own ExitRequested guard allows the exit,
+        // without writing authorized-quit.json on disk — allowing `--guardian` to
+        // cleanly respawn `--gui --restore-session` in 500ms without losing supervision.
+        resilience::AUTHORIZED_QUIT.store(true, Ordering::SeqCst);
+        resilience::session::update_window_state_in_snapshot(&app);
+        stealth_hotkey::teardown_stealth_hotkeys();
+        app.exit(0);
+    } else {
+        resilience::authorize_quit(&app);
+        app.restart();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn save_session_snapshot(
+    app: tauri::AppHandle,
+    snapshot: resilience::session::SessionSnapshot,
+) -> Result<(), String> {
+    resilience::session::save_snapshot_with_window(&app, snapshot)
+}
+
+/// Shared prompt state (selected prompt + custom prompt definitions) used
+/// to keep the main GUI and the desktop worker in sync. Unlike the session
+/// snapshot, desktop workers may read AND write this file.
+#[tauri::command]
+fn get_prompt_state() -> Option<resilience::session::PromptState> {
+    resilience::session::load_prompt_state()
+}
+
+#[tauri::command]
+fn save_prompt_state(
+    snapshot: resilience::session::PromptState,
+) -> Result<resilience::session::PromptState, String> {
+    resilience::session::save_prompt_state(snapshot)
+}
+
+#[tauri::command]
+fn get_session_snapshot() -> Option<resilience::session::SessionSnapshot> {
+    // [webview-diag] Boundary probe 2: App.tsx calls this on mount, so this
+    // line proves the JS bundle executed, React mounted, and Tauri IPC works.
+    resilience::log_event("[webview-diag] frontend IPC alive: get_session_snapshot called");
+    resilience::session::load_snapshot_if_restore_mode()
+}
+
+#[tauri::command]
+fn frontend_heartbeat() {
+    resilience::record_frontend_heartbeat();
+}
+
+#[tauri::command]
+fn report_frontend_diagnostic(message: String) {
+    // [webview-diag] Boundary probe 3: JS errors / boot milestones from main.tsx.
+    let truncated: String = message.chars().take(500).collect();
+    resilience::log_event(&format!("[webview-diag] frontend: {}", truncated));
 }
 
 #[tauri::command]
@@ -2326,6 +2553,7 @@ fn set_hotkeys(
     move_right_hotkey: String,
     toggle_visibility_hotkey: String,
     quit_app_hotkey: String,
+    capture_selection_hotkey: String,
 ) -> Result<HotkeysConfig, String> {
     let text = normalize_hotkey(&text_hotkey);
     let screenshot = normalize_hotkey(&screenshot_hotkey);
@@ -2338,6 +2566,7 @@ fn set_hotkeys(
     let move_right = normalize_hotkey(&move_right_hotkey);
     let toggle_visibility = normalize_hotkey(&toggle_visibility_hotkey);
     let quit_app = normalize_hotkey(&quit_app_hotkey);
+    let capture_selection = normalize_hotkey(&capture_selection_hotkey);
 
     if text.is_empty()
         || screenshot.is_empty()
@@ -2350,6 +2579,7 @@ fn set_hotkeys(
         || move_right.is_empty()
         || toggle_visibility.is_empty()
         || quit_app.is_empty()
+        || capture_selection.is_empty()
     {
         return Err("Hotkeys cannot be empty".to_string());
     }
@@ -2378,6 +2608,7 @@ fn set_hotkeys(
         move_right.as_str(),
         toggle_visibility.as_str(),
         quit_app.as_str(),
+        capture_selection.as_str(),
     ];
     for i in 0..all.len() {
         for j in (i + 1)..all.len() {
@@ -2399,6 +2630,7 @@ fn set_hotkeys(
     validate_hotkey_for_global_use(&move_right)?;
     validate_hotkey_for_global_use(&toggle_visibility)?;
     validate_hotkey_for_global_use(&quit_app)?;
+    validate_hotkey_for_global_use(&capture_selection)?;
     validate_scroll_hotkey(&scroll_up)?;
     validate_scroll_hotkey(&scroll_down)?;
     validate_move_hotkey(&move_up)?;
@@ -2423,6 +2655,7 @@ fn set_hotkeys(
         move_right,
         toggle_visibility,
         quit_app,
+        capture_selection,
     };
 
     // Register text first, then screenshot; rollback if anything fails.
@@ -2536,6 +2769,12 @@ fn set_hotkeys(
         unregister_hotkey_best_effort(&app, &next.toggle_visibility);
         register_hotkeys(&app, &previous).ok();
         return Err(format!("Failed to register quit hotkey: {}", e));
+    }
+
+    if let Err(e) = register_selection_hotkey(&app, &next.capture_selection, stealth_hotkey::HotkeyAction::CaptureSelection) {
+        unregister_all_fallback_hotkeys(&app, &next);
+        register_hotkeys(&app, &previous).ok();
+        return Err(format!("Failed to register capture selection hotkey: {}", e));
     }
 
     save_hotkeys_to_disk(&app, &next)?;

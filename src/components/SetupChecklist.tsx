@@ -23,7 +23,7 @@ export interface SetupStep {
   oneTime: boolean;
 }
 
-export function getSetupSteps(status: SetupStatus | null, cdpReady: boolean, isPro: boolean): SetupStep[] {
+export function getSetupSteps(status: SetupStatus | null, cdpReady: boolean, _isPro: boolean): SetupStep[] {
   if (!status) return [];
   const steps: SetupStep[] = [
     {
@@ -53,7 +53,7 @@ export function getSetupSteps(status: SetupStatus | null, cdpReady: boolean, isP
       oneTime: true,
     });
   }
-  if (status.screen_recording_granted !== null && isPro) {
+  if (status.screen_recording_granted !== null) {
     steps.push({
       id: 'screen_recording',
       label: 'Screen & System Audio Recording',

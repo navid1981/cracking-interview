@@ -1,0 +1,1186 @@
+//! Windows-specific window self-healing and resilience helpers (Scenarios A1a, A1b).
+
+use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use tauri::Manager;
+
+#[cfg(target_os = "windows")]
+struct WorkerProc {
+    pid: u32,
+    handle: isize,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for WorkerProc {
+    fn drop(&mut self) {
+        if self.handle != 0 {
+            unsafe {
+                win_desktop_ffi::CloseHandle(self.handle);
+            }
+        }
+    }
+}
+
+/// Spawns a windowless background thread inside `--guardian` that polls `OpenInputDesktop`
+/// every 300ms (Scenario A3). When a kiosk app switches to a new Win32 `HDESK`, spawns a
+/// `--desktop-worker <deskName>` instance directly onto `WinSta0\<deskName>` with its own
+/// WebView2 profile folder, or stands by cleanly if the desktop DACL denies access.
+pub fn start_desktop_switch_monitor(config_dir: PathBuf) {
+    #[cfg(target_os = "windows")]
+    std::thread::spawn(move || {
+        use super::{DesktopSwitchAction, DesktopSwitchState};
+        let mut state = DesktopSwitchState::default();
+        let mut worker: Option<WorkerProc> = None;
+
+        loop {
+            std::thread::sleep(Duration::from_millis(300));
+            if super::quit_was_authorized_in_dir(&config_dir, super::now_unix_secs()) {
+                if let Some(w) = worker.take() {
+                    terminate_pid_win32(w.pid);
+                }
+                break;
+            }
+            if !super::ResilienceConfig::load_from_dir(&config_dir).enabled {
+                continue;
+            }
+
+            let active_desk = query_active_input_desktop_name();
+            let alive = if let Some(ref w) = worker {
+                if is_handle_alive_win32(w.handle) {
+                    true
+                } else {
+                    let exit_code = query_exit_code_win32(w.handle);
+                    super::log_event_in_dir(
+                        &config_dir,
+                        &format!(
+                            "[desktop-diag] desktop worker PID={} exited (exit_code={:?})",
+                            w.pid, exit_code
+                        ),
+                    );
+                    false
+                }
+            } else {
+                false
+            };
+            if !alive {
+                worker = None;
+            }
+
+            match state.on_poll(active_desk.as_deref(), alive) {
+                DesktopSwitchAction::NoOp => {}
+                DesktopSwitchAction::SpawnWorker { desktop_name } => {
+                    super::log_event_in_dir(
+                        &config_dir,
+                        &format!(
+                            "Detected Win32 desktop switch -> '{}'; spawning shadow worker",
+                            desktop_name
+                        ),
+                    );
+                    match spawn_worker_on_desktop(&desktop_name, &config_dir) {
+                        Ok(w) => {
+                            let pid = w.pid;
+                            worker = Some(w);
+                            super::log_event_in_dir(
+                                &config_dir,
+                                &format!(
+                                    "Spawned desktop worker (PID={}) on WinSta0\\{}",
+                                    pid, desktop_name
+                                ),
+                            );
+                        }
+                        Err(e) => {
+                            state.blocked_desktop = Some(desktop_name.clone());
+                            super::log_event_in_dir(
+                                &config_dir,
+                                &format!(
+                                    "Could not spawn worker on '{}': {}; standing by for Default",
+                                    desktop_name, e
+                                ),
+                            );
+                        }
+                    }
+                }
+                DesktopSwitchAction::StandByForDefault { reason } => {
+                    super::log_event_in_dir(&config_dir, &reason);
+                }
+                DesktopSwitchAction::ReturnToDefault { terminate_worker } => {
+                    if terminate_worker {
+                        if let Some(w) = worker.take() {
+                            terminate_pid_win32(w.pid);
+                        }
+                    }
+                    super::log_event_in_dir(
+                        &config_dir,
+                        "Active input desktop returned to Default; shadow worker cleaned up",
+                    );
+                }
+            }
+        }
+    });
+}
+
+#[cfg(target_os = "windows")]
+mod console_ffi {
+    pub type BOOL = i32;
+    pub type DWORD = u32;
+    pub type PHANDLER_ROUTINE = Option<unsafe extern "system" fn(DWORD) -> BOOL>;
+
+    pub const CTRL_CLOSE_EVENT: DWORD = 2;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        pub fn SetConsoleCtrlHandler(HandlerRoutine: PHANDLER_ROUTINE, Add: BOOL) -> BOOL;
+        pub fn FreeConsole() -> BOOL;
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn swallow_console_close_handler(ctrl_type: u32) -> i32 {
+    // Returning TRUE marks the event handled: the process keeps running.
+    // Only CTRL_CLOSE_EVENT is swallowed — Ctrl+C/Ctrl+Break keep their
+    // default behavior so dev terminals stay interruptible.
+    if ctrl_type == console_ffi::CTRL_CLOSE_EVENT {
+        1
+    } else {
+        0
+    }
+}
+
+/// Removes the console as a kill vector for guardian-spawned GUI processes.
+///
+/// A GUI spawned by the detached (console-less) guardian is a
+/// console-subsystem process, so Windows allocates it a fresh console —
+/// complete with a top-level `ConsoleWindowClass` window owned by the GUI
+/// process. A proctor enumerating the process's top-level windows
+/// (win-proctor does; SEB-style sweeps can too) that posts `WM_CLOSE` to
+/// that console window triggers `CTRL_CLOSE_EVENT`, whose default handler
+/// terminates the process immediately, bypassing the window-proc subclass,
+/// Tauri's `CloseRequested`, and every other window-level defense (and
+/// outrunning their log writes). Detaching from the console removes the
+/// window entirely; the control handler is belt-and-braces for any console
+/// the process remains attached to. No-ops for window-subsystem (release)
+/// processes, which never have a console.
+#[cfg(target_os = "windows")]
+pub fn harden_console_for_gui(config_dir: &std::path::Path) {
+    unsafe {
+        let handler_ok =
+            console_ffi::SetConsoleCtrlHandler(Some(swallow_console_close_handler), 1) != 0;
+        let freed = console_ffi::FreeConsole() != 0;
+        super::log_event_in_dir(
+            config_dir,
+            &format!(
+                "Hardened GUI console (ctrl-handler={}, detached={}); CTRL_CLOSE_EVENT can no longer kill this process",
+                handler_ok, freed
+            ),
+        );
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod win_desktop_ffi {
+    pub type HANDLE = isize;
+    pub type HDESK = isize;
+    pub type BOOL = i32;
+    pub type DWORD = u32;
+
+    pub const DF_ALLOWOTHERACCOUNTHOOK: DWORD = 0x0001;
+    pub const DESKTOP_READOBJECTS: DWORD = 0x0001;
+    pub const DESKTOP_CREATEWINDOW: DWORD = 0x0002;
+    pub const DESKTOP_SWITCHDESKTOP: DWORD = 0x0100;
+    pub const UOI_NAME: i32 = 2;
+    pub const PROCESS_TERMINATE: DWORD = 0x0001;
+    pub const PROCESS_SYNCHRONIZE: DWORD = 0x00100000;
+    pub const WAIT_OBJECT_0: DWORD = 0;
+
+    #[repr(C)]
+    pub struct STARTUPINFOW {
+        pub cb: DWORD,
+        pub lpReserved: *mut u16,
+        pub lpDesktop: *mut u16,
+        pub lpTitle: *mut u16,
+        pub dwX: DWORD,
+        pub dwY: DWORD,
+        pub dwXSize: DWORD,
+        pub dwYSize: DWORD,
+        pub dwXCountChars: DWORD,
+        pub dwYCountChars: DWORD,
+        pub dwFillAttribute: DWORD,
+        pub dwFlags: DWORD,
+        pub wShowWindow: u16,
+        pub cbReserved2: u16,
+        pub lpReserved2: *mut u8,
+        pub hStdInput: HANDLE,
+        pub hStdOutput: HANDLE,
+        pub hStdError: HANDLE,
+    }
+
+    #[repr(C)]
+    pub struct PROCESS_INFORMATION {
+        pub hProcess: HANDLE,
+        pub hThread: HANDLE,
+        pub dwProcessId: DWORD,
+        pub dwThreadId: DWORD,
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        pub fn OpenInputDesktop(dwFlags: DWORD, fInherit: BOOL, dwDesiredAccess: DWORD) -> HDESK;
+        pub fn GetUserObjectInformationW(
+            hObj: HANDLE,
+            nIndex: i32,
+            pvInfo: *mut u8,
+            nLength: DWORD,
+            lpnLengthNeeded: *mut DWORD,
+        ) -> BOOL;
+        pub fn CloseDesktop(hDesktop: HDESK) -> BOOL;
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        pub fn CreateProcessW(
+            lpApplicationName: *const u16,
+            lpCommandLine: *mut u16,
+            lpProcessAttributes: *const u8,
+            lpThreadAttributes: *const u8,
+            bInheritHandles: BOOL,
+            dwCreationFlags: DWORD,
+            lpEnvironment: *const u8,
+            lpCurrentDirectory: *const u16,
+            lpStartupInfo: *const STARTUPINFOW,
+            lpProcessInformation: *mut PROCESS_INFORMATION,
+        ) -> BOOL;
+        pub fn OpenProcess(
+            dwDesiredAccess: DWORD,
+            bInheritHandle: BOOL,
+            dwProcessId: DWORD,
+        ) -> HANDLE;
+        pub fn WaitForSingleObject(hHandle: HANDLE, dwMilliseconds: DWORD) -> DWORD;
+        pub fn GetExitCodeProcess(hProcess: HANDLE, lpExitCode: *mut DWORD) -> BOOL;
+        pub fn TerminateProcess(hProcess: HANDLE, uExitCode: u32) -> BOOL;
+        pub fn CloseHandle(hObject: HANDLE) -> BOOL;
+        pub fn GetLastError() -> DWORD;
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn query_active_input_desktop_name() -> Option<String> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use win_desktop_ffi::*;
+
+    unsafe {
+        let hdesk = OpenInputDesktop(
+            DF_ALLOWOTHERACCOUNTHOOK,
+            0,
+            DESKTOP_READOBJECTS | DESKTOP_CREATEWINDOW | DESKTOP_SWITCHDESKTOP,
+        );
+        if hdesk == 0 {
+            return None;
+        }
+        let mut buf = [0u16; 256];
+        let mut needed: DWORD = 0;
+        let ok = GetUserObjectInformationW(
+            hdesk,
+            UOI_NAME,
+            buf.as_mut_ptr() as *mut u8,
+            (buf.len() * 2) as DWORD,
+            &mut needed,
+        );
+        CloseDesktop(hdesk);
+        if ok == 0 {
+            return None;
+        }
+        let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        Some(OsString::from_wide(&buf[..len]).to_string_lossy().into_owned())
+    }
+}
+
+/// Spawns `--desktop-worker` using the shell's genuine unelevated (Medium-integrity,
+/// non-restricted) user token when the guardian is running elevated.
+/// Unlike `CreateRestrictedToken` (which keeps `TokenIsElevated=1` and sets restricted
+/// flags that hang Edge WebView2), duplicating the desktop shell's primary token and calling
+/// `CreateProcessWithTokenW` gives the worker a real `elevated=false` token that SEB allows
+/// and WebView2 initializes cleanly.
+#[cfg(target_os = "windows")]
+fn spawn_worker_unelevated_on_desktop(
+    cmd_line: &mut [u16],
+    desk_wide: &mut [u16],
+) -> Result<WorkerProc, String> {
+    use windows::core::{PCWSTR, PWSTR};
+    use windows::Win32::Foundation::{CloseHandle as WinCloseHandle, HANDLE};
+    use windows::Win32::Security::{
+        DuplicateTokenEx, GetTokenInformation, SecurityImpersonation, TokenElevation,
+        TokenPrimary, TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_SESSIONID, TOKEN_ASSIGN_PRIMARY,
+        TOKEN_DUPLICATE, TOKEN_ELEVATION, TOKEN_QUERY,
+    };
+    use windows::Win32::System::Threading::{
+        CreateProcessWithTokenW, OpenProcess, CREATE_PROCESS_LOGON_FLAGS, OpenProcessToken,
+        PROCESS_CREATION_FLAGS, PROCESS_INFORMATION as WinProcessInformation,
+        PROCESS_QUERY_LIMITED_INFORMATION, STARTUPINFOW as WinStartupInfoW,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId};
+
+    unsafe {
+        let shell_hwnd = GetShellWindow();
+        if shell_hwnd.0.is_null() {
+            return Err("GetShellWindow returned null (explorer shell unavailable)".to_string());
+        }
+
+        let mut shell_pid: u32 = 0;
+        GetWindowThreadProcessId(shell_hwnd, Some(&mut shell_pid));
+        if shell_pid == 0 {
+            return Err("GetWindowThreadProcessId returned 0 for shell window".to_string());
+        }
+
+        let shell_proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, shell_pid)
+            .map_err(|e| format!("OpenProcess(shell pid={}): {}", shell_pid, e))?;
+
+        let mut shell_token = HANDLE::default();
+        let open_tok_res = OpenProcessToken(shell_proc, TOKEN_DUPLICATE | TOKEN_QUERY, &mut shell_token);
+        let _ = WinCloseHandle(shell_proc);
+        open_tok_res.map_err(|e| format!("OpenProcessToken(shell): {}", e))?;
+
+        let mut elev = TOKEN_ELEVATION::default();
+        let mut ret_len = 0u32;
+        let elev_ok = GetTokenInformation(
+            shell_token,
+            TokenElevation,
+            Some(&mut elev as *mut TOKEN_ELEVATION as *mut core::ffi::c_void),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut ret_len,
+        )
+        .is_ok();
+        if elev_ok && elev.TokenIsElevated != 0 {
+            let _ = WinCloseHandle(shell_token);
+            return Err("Shell token is itself elevated".to_string());
+        }
+
+        let mut primary_token = HANDLE::default();
+        let dup_res = DuplicateTokenEx(
+            shell_token,
+            TOKEN_ASSIGN_PRIMARY
+                | TOKEN_DUPLICATE
+                | TOKEN_QUERY
+                | TOKEN_ADJUST_DEFAULT
+                | TOKEN_ADJUST_SESSIONID,
+            None,
+            SecurityImpersonation,
+            TokenPrimary,
+            &mut primary_token,
+        );
+        let _ = WinCloseHandle(shell_token);
+        dup_res.map_err(|e| format!("DuplicateTokenEx(shell): {}", e))?;
+
+        let mut si = WinStartupInfoW::default();
+        si.cb = std::mem::size_of::<WinStartupInfoW>() as u32;
+        si.lpDesktop = PWSTR(desk_wide.as_mut_ptr());
+
+        let mut pi = WinProcessInformation::default();
+        let spawn_res = CreateProcessWithTokenW(
+            primary_token,
+            CREATE_PROCESS_LOGON_FLAGS(0),
+            PCWSTR::null(),
+            PWSTR(cmd_line.as_mut_ptr()),
+            PROCESS_CREATION_FLAGS(0),
+            None,
+            PCWSTR::null(),
+            &si,
+            &mut pi,
+        );
+        let _ = WinCloseHandle(primary_token);
+        spawn_res.map_err(|e| format!("CreateProcessWithTokenW: {}", e))?;
+
+        let _ = WinCloseHandle(pi.hThread);
+        Ok(WorkerProc {
+            pid: pi.dwProcessId,
+            handle: pi.hProcess.0 as isize,
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_worker_on_desktop(
+    desktop_name: &str,
+    config_dir: &std::path::Path,
+) -> Result<WorkerProc, String> {
+    use win_desktop_ffi::*;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let wv2_dir = config_dir.join("WebView2_DeskWorker");
+    let _ = std::fs::create_dir_all(&wv2_dir);
+
+    let mut cmd_line: Vec<u16> = format!(
+        "\"{}\" --gui --restore-session --desktop-worker \"{}\"\0",
+        exe.display(),
+        desktop_name
+    )
+    .encode_utf16()
+    .collect();
+    let mut desk_wide: Vec<u16> = format!("WinSta0\\{}\0", desktop_name)
+        .encode_utf16()
+        .collect();
+
+    if is_current_process_elevated() {
+        match spawn_worker_unelevated_on_desktop(&mut cmd_line, &mut desk_wide) {
+            Ok(w) => {
+                super::log_event_in_dir(
+                    config_dir,
+                    "[desktop-diag] spawned desktop worker at Medium integrity (de-elevated)",
+                );
+                return Ok(w);
+            }
+            Err(e) => {
+                super::log_event_in_dir(
+                    config_dir,
+                    &format!(
+                        "[desktop-diag] Medium-integrity worker spawn failed ({}); falling back to CreateProcessW",
+                        e
+                    ),
+                );
+            }
+        }
+    }
+
+    unsafe {
+        let mut si: STARTUPINFOW = std::mem::zeroed();
+        si.cb = std::mem::size_of::<STARTUPINFOW>() as DWORD;
+        si.lpDesktop = desk_wide.as_mut_ptr();
+
+        let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+        let ok = CreateProcessW(
+            std::ptr::null(),
+            cmd_line.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            0,
+            std::ptr::null(),
+            std::ptr::null(),
+            &si,
+            &mut pi,
+        );
+        if ok == 0 {
+            return Err(format!("CreateProcessW failed with err={}", GetLastError()));
+        }
+        CloseHandle(pi.hThread);
+        Ok(WorkerProc {
+            pid: pi.dwProcessId,
+            handle: pi.hProcess,
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_handle_alive_win32(handle: isize) -> bool {
+    use win_desktop_ffi::*;
+    if handle == 0 {
+        return false;
+    }
+    unsafe { WaitForSingleObject(handle, 0) != WAIT_OBJECT_0 }
+}
+
+#[cfg(target_os = "windows")]
+fn query_exit_code_win32(handle: isize) -> Option<u32> {
+    use win_desktop_ffi::*;
+    if handle == 0 {
+        return None;
+    }
+    unsafe {
+        let mut code: DWORD = 0;
+        if GetExitCodeProcess(handle, &mut code) != 0 {
+            Some(code)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn terminate_pid_win32(pid: u32) {
+    use win_desktop_ffi::*;
+    unsafe {
+        let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if h != 0 {
+            let _ = TerminateProcess(h, 0);
+            CloseHandle(h);
+        }
+    }
+}
+
+/// Opens an `http(s)` URL on Windows without relying on `explorer.exe` or `cmd.exe /C start`.
+/// Resolves the browser binary from Registry or known Chrome/Edge/Brave install paths and spawns directly.
+pub fn open_url_shell_independent(url: &str) -> Result<(), String> {
+    let validated = super::validate_external_http_url(url)?;
+
+    if let Some(browser_exe) = resolve_windows_browser_exe() {
+        if std::process::Command::new(&browser_exe)
+            .arg(&validated)
+            .spawn()
+            .is_ok()
+        {
+            return Ok(());
+        }
+    }
+
+    Err("Could not locate a browser executable (Chrome/Edge) to open URL while Explorer shell is unavailable".to_string())
+}
+
+fn resolve_windows_browser_exe() -> Option<PathBuf> {
+    // 1. Try resolving UserChoice ProgId -> shell\open\command via reg.exe (works without explorer.exe)
+    if let Ok(out) = std::process::Command::new("reg")
+        .args([
+            "query",
+            r"HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
+            "/v",
+            "ProgId",
+        ])
+        .output()
+    {
+        if out.status.success() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            if let Some(prog_id) = text
+                .lines()
+                .find(|l| l.contains("ProgId"))
+                .and_then(|l| l.split_whitespace().last())
+            {
+                let key = format!(r"HKCR\{}\shell\open\command", prog_id);
+                if let Ok(cmd_out) = std::process::Command::new("reg")
+                    .args(["query", &key, "/ve"])
+                    .output()
+                {
+                    if cmd_out.status.success() {
+                        let cmd_text = String::from_utf8_lossy(&cmd_out.stdout);
+                        for line in cmd_text.lines() {
+                            if let Some(idx) = line.find("REG_SZ") {
+                                let template = &line[idx + "REG_SZ".len()..];
+                                if let Some(exe) =
+                                    super::extract_exe_from_command_template(template)
+                                {
+                                    let pb = PathBuf::from(exe);
+                                    if pb.is_file() {
+                                        return Some(pb);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Fallback: Check standard Chrome / Edge / Brave paths directly (zero shell dependency)
+    let mut candidates: Vec<PathBuf> = vec![
+        PathBuf::from(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        PathBuf::from(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+        PathBuf::from(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+        PathBuf::from(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+        PathBuf::from(r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"),
+    ];
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        candidates.insert(
+            0,
+            PathBuf::from(&local).join(r"Google\Chrome\Application\chrome.exe"),
+        );
+        candidates.push(PathBuf::from(&local).join(r"Microsoft\Edge\Application\msedge.exe"));
+        candidates.push(
+            PathBuf::from(&local).join(r"BraveSoftware\Brave-Browser\Application\brave.exe"),
+        );
+    }
+
+    for candidate in candidates {
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Optional experimental process-DACL hardening (Task 9, off by default unless
+/// `resilience.json` sets `"harden_process_dacl": true`).
+/// Prepends an `ACCESS_DENIED_ACE` for `PROCESS_TERMINATE | PROCESS_SUSPEND_RESUME`
+/// for `CURRENT_USER` on `GetCurrentProcess()` so non-elevated same-user monitors
+/// receive `ERROR_ACCESS_DENIED` on `OpenProcess(PROCESS_TERMINATE)`.
+pub fn apply_experimental_process_dacl_hardening() {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::Win32::Foundation::ERROR_SUCCESS;
+        use windows::Win32::Security::Authorization::*;
+        use windows::Win32::Security::*;
+        use windows::Win32::System::Threading::GetCurrentProcess;
+
+        const PROCESS_TERMINATE_MASK: u32 = 0x0001;
+        const PROCESS_SUSPEND_RESUME_MASK: u32 = 0x0800;
+
+        let hproc = GetCurrentProcess();
+        let mut orig_dacl: *mut ACL = std::ptr::null_mut();
+        let mut sd = PSECURITY_DESCRIPTOR::default();
+
+        // windows 0.58: GetSecurityInfo takes Option<*mut T> raw out-pointers
+        // (not &mut T) and returns WIN32_ERROR (not Result).
+        if GetSecurityInfo(
+            hproc,
+            SE_KERNEL_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(std::ptr::addr_of_mut!(orig_dacl)),
+            None,
+            Some(std::ptr::addr_of_mut!(sd)),
+        ) != ERROR_SUCCESS
+        {
+            return;
+        }
+
+        let current_user_wide: Vec<u16> = "CURRENT_USER\0".encode_utf16().collect();
+        let mut ea = EXPLICIT_ACCESS_W::default();
+        ea.grfAccessPermissions = PROCESS_TERMINATE_MASK | PROCESS_SUSPEND_RESUME_MASK;
+        ea.grfAccessMode = DENY_ACCESS;
+        ea.grfInheritance = NO_INHERITANCE;
+        ea.Trustee.TrusteeForm = TRUSTEE_IS_NAME;
+        ea.Trustee.TrusteeType = TRUSTEE_IS_USER;
+        ea.Trustee.ptstrName = windows::core::PWSTR(current_user_wide.as_ptr() as *mut u16);
+
+        let mut new_dacl: *mut ACL = std::ptr::null_mut();
+        // windows 0.58: SetEntriesInAclW takes Option<*const ACL> for the old
+        // DACL and a raw *mut *mut ACL out-pointer; returns WIN32_ERROR.
+        if SetEntriesInAclW(
+            Some(&[ea]),
+            Some(orig_dacl as *const ACL),
+            std::ptr::addr_of_mut!(new_dacl),
+        ) == ERROR_SUCCESS
+        {
+            let _ = SetSecurityInfo(
+                hproc,
+                SE_KERNEL_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                PSID::default(),
+                PSID::default(),
+                Some(new_dacl),
+                None,
+            );
+            super::log_event("Applied experimental process-DACL hardening (DENY PROCESS_TERMINATE | PROCESS_SUSPEND_RESUME)");
+        }
+    }
+}
+
+static ORIGINAL_WNDPROC: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+static PROTECT_SUBCLASS_INSTALLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Window procedure installed over the Tauri/wry proc to stop external hides
+/// at the source instead of re-showing after the fact. Kiosk monitors such as
+/// SEB call `ShowWindow(SW_HIDE)` every few seconds; re-showing in response
+/// produced a visible close/open flicker (~2-3s) and left WebView2 painting
+/// white. Swallowing the hide keeps the window (and its painted surface)
+/// untouched. The user's own hide (`USER_HIDDEN`) and authorized quits are
+/// always allowed through to the original proc.
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn protected_window_proc(
+    hwnd: windows::Win32::Foundation::HWND,
+    msg: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    // [window-diag] Log every close-path message ON ARRIVAL, before any guard
+    // runs. A guardian-respawned GUI once died from an external WM_CLOSE with
+    // no block/authorization log at all; arrival logging distinguishes
+    // "message never reached this proc" (helper-window / proc replaced) from
+    // "guard let it through" (values below) from "died inside the handler"
+    // (arrival logged, nothing after). Close attempts are rare, so the
+    // filesystem-backed reads are acceptable here.
+    if msg == WM_CLOSE
+        || msg == WM_DESTROY
+        || (msg == WM_SYSCOMMAND && (wparam.0 & 0xFFF0) == SC_CLOSE as usize)
+    {
+        super::log_event(&format!(
+            "[window-diag] close-path arrival msg={:#06x} enabled={} quit_authorized={} user_hidden={}",
+            msg,
+            super::enabled(),
+            super::quit_was_authorized(),
+            super::USER_HIDDEN.load(Ordering::Relaxed)
+        ));
+    }
+
+    // Only the hide/close messages need the (filesystem-backed) authorization
+    // and config checks; every other message goes straight to the original
+    // proc so the UI thread is not slowed down.
+    let block_hide = matches!(
+        msg,
+        WM_SHOWWINDOW | WM_WINDOWPOSCHANGING | WM_CLOSE | WM_SYSCOMMAND
+    ) && super::should_block_external_hide(
+        super::USER_HIDDEN.load(Ordering::Relaxed),
+        super::quit_was_authorized(),
+        super::enabled(),
+    );
+
+    match msg {
+        // [window-diag] Activation changes are rare and click-correlated;
+        // log them (never block) to timestamp focus events against white-out.
+        WM_ACTIVATE => {
+            let state = wparam.0 & 0xFFFF;
+            super::log_event(&format!(
+                "[window-diag] WM_ACTIVATE state={} (0=inactive,1=active,2=click-active)",
+                state
+            ));
+        }
+        // External ShowWindow(SW_HIDE): wParam == FALSE.
+        WM_SHOWWINDOW if wparam.0 == 0 && block_hide => {
+            super::log_event("Blocked external hide (WM_SHOWWINDOW) via window-proc subclass");
+            return LRESULT(0);
+        }
+        // External SetWindowPos(SWP_HIDEWINDOW): strip just the hide bit.
+        WM_WINDOWPOSCHANGING if block_hide => {
+            let pos = lparam.0 as *mut WINDOWPOS;
+            if !pos.is_null() {
+                let stripped = super::strip_hide_window_flag((*pos).flags.0, true);
+                if stripped != (*pos).flags.0 {
+                    super::log_event(
+                        "Blocked external hide (SWP_HIDEWINDOW) via window-proc subclass",
+                    );
+                    (*pos).flags = SET_WINDOW_POS_FLAGS(stripped);
+                }
+            }
+        }
+        // Defense in depth: Tauri's CloseRequested handler also blocks this.
+        WM_CLOSE if super::enabled() && !super::quit_was_authorized() => {
+            super::log_event("Blocked external WM_CLOSE via window-proc subclass");
+            return LRESULT(0);
+        }
+        // Minimize/restore are always legitimate user actions: never block,
+        // just record them so the self-healer stands down instead of
+        // "healing" the minimized window back onto the screen.
+        WM_SYSCOMMAND if super::is_minimize_command(wparam.0) => {
+            super::USER_MINIMIZED.store(true, Ordering::SeqCst);
+            super::log_event("User minimized window (SC_MINIMIZE); self-healer standing down");
+        }
+        WM_SYSCOMMAND if super::is_restore_command(wparam.0) => {
+            super::USER_MINIMIZED.store(false, Ordering::SeqCst);
+            super::log_event("User restored window (SC_RESTORE); self-healer resuming");
+        }
+        // The user clicking the title-bar X (mouse coords in lParam) is an
+        // authorized quit: persist it so the guardian exits cleanly, then
+        // fall through to the original proc to close normally. Programmatic
+        // SC_CLOSE (lParam = 0, e.g. SEB's close escalation) stays blocked
+        // by the next arm.
+        WM_SYSCOMMAND
+            if super::is_user_mouse_close_command(wparam.0, lparam.0)
+                && super::enabled()
+                && !super::quit_was_authorized() =>
+        {
+            super::authorize_quit_without_app_handle();
+            super::log_event("User clicked title-bar X (mouse SC_CLOSE); authorizing quit");
+        }
+        WM_SYSCOMMAND
+            if (wparam.0 & 0xFFF0) == SC_CLOSE as usize
+                && super::enabled()
+                && !super::quit_was_authorized() =>
+        {
+            super::log_event("Blocked external SC_CLOSE via window-proc subclass");
+            return LRESULT(0);
+        }
+        _ => {}
+    }
+
+    let orig = ORIGINAL_WNDPROC.load(Ordering::SeqCst);
+    if orig == 0 {
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    } else {
+        let prev: WNDPROC = std::mem::transmute(orig);
+        CallWindowProcW(prev, hwnd, msg, wparam, lparam)
+    }
+}
+
+/// Installs [`protected_window_proc`] on the main window (once per process).
+/// Runs on both the normal GUI and `--desktop-worker` instances because both
+/// go through the same Tauri setup that starts the self-healer.
+#[cfg(target_os = "windows")]
+pub fn install_window_protect_subclass(app: &tauri::AppHandle) {
+    if PROTECT_SUBCLASS_INSTALLED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let Some(win) = app.get_webview_window("main") else {
+        PROTECT_SUBCLASS_INSTALLED.store(false, Ordering::SeqCst);
+        return;
+    };
+    let Ok(hwnd_raw) = win.hwnd() else {
+        PROTECT_SUBCLASS_INSTALLED.store(false, Ordering::SeqCst);
+        return;
+    };
+    unsafe {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::*;
+
+        let hwnd = HWND(hwnd_raw.0 as *mut _);
+        if !IsWindow(hwnd).as_bool() {
+            PROTECT_SUBCLASS_INSTALLED.store(false, Ordering::SeqCst);
+            return;
+        }
+        let prev = SetWindowLongPtrW(
+            hwnd,
+            GWLP_WNDPROC,
+            protected_window_proc as *const () as isize,
+        );
+        if prev == 0 {
+            PROTECT_SUBCLASS_INSTALLED.store(false, Ordering::SeqCst);
+            super::log_event("Failed to install window-proc hide-protection subclass");
+        } else {
+            ORIGINAL_WNDPROC.store(prev, Ordering::SeqCst);
+            super::log_event("Installed window-proc hide-protection subclass");
+        }
+    }
+}
+
+/// [window-diag] Snapshot of the main window + its child HWND tree
+/// (WebView2 renders into children such as `Chrome_WidgetWin_0`), returned
+/// as `(full, signature)`. The self-healer logs the full snapshot only when
+/// the *signature* changes — visibility, affinity, foreground, and child
+/// visibility — so dragging/resizing the window doesn't spam the log, while
+/// a white window can still be attributed to a hidden child or lost focus.
+#[cfg(target_os = "windows")]
+unsafe fn build_window_diag_snapshot(
+    hwnd: windows::Win32::Foundation::HWND,
+) -> (String, String) {
+    use windows::Win32::Foundation::{LPARAM, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    unsafe extern "system" fn enum_child(
+        child: windows::Win32::Foundation::HWND,
+        lparam: LPARAM,
+    ) -> windows::Win32::Foundation::BOOL {
+        let lists = &mut *(lparam.0 as *mut (Vec<String>, Vec<String>));
+        let mut buf = [0u16; 128];
+        let len = GetClassNameW(child, &mut buf);
+        let class = String::from_utf16_lossy(&buf[..len.max(0) as usize]);
+        let visible = IsWindowVisible(child).as_bool();
+        let mut rect: RECT = std::mem::zeroed();
+        let _ = GetWindowRect(child, &mut rect);
+        lists.0.push(format!(
+            "{}:vis={}:{}x{}@{},{}",
+            class,
+            visible,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            rect.left,
+            rect.top
+        ));
+        lists.1.push(format!("{}:vis={}", class, visible));
+        windows::Win32::Foundation::BOOL(1)
+    }
+
+    let mut children: (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    let _ = EnumChildWindows(
+        hwnd,
+        Some(enum_child),
+        LPARAM(&mut children as *mut (Vec<String>, Vec<String>) as isize),
+    );
+    let mut rect: RECT = std::mem::zeroed();
+    let _ = GetWindowRect(hwnd, &mut rect);
+    let mut affinity: u32 = 0;
+    let _ = GetWindowDisplayAffinity(hwnd, &mut affinity);
+    let main_visible = IsWindowVisible(hwnd).as_bool();
+    let foreground = GetForegroundWindow() == hwnd;
+    let full = format!(
+        "main vis={} rect={}x{}@{},{} affinity=0x{:x} foreground={} children=[{}]",
+        main_visible,
+        rect.right - rect.left,
+        rect.bottom - rect.top,
+        rect.left,
+        rect.top,
+        affinity,
+        foreground,
+        children.0.join("; ")
+    );
+    let signature = format!(
+        "main vis={} affinity=0x{:x} foreground={} children=[{}]",
+        main_visible,
+        affinity,
+        foreground,
+        children.1.join("; ")
+    );
+    (full, signature)
+}
+
+/// Spawns a 250ms background thread on Windows that inspects the main window's
+/// visibility, topmost z-order, extended styles (`WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`),
+/// and screen-capture exclusion (`WDA_EXCLUDEFROMCAPTURE = 0x11`).
+///
+/// Never heals if `resilience::USER_HIDDEN` is true or `resilience::quit_was_authorized()`.
+pub fn start_window_self_healer(app: tauri::AppHandle) {
+    #[cfg(target_os = "windows")]
+    install_window_protect_subclass(&app);
+    if let Some(dir) = super::get_config_dir() {
+        let cfg = super::ResilienceConfig::load_from_dir(&dir);
+        if cfg.should_apply_process_dacl() {
+            apply_experimental_process_dacl_hardening();
+        }
+    }
+    std::thread::spawn(move || {
+        let mut heartbeat_lost_logged = false;
+        let mut last_window_diag_signature = String::new();
+        loop {
+            std::thread::sleep(Duration::from_millis(250));
+
+            if super::quit_was_authorized() {
+                // Log before exiting: this is a legitimate silent-exit path
+                // (authorized quit observed cross-process) and must be
+                // distinguishable from an unexplained GUI death in the log.
+                super::log_event("Self-healer observed authorized quit; exiting GUI");
+                crate::stealth_hotkey::teardown_stealth_hotkeys();
+                app.exit(0);
+                break;
+            }
+
+            // [webview-diag] Detect frontend death (WebView renderer killed /
+            // JS crashed) within ~8s and log it once per episode, so a white
+            // window is timestamped against external events in the same log.
+            {
+                let last = super::FRONTEND_HEARTBEAT_MS.load(Ordering::Relaxed);
+                let stale = super::frontend_heartbeat_is_stale(last, super::now_unix_ms(), 8_000);
+                if stale && !super::USER_HIDDEN.load(Ordering::Relaxed) {
+                    if !heartbeat_lost_logged {
+                        heartbeat_lost_logged = true;
+                        super::log_event(&format!(
+                            "[webview-diag] frontend heartbeat lost: renderer/JS presumed dead (last beat {}ms ago)",
+                            super::now_unix_ms().saturating_sub(last)
+                        ));
+                    }
+                } else if !stale {
+                    heartbeat_lost_logged = false;
+                }
+            }
+            if !super::enabled() || super::USER_HIDDEN.load(Ordering::Relaxed) {
+                continue;
+            }
+
+            let Some(win) = app.get_webview_window("main") else {
+                continue;
+            };
+            let Ok(hwnd_raw) = win.hwnd() else {
+                continue;
+            };
+
+            #[cfg(target_os = "windows")]
+            unsafe {
+                use windows::Win32::Foundation::HWND;
+                use windows::Win32::UI::WindowsAndMessaging::*;
+
+                let hwnd = HWND(hwnd_raw.0 as *mut _);
+                if !IsWindow(hwnd).as_bool() {
+                    continue;
+                }
+
+                // 1. Heal visibility if an external monitor called ShowWindow(SW_HIDE).
+                // A minimized window also reports not-visible on current
+                // Windows builds; healing it makes the user's minimize bounce
+                // straight back, so iconic/user-minimized always stands down.
+                let is_iconic = IsIconic(hwnd).as_bool();
+                if !is_iconic {
+                    super::USER_MINIMIZED.store(false, Ordering::Relaxed);
+                }
+                if super::should_heal_hidden_window(
+                    IsWindowVisible(hwnd).as_bool(),
+                    is_iconic,
+                    super::USER_MINIMIZED.load(Ordering::Relaxed),
+                ) {
+                    let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND_TOPMOST,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    );
+                    super::log_event("Self-healed hidden HWND via SW_SHOWNOACTIVATE + HWND_TOPMOST");
+                }
+
+                // 2. Heal topmost & stealth extended styles if stripped
+                // (never poke a minimized window with SetWindowPos).
+                let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                let is_topmost = (ex_style & (WS_EX_TOPMOST.0 as isize)) != 0;
+                if !is_topmost && !is_iconic {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND_TOPMOST,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    );
+                    super::log_event("Self-healed stripped WS_EX_TOPMOST on HWND");
+                }
+
+                if crate::STEALTH_ENABLED.load(Ordering::Relaxed) {
+                    let kb_active = super::KEYBOARD_INPUT_ACTIVE.load(Ordering::Relaxed);
+                    let want_tool = WS_EX_TOOLWINDOW.0 as isize;
+                    let want_noact = if kb_active { 0 } else { WS_EX_NOACTIVATE.0 as isize };
+                    let unwanted_app = WS_EX_APPWINDOW.0 as isize;
+
+                    let missing_tool = (ex_style & want_tool) == 0;
+                    let missing_noact = !kb_active && (ex_style & want_noact) == 0;
+                    let has_appwin = (ex_style & unwanted_app) != 0;
+
+                    if missing_tool || missing_noact || has_appwin {
+                        let fixed = (ex_style | want_tool | want_noact) & !unwanted_app;
+                        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, fixed);
+                        super::log_event("Self-healed stripped GWL_EXSTYLE stealth flags");
+                    }
+
+                    // 3. Heal WDA_EXCLUDEFROMCAPTURE (0x11)
+                    let mut affinity: u32 = 0;
+                    if GetWindowDisplayAffinity(hwnd, &mut affinity).is_ok() && affinity != 0x11 {
+                        let _ = SetWindowDisplayAffinity(hwnd, WINDOW_DISPLAY_AFFINITY(0x11));
+                        super::log_event("Self-healed WDA_EXCLUDEFROMCAPTURE (0x11) display affinity");
+                    }
+                }
+
+                // 4. [window-diag] Log the HWND tree whenever it changes, so
+                // a white window shows whether WebView2's child windows were
+                // hidden, zero-sized, or lost with the main window intact.
+                #[cfg(target_os = "windows")]
+                {
+                    let (snapshot, signature) = build_window_diag_snapshot(hwnd);
+                    if signature != last_window_diag_signature {
+                        last_window_diag_signature = signature;
+                        super::log_event(&format!("[window-diag] {}", snapshot));
+                    }
+                }
+
+                // 5. Heal WebView2 render-surface children. SEB's blocked
+                // ShowWindow(SW_HIDE) on the main window still makes Chromium
+                // hide Chrome_RenderWidgetHostHWND / Chrome_WidgetWin_1 /
+                // Intermediate D3D Window, and nothing ever shows them again
+                // (main window stayed visible) -> permanent white window with
+                // a live DOM. Re-show them while the main window is visible
+                // and not minimized.
+                #[cfg(target_os = "windows")]
+                if !IsIconic(hwnd).as_bool() {
+                    unsafe extern "system" fn enum_hidden_render_child(
+                        child: HWND,
+                        lparam: windows::Win32::Foundation::LPARAM,
+                    ) -> windows::Win32::Foundation::BOOL {
+                        let list = &mut *(lparam.0 as *mut Vec<(HWND, String)>);
+                        if !IsWindowVisible(child).as_bool() {
+                            let mut buf = [0u16; 128];
+                            let len = GetClassNameW(child, &mut buf);
+                            let class =
+                                String::from_utf16_lossy(&buf[..len.max(0) as usize]).to_string();
+                            if super::is_webview_render_surface_class(&class) {
+                                list.push((child, class));
+                            }
+                        }
+                        windows::Win32::Foundation::BOOL(1)
+                    }
+
+                    let mut hidden: Vec<(HWND, String)> = Vec::new();
+                    let _ = EnumChildWindows(
+                        hwnd,
+                        Some(enum_hidden_render_child),
+                        windows::Win32::Foundation::LPARAM(
+                            &mut hidden as *mut Vec<(HWND, String)> as isize,
+                        ),
+                    );
+                    for (child, class) in hidden {
+                        let _ = ShowWindow(child, SW_SHOWNOACTIVATE);
+                        super::log_event(&format!(
+                            "Self-healed hidden WebView render child HWND ({}) via SW_SHOWNOACTIVATE",
+                            class
+                        ));
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[cfg(target_os = "windows")]
+pub fn is_current_process_elevated() -> bool {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+            return false;
+        }
+        let mut elev = TOKEN_ELEVATION::default();
+        let mut ret_len = 0u32;
+        let ok = GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elev as *mut TOKEN_ELEVATION as *mut core::ffi::c_void),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut ret_len,
+        )
+        .is_ok();
+        let _ = CloseHandle(token);
+        ok && elev.TokenIsElevated != 0
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn relaunch_as_admin(extra_args: &[String]) -> Result<(), String> {
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: isize,
+            lp_operation: *const u16,
+            lp_file: *const u16,
+            lp_parameters: *const u16,
+            lp_directory: *const u16,
+            n_show_cmd: i32,
+        ) -> isize;
+    }
+
+    const SW_SHOWNORMAL: i32 = 1;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let runas_w: Vec<u16> = "runas\0".encode_utf16().collect();
+    let exe_w: Vec<u16> = exe
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let params_joined = extra_args
+        .iter()
+        .map(|a| {
+            if a.contains(' ') {
+                format!("\"{}\"", a)
+            } else {
+                a.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let params_w: Vec<u16> = params_joined
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let params_ptr = if params_joined.is_empty() {
+        std::ptr::null()
+    } else {
+        params_w.as_ptr()
+    };
+
+    let rc = unsafe {
+        ShellExecuteW(
+            0,
+            runas_w.as_ptr(),
+            exe_w.as_ptr(),
+            params_ptr,
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if rc > 32 {
+        Ok(())
+    } else {
+        Err(format!("ShellExecuteW(runas) returned code {}", rc))
+    }
+}

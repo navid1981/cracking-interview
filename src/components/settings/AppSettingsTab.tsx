@@ -14,18 +14,32 @@ interface Props {
   /** macOS only: whether the event tap that hides hotkeys from other apps is running. */
   hotkeySwallowingActive: boolean;
   isMac: boolean;
+  isWindows: boolean;
+  runAsAdmin: boolean;
+  isElevated: boolean;
+  adminRestartStatus: string;
+  onRunAsAdminChange: (enabled: boolean) => void;
+  onRestartNow: () => void;
   onRequestAccessibility: () => void;
   onRefreshStealthStatus: () => void;
   setupChecklist: Omit<ComponentProps<typeof SetupChecklist>, 'variant'>;
 }
 
+const STEALTH_FEATURES = (
+  <>
+    <div className="stealth-box-text">• <strong>Hidden hotkeys:</strong> your shortcuts are hidden from other apps and browsers.</div>
+    <div className="stealth-box-text">• <strong>Hidden window:</strong> not shown in screen sharing, recordings, screenshots, the Dock (macOS) or the Taskbar (Windows).</div>
+  </>
+);
+
 export default function AppSettingsTab({
   windowOpacity, onOpacityChange, theme, onThemeChange,
   isPro, stealthMode, onStealthModeChange, hotkeySwallowingActive, isMac,
+  isWindows, runAsAdmin, isElevated, adminRestartStatus, onRunAsAdminChange, onRestartNow,
   onRequestAccessibility, onRefreshStealthStatus, setupChecklist,
 }: Props) {
   const restartNote = isMac && (
-    <div className="stealth-note">* Stealth changes take effect after restarting the app.</div>
+    <div className="stealth-note">* Restart the app for changes to take effect.</div>
   );
 
   return (
@@ -64,6 +78,7 @@ export default function AppSettingsTab({
           Stealth Mode
           {!isPro && <span className="pro-only-tag">Pro Only</span>}
         </div>
+        <div className="app-settings-desc">Keeps the app out of sight while you use it.</div>
         <div className="stealth-toggle-row">
           <label className={`toggle-switch ${!isPro ? 'disabled' : ''}`}>
             <input
@@ -81,12 +96,12 @@ export default function AppSettingsTab({
 
         {isPro && stealthMode ? (
           <div className="stealth-box is-active">
-            <div className="stealth-box-title">🛡️ Anti-Detection Protection Active</div>
-            <div className="stealth-box-text">• <strong>Hotkey Hiding:</strong> Chrome can never catch your HotKey.</div>
-            <div className="stealth-box-text">• <strong>Screen & System Protection:</strong> Hidden from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows).</div>
+            <div className="stealth-box-title">🛡️ Stealth Active</div>
+            {STEALTH_FEATURES}
             {restartNote}
             {isMac && !hotkeySwallowingActive && (
               <div className="stealth-actions">
+                <div className="stealth-box-text">Hidden hotkeys need Accessibility permission (System Settings → Privacy & Security → Accessibility).</div>
                 <button type="button" className="stealth-btn primary" onClick={onRequestAccessibility}>🔑 Request macOS Permission</button>
                 <button type="button" className="stealth-btn" onClick={onRefreshStealthStatus}>🔄 Re-check Status</button>
               </div>
@@ -94,9 +109,9 @@ export default function AppSettingsTab({
           </div>
         ) : isPro ? (
           <div className="stealth-box is-inactive">
-            <div className="stealth-box-title">🛡️ Anti-Detection Protection Inactive</div>
+            <div className="stealth-box-title">🛡️ Stealth Off</div>
             <div className="stealth-box-text">
-              Enable Stealth Mode above so Chrome cannot catch your HotKey, and the window is hidden from screen sharing, screenshots, Dock (macOS) and Taskbar (Windows).
+              Turn on Stealth Mode above to hide your hotkeys from other apps and hide the window from screen sharing, recordings, screenshots, the Dock (macOS) and the Taskbar (Windows).
             </div>
             {restartNote}
           </div>
@@ -104,11 +119,62 @@ export default function AppSettingsTab({
           <div className="stealth-box is-locked">
             <div className="stealth-box-title">🔒 Pro Feature: Stealth Mode</div>
             <div className="stealth-box-text">
-              Upgrade to Pro to unlock Stealth Mode (Undetectable and fully private. Hidden hotkeys, and the window never appears in screen shares, recordings, screenshots, the Dock or the Taskbar).
+              Upgrade to Pro to hide your hotkeys and keep the window out of screen shares, recordings, screenshots, the Dock and the Taskbar.
             </div>
           </div>
         )}
       </div>
+
+      {isWindows && (
+        <div className="app-settings-group">
+          <div className="app-settings-label stealth-heading">
+            Run as Administrator
+          </div>
+          <div className="app-settings-desc">
+            Automatically prompts for Windows elevation at launch so Lockdown Browser text capture can read protected windows.
+          </div>
+          <div className="stealth-toggle-row">
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={runAsAdmin}
+                onChange={(e) => onRunAsAdminChange(e.target.checked)}
+              />
+              <span className="toggle-switch-slider" />
+            </label>
+            <span className="stealth-label">
+              {runAsAdmin
+                ? (isElevated ? 'Enabled (Elevated)' : 'Enabled (Restart required)')
+                : (isElevated ? 'Disabled (Currently Elevated)' : 'Disabled')}
+            </span>
+          </div>
+
+          <div className={`stealth-box ${isElevated ? 'is-active' : 'is-inactive'}`}>
+            <div className="stealth-box-title">
+              {isElevated ? '🛡️ Running as Administrator' : '🛡️ Running with Standard Privileges'}
+            </div>
+            <div className="stealth-box-text">
+              {runAsAdmin
+                ? (isElevated
+                  ? 'The app will automatically request Windows administrator elevation on future launches.'
+                  : 'Administrator mode is saved. Restart the app to trigger the Windows elevation prompt.')
+                : (isElevated
+                  ? 'Administrator mode is turned off. Quit and reopen the app to return to standard privileges.'
+                  : 'Enable Run as Administrator if Lockdown Browser blocks text capture.')}
+            </div>
+            {runAsAdmin && !isElevated && (
+              <div className="stealth-actions">
+                <button type="button" className="stealth-btn primary" onClick={onRestartNow}>
+                  🔄 Restart Now
+                </button>
+              </div>
+            )}
+            {adminRestartStatus && (
+              <div className="stealth-note">{adminRestartStatus}</div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="app-settings-group">
         <SetupChecklist variant="panel" {...setupChecklist} />

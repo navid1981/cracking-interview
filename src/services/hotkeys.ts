@@ -10,6 +10,7 @@ export interface HotkeysConfig {
   move_right: string;
   toggle_visibility: string;
   quit_app: string;
+  capture_selection: string;
 }
 
 const MAC_SYMBOLS: Record<string, string> = {
@@ -18,12 +19,15 @@ const MAC_SYMBOLS: Record<string, string> = {
   up: '↑', down: '↓', left: '←', right: '→',
 };
 
+/** "Cmd+Shift+1" → ["⌘", "⇧", "1"] on macOS, ["Ctrl", "Shift", "1"] elsewhere. */
+export function hotkeyKeys(hotkey: string, isMac: boolean): string[] {
+  if (!hotkey) return [];
+  const parts = hotkey.split('+').map(p => p.trim()).filter(Boolean);
+  if (isMac) return parts.map(p => MAC_SYMBOLS[p.toLowerCase()] ?? p.toUpperCase());
+  return parts.map(p => (/^(cmd|command|commandorcontrol|cmdorctrl)$/i.test(p) ? 'Ctrl' : p));
+}
+
 /** "Cmd+Shift+1" → "⌘⇧1" on macOS, "Ctrl+Shift+1" elsewhere. */
 export function formatHotkey(hotkey: string, isMac: boolean): string {
-  if (!hotkey) return '';
-  const parts = hotkey.split('+').map(p => p.trim()).filter(Boolean);
-  if (isMac) return parts.map(p => MAC_SYMBOLS[p.toLowerCase()] ?? p.toUpperCase()).join('');
-  return parts
-    .map(p => (/^(cmd|command|commandorcontrol|cmdorctrl)$/i.test(p) ? 'Ctrl' : p))
-    .join('+');
+  return hotkeyKeys(hotkey, isMac).join(isMac ? '' : '+');
 }

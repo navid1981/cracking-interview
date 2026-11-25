@@ -77,9 +77,17 @@ pub enum HotkeyAction {
     MoveRight,
     ToggleVisibility,
     QuitApp,
+    CaptureSelection,
 }
 
 impl HotkeyAction {
+    /// Hotkeys whose keystroke must never reach the foreground app, even without stealth mode.
+    /// Capture Selection reads the selection in the foreground app; letting Cmd/Alt+4 through
+    /// makes Chrome/Lockdown Browser switch tabs first, so the selection is gone.
+    pub fn always_swallow(&self) -> bool {
+        matches!(self, HotkeyAction::CaptureSelection)
+    }
+
     #[allow(dead_code)]
     pub fn event_name(&self) -> Option<&'static str> {
         match self {
@@ -94,6 +102,7 @@ impl HotkeyAction {
             HotkeyAction::MoveRight => Some("hotkey-move-right"),
             HotkeyAction::ToggleVisibility => None,
             HotkeyAction::QuitApp => None,
+            HotkeyAction::CaptureSelection => None, // emitted by selection::capture with the captured text
         }
     }
 
@@ -110,6 +119,7 @@ impl HotkeyAction {
             HotkeyAction::MoveRight => "move-right",
             HotkeyAction::ToggleVisibility => "toggle-visibility",
             HotkeyAction::QuitApp => "quit-app",
+            HotkeyAction::CaptureSelection => "capture-selection",
         }
     }
 }
@@ -208,8 +218,10 @@ pub fn request_accessibility_permission() -> bool {
 /// Bring the main window to the front without stealing focus from Chrome or the active app.
 /// Blur prevention is ALWAYS active so test tabs never register a window.blur event.
 pub fn bring_to_front_without_focus(win: &tauri::WebviewWindow) {
+    let restored_coords = crate::resilience::consume_offscreen_restore_coords_if_hidden();
     #[cfg(target_os = "macos")]
     {
+        let _ = restored_coords;
         use std::ffi::c_void;
         extern "C" {
             fn sel_registerName(name: *const std::ffi::c_char) -> *mut c_void;
@@ -241,12 +253,27 @@ pub fn bring_to_front_without_focus(win: &tauri::WebviewWindow) {
                 let hwnd = HWND(h.0 as *mut _);
                 // SW_SHOWNOACTIVATE (4): Displays window without activating it.
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                let _ = SetWindowPos(
-                    hwnd,
-                    HWND_TOPMOST,
-                    0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                );
+                if let Some((rx, ry)) = restored_coords {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND_TOPMOST,
+                        rx,
+                        ry,
+                        0,
+                        0,
+                        SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    );
+                } else {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND_TOPMOST,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    );
+                }
             }
         }
     }
@@ -259,33 +286,40 @@ pub fn bring_to_front_without_focus(win: &tauri::WebviewWindow) {
 
 /// Toggle window visibility without stealing focus from the active foreground app.
 pub fn toggle_visibility_without_focus(app: &tauri::AppHandle) {
+    crate::resilience::record_user_interaction();
     if let Some(win) = app.get_webview_window("main") {
         #[cfg(target_os = "windows")]
         {
             if crate::STEALTH_ENABLED.load(Ordering::Relaxed) {
                 crate::toggle_window_offscreen_win32(&win);
+                crate::resilience::session::update_window_state_in_snapshot(app);
                 return;
             }
         }
 
         match win.is_visible() {
             Ok(true) => {
+                crate::resilience::USER_HIDDEN.store(true, Ordering::Relaxed);
                 let _ = win.hide();
             }
             Ok(false) => {
+                crate::resilience::USER_HIDDEN.store(false, Ordering::Relaxed);
                 bring_to_front_without_focus(&win);
                 crate::reapply_stealth_after_show(&win);
             }
             Err(_) => {
+                crate::resilience::USER_HIDDEN.store(false, Ordering::Relaxed);
                 bring_to_front_without_focus(&win);
                 crate::reapply_stealth_after_show(&win);
             }
         }
+        crate::resilience::session::update_window_state_in_snapshot(app);
     }
 }
 
 /// Dispatch a matched hotkey action safely in the background.
 pub fn dispatch_action(app: &tauri::AppHandle, action: HotkeyAction) {
+    crate::resilience::record_user_interaction();
     match action {
         HotkeyAction::SolveText => {
             if let Some(win) = app.get_webview_window("main") {
@@ -330,8 +364,13 @@ pub fn dispatch_action(app: &tauri::AppHandle, action: HotkeyAction) {
             toggle_visibility_without_focus(app);
         }
         HotkeyAction::QuitApp => {
+            crate::resilience::authorize_quit(app);
             teardown_stealth_hotkeys();
             app.exit(0);
+        }
+        HotkeyAction::CaptureSelection => {
+            crate::resilience::log_event("[selection] CaptureSelection hotkey dispatched");
+            crate::selection::capture(app);
         }
     }
 }
@@ -432,6 +471,7 @@ pub fn setup_stealth_hotkeys(app: &tauri::AppHandle, cfg: &crate::HotkeysConfig)
         (&cfg.move_right, HotkeyAction::MoveRight),
         (&cfg.toggle_visibility, HotkeyAction::ToggleVisibility),
         (&cfg.quit_app, HotkeyAction::QuitApp),
+        (&cfg.capture_selection, HotkeyAction::CaptureSelection),
     ];
 
     for (hotkey_str, action) in pairs {
@@ -773,7 +813,7 @@ unsafe extern "C" fn macos_event_tap_callback(
         };
 
         if let Some(action) = matched_action {
-            let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed);
+            let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed) || action.always_swallow();
             if is_stealth {
                 println!("🕵️ [stealth-hotkey-macOS] Swallowed key event for {}", action.label());
             } else {
@@ -941,7 +981,7 @@ unsafe extern "system" fn windows_keyboard_proc(
                 };
 
                 if let Some((action, h_ctrl, h_alt, h_shift, h_cmd)) = matched {
-                    let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed);
+                    let is_stealth = crate::STEALTH_ENABLED.load(Ordering::Relaxed) || action.always_swallow();
                     if is_stealth {
                         println!("🕵️ [stealth-hotkey-windows] Swallowed key event for {}", action.label());
                         if h_ctrl { WIN_CTRL_COMBO_FIRED.store(true, Ordering::Relaxed); }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { Fragment, useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import AIResponseDisplay from './components/AIResponseDisplay';
@@ -11,10 +11,12 @@ import AuthScreen from './components/AuthScreen';
 import SetupChecklist from './components/SetupChecklist';
 import { useSetupStatus } from './hooks/useSetupStatus';
 import { useKeyboardInputMode } from './hooks/useKeyboardInputMode';
+import { scheduleSessionSnapshot, fetchRestoredSessionSnapshot } from './services/recoveryState';
+import { startPromptStateSync } from './services/promptStateSync';
 import AppSettingsTab from './components/settings/AppSettingsTab';
 import HotkeysSettingsTab from './components/settings/HotkeysSettingsTab';
 import { getMessageActions, MESSAGE_ACTION_LABELS, MessageActionKind } from './services/messageActions';
-import { HotkeysConfig, formatHotkey } from './services/hotkeys';
+import { HotkeysConfig, formatHotkey, hotkeyKeys } from './services/hotkeys';
 import { TabExtraction, MAX_QUESTION_IMAGES, needsTabScreenshot, isWhiteboard } from './services/tabExtraction';
 import { buildPrompt, PromptTemplate, ProgrammingLanguage, getAllTemplates, getTemplateLabel, getConversationPrompts, StoredDocPlaceholder } from './services/prompts';
 import { 
@@ -226,15 +228,56 @@ function App() {
     return saved !== null ? saved === 'true' : true;
   });
 
-  // Apply saved app preferences on startup
+  // Apply saved app preferences on startup & restore snapshot if respawned with --restore-session
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     invoke('set_window_opacity', { opacity: windowOpacity }).catch(() => {});
-    // Stealth mode is applied by Rust at startup from stealth.json config file.
-    // No need to call set_stealth_mode here — it would conflict with the startup
-    // activation policy on macOS.
+    fetchRestoredSessionSnapshot().then((snap) => {
+      if (!snap) return;
+      if (snap.active_template_id) {
+        setSelectedTemplate(snap.active_template_id);
+      }
+      if (snap.programming_language) {
+        setSelectedLanguage(snap.programming_language as ProgrammingLanguage);
+      }
+      if (snap.active_mode) {
+        setUseScreenshot(snap.active_mode === 'screenshot');
+      }
+      if (snap.selected_model) {
+        setAiConfig((prev) => ({ ...prev, selected_model: snap.selected_model! }));
+      }
+      if (snap.last_response_markdown) {
+        setAiResponse(snap.last_response_markdown);
+      }
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep prompt selection/definitions in sync with the desktop worker via
+  // the shared backend prompt-state file (localStorage is per-WebView2
+  // profile, and the worker deliberately runs an isolated profile).
+  useEffect(() => startPromptStateSync({
+    onRemoteChange: (bundle) => {
+      if (bundle.selectedTemplateId) {
+        setSelectedTemplate((prev) =>
+          prev === bundle.selectedTemplateId ? prev : bundle.selectedTemplateId!,
+        );
+      }
+      setPromptSyncVersion((v) => v + 1);
+    },
+  }), []);
+
+  // Debounced non-sensitive session checkpoint for guardian/desktop recovery
+  useEffect(() => {
+    scheduleSessionSnapshot({
+      stealthEnabled: stealthMode,
+      selectedModel: aiConfig.selected_model,
+      activeTemplateId: selectedTemplate,
+      programmingLanguage: selectedLanguage,
+      useScreenshot,
+      lastResponseMarkdown: aiResponse,
+    });
+  }, [stealthMode, aiConfig.selected_model, selectedTemplate, selectedLanguage, useScreenshot, aiResponse]);
 
   const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
 
@@ -292,16 +335,22 @@ function App() {
   const sessionMaxSecondsRef = useRef(Infinity);
   const audioSecondsRef = useRef(0);
 
-  const [hotkeysDraft, setHotkeysDraft] = useState<HotkeysConfig>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '' });
+  const [hotkeysDraft, setHotkeysDraft] = useState<HotkeysConfig>({ text: '', screenshot: '', audio_toggle: '', scroll_up: '', scroll_down: '', move_up: '', move_down: '', move_left: '', move_right: '', toggle_visibility: '', quit_app: '', capture_selection: '' });
   // Saved hotkeys (the draft above may hold unsaved edits from the HotKeys tab).
   const [activeHotkeys, setActiveHotkeys] = useState<HotkeysConfig | null>(null);
   const [hotkeysStatus, setHotkeysStatus] = useState<string>('');
   const [stealthStatus, setStealthStatus] = useState<{ swallowing_active: boolean; blur_prevention_active: boolean; macos_accessibility_granted: boolean } | null>(null);
+  const [adminStatus, setAdminStatus] = useState<{ run_as_admin: boolean; is_elevated: boolean }>({ run_as_admin: false, is_elevated: false });
+  const [adminRestartStatus, setAdminRestartStatus] = useState<string>('');
   
   // Prompt editing state
   const [promptEditMode, setPromptEditMode] = useState<'list' | 'edit'>('list');
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
+  // Bumped whenever the shared prompt state changes in the OTHER process
+  // (main GUI <-> desktop worker) so the prompt list remounts with fresh data.
+  const [promptSyncVersion, setPromptSyncVersion] = useState(0);
   const solveWithAIRef = useRef<((mode?: 'auto' | 'text' | 'screenshot') => Promise<void>) | null>(null);
+  const solveSelectionWithAIRef = useRef<((capturedText: string) => Promise<void>) | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const previousTemplateRef = useRef<string | null>(null); // Stores template before auto-switching to Audio
 
@@ -1133,6 +1182,14 @@ function App() {
         });
         if (cancelled) { uMoveRight(); return; }
         unsubs.push(uMoveRight);
+
+        const uSolveSelection = await listen<string>('hotkey-solve-selection', async (event) => {
+          if (solveSelectionWithAIRef.current) {
+            await solveSelectionWithAIRef.current(event.payload ?? '');
+          }
+        });
+        if (cancelled) { uSolveSelection(); return; }
+        unsubs.push(uSolveSelection);
       } catch (e) {
         // Silent fail - hotkey registration error
       }
@@ -1162,6 +1219,12 @@ function App() {
           .then(setStealthStatus)
           .catch(() => {});
       }
+      if (settingsTab === 'app') {
+        setAdminRestartStatus('');
+        invoke<{ run_as_admin: boolean; is_elevated: boolean }>('get_admin_status')
+          .then(setAdminStatus)
+          .catch(() => {});
+      }
     }
   }, [showSettings, settingsTab]);
 
@@ -1185,6 +1248,9 @@ function App() {
 
   useEffect(() => {
     invoke<HotkeysConfig>('get_hotkeys').then(setActiveHotkeys).catch(() => {});
+    invoke<{ run_as_admin: boolean; is_elevated: boolean }>('get_admin_status')
+      .then(setAdminStatus)
+      .catch(() => {});
   }, []);
 
   const saveHotkeys = async () => {
@@ -1202,6 +1268,7 @@ function App() {
         moveRightHotkey: hotkeysDraft.move_right,
         toggleVisibilityHotkey: hotkeysDraft.toggle_visibility,
         quitAppHotkey: hotkeysDraft.quit_app,
+        captureSelectionHotkey: hotkeysDraft.capture_selection,
       });
       setHotkeysDraft(updated);
       setActiveHotkeys(updated);
@@ -1273,6 +1340,26 @@ function App() {
       .then(() => invoke<typeof stealthStatus>('get_stealth_status'))
       .then(status => setStealthStatus(status))
       .catch(console.error);
+  };
+
+  const handleRunAsAdminChange = async (enabled: boolean) => {
+    setAdminRestartStatus('');
+    try {
+      await invoke('set_run_as_admin', { enabled });
+      const status = await invoke<{ run_as_admin: boolean; is_elevated: boolean }>('get_admin_status');
+      setAdminStatus(status);
+    } catch (e) {
+      setAdminRestartStatus(`Failed to save setting: ${String(e)}`);
+    }
+  };
+
+  const handleRestartNow = async () => {
+    setAdminRestartStatus('Restarting...');
+    try {
+      await invoke('restart_app');
+    } catch (e) {
+      setAdminRestartStatus(`❌ ${String(e)}`);
+    }
   };
 
   const handleShowSetup = () => {
@@ -1744,14 +1831,8 @@ function App() {
 
     // Free user restrictions
     if (!isPro) {
-      // Free users can only use Chrome tabs (no display capture)
-      if (isDisplay(sourceToUse)) {
-        setMessage('⚠️ Display capture requires Pro subscription. Please select a Chrome tab.');
-        return;
-      }
-
-      // Free users can only use allowed domains
-      if (!isAudio(sourceToUse)) {
+      // Free users can only use allowed domains (displays have no URL, so they're allowed)
+      if (!isAudio(sourceToUse) && !isDisplay(sourceToUse)) {
         const tab = sourceToUse as ChromeTab;
         const url = tab.url || '';
         if (!isFreeTierUrlAllowed(models, url)) {
@@ -1813,41 +1894,52 @@ function App() {
       let responseText: string;
       
       if (isDisplay(sourceToUse)) {
-        // Display/Screen capture - always uses screenshot (Pro only)
+        // Display/Screen capture - always uses screenshot
         setSolveFlowType('screenshot');
         setSolvePhase('capture');
         setMessage('📸 Capturing display...');
-        const screenshotPath = await invoke<string>('capture_display_screenshot', { 
-          displayId: sourceToUse.id 
+        const screenshotPath = await invoke<string>('capture_display_screenshot', {
+          displayId: sourceToUse.id
         });
-        
+
         setSolvePhase('asking');
         setMessage('🤖 Analyzing screenshot with AI...');
         const prompt = buildPrompt(selectedTemplate, selectedLanguage);
-        
-        // Display capture is Pro-only, never uses BYO key
-        const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
-          prompt,
-          imagePaths: [screenshotPath],
-          model: modelToUse,
-          accessToken,
-        });
-        
-        if (proxyResponse.error) {
-          throw new Error(proxyResponse.error);
-        }
-        responseText = proxyResponse.response;
-        
-        // Update usage stats if returned
-        if (proxyResponse.usage) {
-          setUsageStats(prev => prev ? {
-            ...prev,
-            requests_used: proxyResponse.usage!.requests_used,
-          } : prev);
-          // Refresh subscription for free users (lifetime_ai_calls updated)
-          if (!proxyResponse.usage.is_paid && authUser?.id) {
-            const updatedSub = await getUserSubscription(authUser.id);
-            if (updatedSub) setSubscription(updatedSub);
+
+        if (useBYOKey) {
+          responseText = await invoke<string>('query_ai_with_image', {
+            prompt,
+            imagePaths: [screenshotPath],
+            config: {
+              selected_model: modelToUse,
+              gemini_api_key: aiConfig.gemini_api_key || '',
+              max_output_tokens: models.max_output_tokens,
+            },
+          });
+        } else {
+          const proxyResponse = await invoke<{ response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string }>('query_ai_via_proxy_with_image', {
+            prompt,
+            imagePaths: [screenshotPath],
+            model: modelToUse,
+            accessToken,
+          });
+
+          if (proxyResponse.error) {
+            throw new Error(proxyResponse.error);
+          }
+          responseText = proxyResponse.response;
+
+          // Update usage stats if returned
+          if (proxyResponse.usage) {
+            setUsageStats(prev => prev ? {
+              ...prev,
+              requests_used: proxyResponse.usage!.requests_used,
+            } : prev);
+            // Refresh subscription for free users (lifetime_ai_calls updated)
+            if (!proxyResponse.usage.is_paid && authUser?.id) {
+              const updatedSub = await getUserSubscription(authUser.id);
+              if (updatedSub) setSubscription(updatedSub);
+            }
           }
         }
       } else if (mode === 'screenshot' || (mode === 'auto' && useScreenshot)) {
@@ -1994,9 +2086,131 @@ function App() {
     }
   };
 
+  const solveSelectionWithAI = async (capturedText: string) => {
+    announcementDismissedRef.current = true;
+    setShowAnnouncement(false);
+
+    if (!authUser) {
+      setSolvePhase('idle');
+      setMessage('❌ Please sign in first');
+      return;
+    }
+
+    const isPro = subscription?.subscription_status === 'active' || subscription?.subscription_status === 'cancelling';
+
+    const trimmed = capturedText.trim();
+    if (!trimmed) {
+      const hk = formatHotkey(
+        activeHotkeys?.capture_selection || (runtimePlatform === 'macos' ? 'Cmd+4' : 'Alt+4'),
+        runtimePlatform === 'macos',
+      );
+      setSolvePhase('idle');
+      setMessage(`⚠️ No selected text captured. Highlight text in Lockdown Browser first, then press ${hk}.`);
+      return;
+    }
+
+    const models = await ensureModelConfig();
+    if (!models) {
+      setSolvePhase('idle');
+      setMessage('❌ Could not load AI models from the server. Check your connection and try again.');
+      return;
+    }
+
+    const quotaCheck = canUseAIProxy(models.free_call_limit);
+    if (!quotaCheck.allowed) {
+      setSolvePhase('idle');
+      setMessage(`⚠️ ${quotaCheck.reason}`);
+      return;
+    }
+
+    // Free user with exhausted quota but their own Gemini key
+    const useBYOKey = quotaCheck.useBYOKey && aiConfig.gemini_api_key;
+
+    let accessToken = '';
+    if (!useBYOKey) {
+      const SUPABASE_URL = 'https://uudwpcjxbwtszhhcgybj.supabase.co';
+      const storageKey = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+      const storedSession = localStorage.getItem(storageKey);
+      if (storedSession) {
+        try {
+          const session = JSON.parse(storedSession);
+          accessToken = session.access_token || '';
+        } catch {
+          setSolvePhase('idle');
+          setMessage('❌ Session error. Please sign in again.');
+          return;
+        }
+      }
+      if (!accessToken) {
+        setSolvePhase('idle');
+        setMessage('❌ Please sign in to use AI features.');
+        return;
+      }
+    }
+
+    const modelToUse = useBYOKey
+      ? models.byo_model.id
+      : (isPro ? (aiConfig.selected_model || models.default_pro_model) : models.free_model.id);
+    setIsLoading(true);
+    setAiResponse('');
+    setSolveFlowType('text');
+    setSolvePhase('asking');
+    setMessage('🤖 Asking AI...');
+
+    try {
+      const prompt = buildPrompt(selectedTemplate, selectedLanguage, trimmed);
+      if (useBYOKey) {
+        const responseText = await invoke<string>('query_ai', {
+          prompt,
+          config: {
+            selected_model: modelToUse,
+            gemini_api_key: aiConfig.gemini_api_key || '',
+            max_output_tokens: models.max_output_tokens,
+          },
+        });
+        setAiResponse(responseText);
+        setSolvePhase('idle');
+        setMessage('');
+        return;
+      }
+
+      type ProxyResponse = { response: string; usage?: { requests_used: number; requests_limit: number; is_paid?: boolean }; error?: string };
+      const proxyResponse = await invoke<ProxyResponse>('query_ai_via_proxy', {
+        prompt,
+        model: modelToUse,
+        accessToken,
+      });
+
+      if (proxyResponse.error) {
+        throw new Error(proxyResponse.error);
+      }
+      setAiResponse(proxyResponse.response);
+      setSolvePhase('idle');
+      setMessage('');
+
+      if (proxyResponse.usage) {
+        setUsageStats(prev => prev ? {
+          ...prev,
+          requests_used: proxyResponse.usage!.requests_used,
+        } : prev);
+        // Refresh subscription for free users (lifetime_ai_calls updated)
+        if (!proxyResponse.usage.is_paid && authUser?.id) {
+          const updatedSub = await getUserSubscription(authUser.id);
+          if (updatedSub) setSubscription(updatedSub);
+        }
+      }
+    } catch (error) {
+      setSolvePhase('error');
+      setMessage(`❌ Error: ${error}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Keep a stable reference for the hotkey listener.
   useEffect(() => {
     solveWithAIRef.current = solveWithAI;
+    solveSelectionWithAIRef.current = solveSelectionWithAI;
   });
 
   const runMessageAction = (kind: MessageActionKind) => {
@@ -2056,6 +2270,22 @@ function App() {
   const solveKind = !selectedTab ? null : isAudio(selectedTab) ? 'audio' : (isDisplay(selectedTab) || useScreenshot) ? 'screenshot' : 'text';
   const solveHotkeyRaw = !activeHotkeys || !solveKind ? '' : solveKind === 'audio' ? activeHotkeys.audio_toggle : activeHotkeys[solveKind];
   const solveHotkey = formatHotkey(solveHotkeyRaw, runtimePlatform === 'macos');
+  // OS-specific default (matches the Rust defaults) until the saved hotkeys load.
+  const isMacPlatform = runtimePlatform === 'macos';
+  const hotkeyMod = isMacPlatform ? 'Cmd' : runtimePlatform === 'windows' ? 'Alt' : 'Ctrl';
+  const renderHotkeyKeys = (hotkey: string) => (
+    <span className="mode-hotkey">
+      <span className="mode-hotkey-label">Hotkey:</span>
+      {hotkeyKeys(hotkey, isMacPlatform).map((k, i) => (
+        <Fragment key={i}>
+          {i > 0 && <span className="mode-hotkey-plus">+</span>}
+          <kbd>{k}</kbd>
+        </Fragment>
+      ))}
+    </span>
+  );
+  const contentCaptureHotkey = renderHotkeyKeys(activeHotkeys?.text || `${hotkeyMod}+1`);
+  const screenshotCaptureHotkey = renderHotkeyKeys(activeHotkeys?.screenshot || `${hotkeyMod}+2`);
   const withHotkey = (label: string, hotkey?: string) =>
     hotkey ? `${label} · solve now with ${formatHotkey(hotkey, runtimePlatform === 'macos')}` : label;
   const solveActionLabel = solveKind === 'audio' ? 'Start / stop recording' : solveKind === 'screenshot' ? 'Solve from screenshot' : 'Solve from text';
@@ -2230,11 +2460,11 @@ function App() {
                   type="button"
                   role="radio"
                   aria-checked={!screenshotActive}
-                  aria-label="Text Extraction"
+                  aria-label="Content Capture"
                   className={`mode-segment-btn ${!screenshotActive ? 'active' : ''}`}
                   onClick={() => setUseScreenshot(false)}
                   disabled={isLoading || displayLocked}
-                  title={displayLocked ? lockedHint : withHotkey('Text Extraction', activeHotkeys?.text)}
+                  title={displayLocked ? lockedHint : withHotkey('Content Capture', activeHotkeys?.text)}
                 >
                   <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
@@ -2627,11 +2857,10 @@ function App() {
                     <div className="upgrade-section">
                       <h4>🚀 Upgrade to Pro</h4>
                       <ul className="upgrade-benefits">
-                        <li>✓ Stealth mode: Undetectable and fully private plus hidden hotkeys</li>
+                        <li>✓ Stealth mode: hidden hotkeys and hidden window</li>
                         <li>✓ {proRequestLimitLabel} AI requests per month</li>
                         <li>✓ {proAudioHoursLabel} hours audio recording per month</li>
                         {proModelNames && <li>✓ {proModelNames}</li>}
-                        <li>✓ Screen capture for display</li>
                         <li>✓ Audio input with transcription</li>
                       </ul>
                       <button 
@@ -2789,10 +3018,10 @@ function App() {
                         )}
                         {freeCallLimit !== undefined && (
                           <li>{freeCallsExhausted
-                            ? (aiConfig.gemini_api_key ? 'Unlimited with your API key' : `${freeCallLimit} lifetime AI requests (used)`)
+                            ? (aiConfig.gemini_api_key ? 'Unlimited with your API key' : `${freeCallLimit} lifetime AI requests + Your own Gemini API key`)
                             : `${freeCallLimit - freeCallsUsed} of ${freeCallLimit} free requests remaining`}</li>
                         )}
-                        <li>Chrome tabs only (no display screen capture)</li>
+                        <li>No live audio capture for verbal interview</li>
                         {modelConfig && !allowsAllDomains(modelConfig) && (
                           <li>Only works on: {modelConfig.free_allowed_domains.join(', ')}</li>
                         )}
@@ -2812,7 +3041,7 @@ function App() {
                     <div className="info-note" style={{ marginTop: '16px' }}>
                       <h4 style={{ marginBottom: '8px' }}>✨ Pro Features</h4>
                       <ul style={{ fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
-                        <li>Stealth Mode with Anti-Detection Protection</li>
+                        <li>Stealth Mode (hidden hotkeys and window)</li>
                         <li>{modelConfig ? `All ${modelConfig.pro_models.length} premium AI models` : 'All premium AI models'}</li>
                         <li>{proRequestLimitLabel} requests per month</li>
                         <li>Display/screen capture</li>
@@ -2823,15 +3052,16 @@ function App() {
 
                   {/* Input Mode (merged from old tab) */}
                   <div className="form-group" style={{ marginTop: '20px', paddingTop: '16px', borderTop: `1px solid var(--border)` }}>
-                    <label>Input Mode:</label>
+                    <label>Capture Mode:</label>
                     <div className="toggle-group">
                       <button
                         onClick={() => setUseScreenshot(false)}
                         className={`toggle-btn mode-btn ${!useScreenshot ? 'active' : ''}`}
                       >
                         <span className="mode-icon">📝</span>
-                        <span className="mode-label">Text Extraction</span>
-                        <span className="mode-desc">Chrome tabs only</span>
+                        <span className="mode-label">Content Capture</span>
+                        <span className="mode-desc">Chrome full page, frames & images</span>
+                        {runtimePlatform !== 'unknown' && contentCaptureHotkey}
                       </button>
                       <button
                         onClick={() => setUseScreenshot(true)}
@@ -2840,6 +3070,7 @@ function App() {
                         <span className="mode-icon">📸</span>
                         <span className="mode-label">Screenshot Capture</span>
                         <span className="mode-desc">Visual · Images & diagrams</span>
+                        {runtimePlatform !== 'unknown' && screenshotCaptureHotkey}
                       </button>
                     </div>
                   </div>
@@ -2847,10 +3078,10 @@ function App() {
                   <div className="info-note">
                     <h4 style={{marginBottom: '8px'}}>Mode Comparison:</h4>
                     <p className="small" style={{marginBottom: '12px'}}>
-                      <strong>📝 Text:</strong> Extracts text from Chrome tabs only. Fast and efficient for text-based problems.
+                      <strong>📝 Content Capture:</strong> Reads the entire Chrome tab, including embedded frames and images, even when the question is too long to fit in one screenshot. Exact text, fast and low cost.
                     </p>
                     <p className="small">
-                      <strong>📸 Screenshot:</strong> Captures visual content including diagrams, tables, and formatting. Works with any source. Display source always uses screenshot mode.
+                      <strong>📸 Screenshot:</strong> Captures only the visible area, including diagrams, charts, and formatting. Works with any source. Display source always uses screenshot mode.
                     </p>
                   </div>
                 </>
@@ -2860,6 +3091,7 @@ function App() {
                 <>
                   {promptEditMode === 'list' ? (
                     <PromptListView
+                      key={`prompt-list-${promptSyncVersion}`}
                       selectedTemplate={selectedTemplate}
                       onSelectTemplate={(id: string) => {
                         setSelectedTemplate(id);
@@ -2919,6 +3151,12 @@ function App() {
                   onStealthModeChange={handleStealthModeChange}
                   hotkeySwallowingActive={!!stealthStatus?.swallowing_active}
                   isMac={runtimePlatform === 'macos'}
+                  isWindows={runtimePlatform === 'windows'}
+                  runAsAdmin={adminStatus.run_as_admin}
+                  isElevated={adminStatus.is_elevated}
+                  adminRestartStatus={adminRestartStatus}
+                  onRunAsAdminChange={handleRunAsAdminChange}
+                  onRestartNow={handleRestartNow}
                   onRequestAccessibility={handleRequestAccessibility}
                   onRefreshStealthStatus={handleRefreshStealthStatus}
                   setupChecklist={setupChecklistProps}
