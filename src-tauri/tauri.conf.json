@@ -13,7 +13,8 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "resources/audio_recorder_bin": "audio_recorder_bin"
+      "resources/audio_recorder_bin": "audio_recorder_bin",
+      "resources/screen_capturer_bin": "screen_capturer_bin"
     },
     "icon": [
       "icons/icon.ico",

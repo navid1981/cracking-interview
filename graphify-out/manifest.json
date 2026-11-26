@@ -42,10 +42,10 @@
     "semantic_hash": ""
   },
   "src-tauri/build.rs": {
-    "mtime": 1773986437.38691,
-    "seen": 1791314020.8597791,
-    "ast_hash": "02974a90794e760637220eafe16ce2f2",
-    "semantic_hash": "02974a90794e760637220eafe16ce2f2"
+    "mtime": 1795669465.6969798,
+    "seen": 1795669894.831331,
+    "ast_hash": "f683d94278745856d9cbec05c6c84f60",
+    "semantic_hash": ""
   },
   "src-tauri/capabilities/default.json": {
     "mtime": 1769675220.45218,
@@ -132,9 +132,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/screenshot.rs": {
-    "mtime": 1795600426.3429523,
-    "seen": 1795600588.863905,
-    "ast_hash": "925cb58a6bcacdc24afcf3f1fed82971",
+    "mtime": 1795669831.9670477,
+    "seen": 1795669894.831649,
+    "ast_hash": "ec7d82c06e5fdbbf047d21b96e6336a4",
     "semantic_hash": ""
   },
   "src-tauri/src/stealth_hotkey.rs": {
@@ -150,9 +150,9 @@
     "semantic_hash": ""
   },
   "src-tauri/tauri.conf.json": {
-    "mtime": 1795588933.3810139,
-    "seen": 1795592191.910677,
-    "ast_hash": "d995b15a2b9fe5e073b457b00bba18a5",
+    "mtime": 1795669325.4608517,
+    "seen": 1795669894.8317068,
+    "ast_hash": "f4b59aeb8701918226c24b7f0290c22d",
     "semantic_hash": ""
   },
   "src/App.tsx": {
@@ -342,9 +342,9 @@
     "semantic_hash": ""
   },
   "docs/AI_PROJECT_GUIDE.md": {
-    "mtime": 1795591835.0190485,
-    "seen": 1795592191.911523,
-    "ast_hash": "5d34e800e220a10a816918f0a62e9b8a",
+    "mtime": 1795600716.6232193,
+    "seen": 1795669894.8327308,
+    "ast_hash": "68e18892770bcf793f1a3b0201844803",
     "semantic_hash": ""
   },
   "index.html": {
@@ -959,10 +959,10 @@
     "ast_hash": "13dc02f2a53498ee4b478e28894e04ad",
     "semantic_hash": ""
   },
-  "Screenshot.png": {
-    "mtime": 1795597349.749952,
-    "seen": 1795597674.955102,
-    "ast_hash": "23899edc8b916fe0fc7248e5f809a79f",
+  "src-tauri/resources/screen_capturer.swift": {
+    "mtime": 1795669374.1806486,
+    "seen": 1795669894.831448,
+    "ast_hash": "318e1416e48cc7f5c5f12cda92e65cfc",
     "semantic_hash": ""
   }
 }

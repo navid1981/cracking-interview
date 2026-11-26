@@ -40,6 +40,41 @@ fn main() {
 
             println!("cargo:warning=Built audio_recorder_bin from Swift source");
         }
+
+        // Screen capture helper
+        let screen_src = Path::new("resources/screen_capturer.swift");
+        let screen_bin = Path::new("resources/screen_capturer_bin");
+
+        println!("cargo:rerun-if-changed=resources/screen_capturer.swift");
+
+        if screen_src.exists() {
+            let status = Command::new("xcrun")
+                .args([
+                    "swiftc",
+                    "-parse-as-library",
+                    "-O",
+                    "-o",
+                    screen_bin.to_str().unwrap(),
+                    screen_src.to_str().unwrap(),
+                    "-framework", "Foundation",
+                    "-framework", "Cocoa",
+                    "-framework", "CoreGraphics",
+                    "-framework", "ScreenCaptureKit",
+                ])
+                .status()
+                .expect("Failed to run xcrun swiftc for screen capturer");
+
+            assert!(status.success(), "Swift screen capturer helper compilation failed");
+
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(screen_bin) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o755);
+                let _ = std::fs::set_permissions(screen_bin, perms);
+            }
+
+            println!("cargo:warning=Built screen_capturer_bin from Swift source");
+        }
     }
 
     tauri_build::build()
